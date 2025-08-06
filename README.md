@@ -1,69 +1,95 @@
-# React + TypeScript + Vite
+# Drift - Modern AI Chat with Side Threading
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A beautiful, modern AI chat interface with innovative side-threading capabilities. Built with React, TypeScript, and Tailwind CSS.
 
-Currently, two official plugins are available:
+![Drift Chat Interface](https://img.shields.io/badge/Status-In%20Development-yellow)
+![React](https://img.shields.io/badge/React-18-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
+![Tailwind](https://img.shields.io/badge/Tailwind-3.4-06B6D4)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Features
 
-## Expanding the ESLint configuration
+- 🌌 **Modern Dark Theme** - Elegant dark interface with pink/violet accents
+- 💬 **Smart Chat Interface** - Beautiful message bubbles with animations
+- 📚 **Chat History Sidebar** - Collapsible sidebar with search functionality
+- 🎨 **Stunning UI/UX** - Gradients, shadows, and smooth transitions
+- ⚡ **Fast & Responsive** - Built with Vite for optimal performance
+- 🔀 **Side Threading** (Coming Soon) - Branch conversations from any message
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🚀 Getting Started
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Prerequisites
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+- Node.js 18+ 
+- npm or yarn
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/morhogeg/Drift.git
+cd Drift
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+2. Install dependencies:
+```bash
+npm install
 ```
+
+3. Start the development server:
+```bash
+npm run dev
+```
+
+4. Open your browser to `http://localhost:5173`
+
+## 🛠️ Tech Stack
+
+- **React** - UI framework
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **Framer Motion** - Animations
+- **Vite** - Build tool
+- **Lucide React** - Icons
+
+## 🎨 Design Features
+
+- Custom color palette with vibrant pink (#ff007a) and violet (#a855f7) accents
+- Layered dark backgrounds for depth
+- Smooth animations and transitions
+- Responsive design that works on all devices
+- Beautiful typography with Inter font
+
+## 📝 Development
+
+```bash
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
+```
+
+## 🔜 Upcoming Features
+
+- [ ] Full side-threading functionality
+- [ ] Message highlighting and branching
+- [ ] LLM integration (OpenAI/Ollama)
+- [ ] Persistent chat storage
+- [ ] Export conversations
+- [ ] Multi-model support
+
+## 📄 License
+
+MIT
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
+
+---
+
+Built with ❤️ using modern web technologies
