@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft } from 'lucide-react'
+import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle } from 'lucide-react'
+import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 
 interface Message {
   id: string
@@ -23,10 +24,12 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeChatId, setActiveChatId] = useState('1')
+  const [ollamaConnected, setOllamaConnected] = useState(false)
+  const [streamingResponse, setStreamingResponse] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Mock chat history
-  const [chatHistory] = useState<ChatSession[]>([
+  // Chat history state
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([
     {
       id: '1',
       title: 'Current Conversation',
@@ -68,9 +71,21 @@ function App() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, streamingResponse])
 
-  const sendMessage = () => {
+  useEffect(() => {
+    // Check Ollama connection on mount
+    checkOllamaConnection().then(setOllamaConnected)
+    
+    // Check connection every 5 seconds
+    const interval = setInterval(() => {
+      checkOllamaConnection().then(setOllamaConnected)
+    }, 5000)
+    
+    return () => clearInterval(interval)
+  }, [])
+
+  const sendMessage = async () => {
     if (message.trim()) {
       const newMessage: Message = {
         id: Date.now().toString(),
@@ -79,21 +94,99 @@ function App() {
         timestamp: new Date()
       }
       
-      setMessages([...messages, newMessage])
+      const updatedMessages = [...messages, newMessage]
+      setMessages(updatedMessages)
       setMessage('')
       setIsTyping(true)
+      setStreamingResponse('')
       
-      // Simulate AI response
-      setTimeout(() => {
+      // Update chat history with new message
+      setChatHistory(prevHistory => 
+        prevHistory.map(chat => 
+          chat.id === activeChatId 
+            ? { ...chat, messages: updatedMessages, lastMessage: message }
+            : chat
+        )
+      )
+      
+      // Convert messages to Ollama format
+      const ollamaMessages: OllamaMessage[] = updatedMessages.map(msg => ({
+        role: msg.isUser ? 'user' : 'assistant',
+        content: msg.text
+      }))
+      
+      try {
+        // Create AI response message placeholder
+        const aiResponseId = (Date.now() + 1).toString()
+        let accumulatedResponse = ''
+        
+        // Add empty AI message immediately
+        const aiMessage: Message = {
+          id: aiResponseId,
+          text: '',
+          isUser: false,
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, aiMessage])
+        
+        // Stream the response
+        await sendMessageToOllama(ollamaMessages, (chunk) => {
+          accumulatedResponse += chunk
+          setStreamingResponse(accumulatedResponse)
+          
+          // Update the AI message with streamed content
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === aiResponseId 
+                ? { ...msg, text: accumulatedResponse }
+                : msg
+            )
+          )
+        })
+        
+        // Final update to chat history
+        setChatHistory(prevHistory => 
+          prevHistory.map(chat => 
+            chat.id === activeChatId 
+              ? { 
+                  ...chat, 
+                  messages: messages.map(msg => 
+                    msg.id === aiResponseId 
+                      ? { ...msg, text: accumulatedResponse }
+                      : msg
+                  ),
+                  lastMessage: accumulatedResponse.slice(0, 100) 
+                }
+              : chat
+          )
+        )
+        
+        setStreamingResponse('')
+      } catch (error) {
+        // Fallback message if Ollama isn't running
+        const errorMessage = error instanceof Error && error.message.includes('Ollama is not running')
+          ? "Ollama is not running. Please install and start Ollama:\n1. Download from ollama.com\n2. Run: ollama pull gpt-oss:20b\n3. Run: ollama serve"
+          : "Failed to connect to AI model. Please check your connection."
+          
         const aiResponse: Message = {
           id: (Date.now() + 1).toString(),
-          text: "I'm Drift AI, ready to help you explore ideas with our unique side-threading feature. Try highlighting any part of my messages to branch into focused discussions!",
+          text: errorMessage,
           isUser: false,
           timestamp: new Date()
         }
         setMessages(prev => [...prev, aiResponse])
+        
+        // Update chat history with error
+        setChatHistory(prevHistory => 
+          prevHistory.map(chat => 
+            chat.id === activeChatId 
+              ? { ...chat, messages: [...updatedMessages, aiResponse], lastMessage: 'Connection error' }
+              : chat
+          )
+        )
+      } finally {
         setIsTyping(false)
-      }, 1500)
+      }
     }
   }
 
@@ -106,6 +199,62 @@ function App() {
     if (days === 1) return 'Yesterday'
     if (days < 7) return `${days} days ago`
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const createNewChat = () => {
+    // Update the title and save messages of the current active chat
+    const updatedHistory = chatHistory.map(chat => {
+      if (chat.id === activeChatId) {
+        // Save current messages
+        const updatedChat = { ...chat, messages: messages }
+        
+        // Update title if there are messages
+        if (messages.length > 0) {
+          const firstUserMessage = messages.find(m => m.isUser)
+          const newTitle = firstUserMessage 
+            ? firstUserMessage.text.slice(0, 50) + (firstUserMessage.text.length > 50 ? '...' : '')
+            : `Chat from ${formatDate(chat.createdAt)}`
+          updatedChat.title = newTitle
+        }
+        
+        return updatedChat
+      }
+      return chat
+    })
+    
+    const newChatId = Date.now().toString()
+    const newChat: ChatSession = {
+      id: newChatId,
+      title: 'New Chat',
+      messages: [],
+      lastMessage: 'Start a new conversation...',
+      createdAt: new Date()
+    }
+    
+    setChatHistory([newChat, ...updatedHistory])
+    setActiveChatId(newChatId)
+    setMessages([])
+  }
+
+  const switchChat = (chatId: string) => {
+    // Don't switch to the same chat
+    if (chatId === activeChatId) return
+    
+    // Save current chat's messages before switching
+    const updatedHistory = chatHistory.map(chat => 
+      chat.id === activeChatId 
+        ? { ...chat, messages: messages }
+        : chat
+    )
+    
+    setChatHistory(updatedHistory)
+    
+    // Load the selected chat's messages
+    const targetChat = updatedHistory.find(c => c.id === chatId)
+    if (targetChat) {
+      setActiveChatId(chatId)
+      setMessages(targetChat.messages || [])
+    }
   }
 
   return (
@@ -161,7 +310,7 @@ function App() {
           {filteredChats.map((chat) => (
             <div
               key={chat.id}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => switchChat(chat.id)}
               className={`
                 group relative rounded-xl p-3 cursor-pointer
                 transition-all duration-200 ease-in-out
@@ -197,7 +346,9 @@ function App() {
 
         {/* Sidebar Footer */}
         <div className="p-4 border-t border-dark-border/30">
-          <button className="
+          <button 
+            onClick={createNewChat}
+            className="
             w-full flex items-center justify-center gap-2
             bg-gradient-to-r from-accent-pink to-accent-violet
             text-white rounded-full px-4 py-2.5
@@ -238,7 +389,14 @@ function App() {
                   Drift
                 </h1>
               </div>
-              <span className="text-text-muted text-sm">AI Chat with Side Threading</span>
+              
+              {/* Connection Status */}
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
+                <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+                <span className="text-xs text-text-muted">
+                  {ollamaConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
+                </span>
+              </div>
             </div>
             
             {!sidebarOpen && <div className="w-10" />}
@@ -257,27 +415,29 @@ function App() {
               )}
               
               {messages.map((msg, index) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up`}
-                  style={{ animationDelay: `${index * 50}ms` }}
-                >
+                msg.text ? (
                   <div
-                    className={`
-                      max-w-[70%] rounded-2xl px-5 py-3 
-                      ${msg.isUser 
-                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20' 
-                        : 'bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
-                      }
-                      transition-all duration-200 hover:scale-[1.02]
-                    `}
+                    key={msg.id}
+                    className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up`}
+                    style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <p className="text-sm leading-relaxed">{msg.text}</p>
+                    <div
+                      className={`
+                        max-w-[70%] rounded-2xl px-5 py-3 
+                        ${msg.isUser 
+                          ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20' 
+                          : 'bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                        }
+                        transition-all duration-200 hover:scale-[1.02]
+                      `}
+                    >
+                      <p className="text-sm leading-relaxed">{msg.text}</p>
+                    </div>
                   </div>
-                </div>
+                ) : null
               ))}
               
-              {isTyping && (
+              {isTyping && !streamingResponse && (
                 <div className="flex justify-start animate-fade-up">
                   <div className="bg-dark-bubble border border-dark-border/50 rounded-2xl px-5 py-3 shadow-lg">
                     <div className="flex gap-1">
