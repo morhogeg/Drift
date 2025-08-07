@@ -536,7 +536,7 @@ function App() {
             transition-all duration-200 hover:scale-[1.02]
           ">
             <Plus className="w-4 h-4" />
-            <span className="text-sm font-medium">New Drift</span>
+            <span className="text-sm font-medium">New Chat</span>
           </button>
         </div>
       </aside>
