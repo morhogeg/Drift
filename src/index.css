@@ -35,3 +35,35 @@
     @apply bg-dark-border/80;
   }
 }
+
+/* Text selection styles for Drift */
+.ai-message {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ai-message p::selection {
+  background-color: rgba(168, 85, 247, 0.3);
+  color: inherit;
+}
+
+.ai-message p::-moz-selection {
+  background-color: rgba(168, 85, 247, 0.3);
+  color: inherit;
+}
+
+/* Smooth animations */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.3s ease-out;
+}

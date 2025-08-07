@@ -11,18 +11,26 @@ export interface ChatMessage {
 
 export async function sendMessageToOllama(
   messages: ChatMessage[],
-  onStream?: (chunk: string) => void
+  onStream?: (chunk: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<string> {
   try {
     const response = await ollama.chat({
       model: 'gpt-oss:20b',
       messages: messages,
-      stream: true
+      stream: true,
+      options: {
+        signal: abortSignal
+      }
     })
 
     let fullResponse = ''
     
     for await (const part of response) {
+      if (abortSignal?.aborted) {
+        break
+      }
+      
       if (part.message?.content) {
         fullResponse += part.message.content
         if (onStream) {
@@ -34,6 +42,11 @@ export async function sendMessageToOllama(
     return fullResponse
   } catch (error) {
     console.error('Ollama API error:', error)
+    
+    // Check if it was cancelled
+    if (error instanceof Error && error.name === 'AbortError') {
+      return ''
+    }
     
     // Fallback to a helpful error message
     if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
