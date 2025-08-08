@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Bookmark } from 'lucide-react'
+import { snippetStorage } from '../services/snippetStorage'
 
 interface SelectionTooltipProps {
   onStartDrift: (text: string, messageId: string) => void
+  currentChatId?: string
+  currentChatTitle?: string
+  onSnippetSaved?: () => void
 }
 
-export default function SelectionTooltip({ onStartDrift }: SelectionTooltipProps) {
+export default function SelectionTooltip({ 
+  onStartDrift, 
+  currentChatId = '',
+  currentChatTitle = 'Chat',
+  onSnippetSaved 
+}: SelectionTooltipProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [isVisible, setIsVisible] = useState(false)
   const [selectedText, setSelectedText] = useState('')
@@ -78,6 +87,23 @@ export default function SelectionTooltip({ onStartDrift }: SelectionTooltipProps
     window.getSelection()?.removeAllRanges()
   }
 
+  const handleSaveSnippet = () => {
+    snippetStorage.createSnippet(
+      selectedText,
+      {
+        chatId: currentChatId,
+        chatTitle: currentChatTitle,
+        messageId: messageId,
+        isFullMessage: false,
+        timestamp: new Date()
+      }
+    )
+    
+    setIsVisible(false)
+    window.getSelection()?.removeAllRanges()
+    onSnippetSaved?.()
+  }
+
   if (!isVisible) return null
 
   return (
@@ -89,21 +115,39 @@ export default function SelectionTooltip({ onStartDrift }: SelectionTooltipProps
         transform: 'translate(-50%, -100%)'
       }}
     >
-      <button
-        onClick={handleStartDrift}
-        className="
-          flex items-center gap-1.5 px-3 py-1.5
-          bg-gradient-to-r from-accent-pink to-accent-violet
-          text-white text-sm font-medium
-          rounded-full shadow-lg shadow-accent-pink/30
-          hover:scale-105 active:scale-95
-          transition-all duration-200
-          border border-white/20
-        "
-      >
-        <span className="text-base">🌀</span>
-        <span>Start a Drift</span>
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={handleStartDrift}
+          className="
+            flex items-center gap-1.5 px-3 py-1.5
+            bg-gradient-to-r from-accent-pink to-accent-violet
+            text-white text-sm font-medium
+            rounded-full shadow-lg shadow-accent-pink/30
+            hover:scale-105 active:scale-95
+            transition-all duration-200
+            border border-white/20
+          "
+        >
+          <span className="text-base">🌀</span>
+          <span>Drift</span>
+        </button>
+        
+        <button
+          onClick={handleSaveSnippet}
+          className="
+            flex items-center gap-1.5 px-3 py-1.5
+            bg-gradient-to-r from-cyan-500 to-teal-500
+            text-white text-sm font-medium
+            rounded-full shadow-lg shadow-cyan-500/30
+            hover:scale-105 active:scale-95
+            transition-all duration-200
+            border border-white/20
+          "
+        >
+          <Bookmark className="w-3.5 h-3.5" />
+          <span>Save</span>
+        </button>
+      </div>
       
       {/* Arrow pointing down */}
       <div className="

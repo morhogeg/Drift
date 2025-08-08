@@ -42,12 +42,9 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  // Initialize Drift with context and system message
+  // Initialize Drift with only system message (no context)
   useEffect(() => {
-    if (isOpen && contextMessages.length > 0) {
-      // Copy context messages
-      const driftMessages = [...contextMessages]
-      
+    if (isOpen) {
       // Add system context message
       const systemMessage: Message = {
         id: 'drift-system-' + Date.now(),
@@ -56,13 +53,13 @@ export default function DriftPanel({
         timestamp: new Date()
       }
       
-      // Set all messages for display (including context)
-      setMessages([...driftMessages, systemMessage])
+      // Set only the system message - no context messages
+      setMessages([systemMessage])
       
       // Set drift-only messages (just the system message to start)
       setDriftOnlyMessages([systemMessage])
     }
-  }, [isOpen, contextMessages, selectedText])
+  }, [isOpen, selectedText])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -96,7 +93,7 @@ export default function DriftPanel({
       const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
         {
           role: 'system',
-          content: `The user selected the text "${selectedText}" and wants to understand it better. Focus ONLY on explaining, expanding, or clarifying "${selectedText}". Do not discuss the broader context unless directly relevant to understanding "${selectedText}".`
+          content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
         },
         ...driftConversation.map(msg => ({
           role: msg.isUser ? 'user' as const : 'assistant' as const,

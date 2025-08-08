@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown } from 'lucide-react'
+import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
+import SnippetGallery from './components/SnippetGallery'
+import ContextMenu from './components/ContextMenu'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { snippetStorage } from './services/snippetStorage'
 
 interface Message {
   id: string
@@ -77,6 +80,21 @@ function App() {
     sourceMessageId: '',
     contextMessages: []
   })
+  
+  // Gallery state
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [snippetCount, setSnippetCount] = useState(0)
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    chatId: string
+  } | null>(null)
+  const [pinnedChats, setPinnedChats] = useState<Set<string>>(new Set())
+  const [starredChats, setStarredChats] = useState<Set<string>>(new Set())
+  const [editingChatId, setEditingChatId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
 
   // Chat history state
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([
@@ -164,6 +182,16 @@ function App() {
     
     return () => clearInterval(interval)
   }, [useOpenRouter])
+
+  useEffect(() => {
+    // Update snippet count
+    try {
+      setSnippetCount(snippetStorage.getAllSnippets().length)
+    } catch (error) {
+      console.error('Error loading snippets:', error)
+      setSnippetCount(0)
+    }
+  }, [galleryOpen])
 
   useEffect(() => {
     // Monitor scroll position to show/hide scroll button
@@ -517,6 +545,114 @@ function App() {
     setDriftOpen(false)
   }
 
+  // Context menu handlers
+  const handleContextMenu = (e: React.MouseEvent, chatId: string) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, chatId })
+  }
+
+  const handleRenameChat = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId)
+    if (chat) {
+      setEditingChatId(chatId)
+      setEditingTitle(chat.title)
+    }
+  }
+
+  const handleSaveRename = () => {
+    if (editingChatId && editingTitle.trim()) {
+      setChatHistory(prev => 
+        prev.map(chat => 
+          chat.id === editingChatId 
+            ? { ...chat, title: editingTitle.trim() }
+            : chat
+        )
+      )
+    }
+    setEditingChatId(null)
+    setEditingTitle('')
+  }
+
+  const handleDuplicateChat = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId)
+    if (chat) {
+      const newChat: ChatSession = {
+        ...chat,
+        id: Date.now().toString(),
+        title: `${chat.title} (Copy)`,
+        createdAt: new Date()
+      }
+      setChatHistory(prev => [newChat, ...prev])
+    }
+  }
+
+  const handleDeleteChat = (chatId: string) => {
+    if (confirm('Are you sure you want to delete this chat?')) {
+      setChatHistory(prev => prev.filter(chat => chat.id !== chatId))
+      if (activeChatId === chatId) {
+        setActiveChatId(chatHistory[0]?.id || '1')
+        setMessages([])
+      }
+    }
+  }
+
+  const handleTogglePin = (chatId: string) => {
+    setPinnedChats(prev => {
+      const newPinned = new Set(prev)
+      if (newPinned.has(chatId)) {
+        newPinned.delete(chatId)
+      } else {
+        newPinned.add(chatId)
+      }
+      return newPinned
+    })
+  }
+
+  const handleToggleStar = (chatId: string) => {
+    setStarredChats(prev => {
+      const newStarred = new Set(prev)
+      if (newStarred.has(chatId)) {
+        newStarred.delete(chatId)
+      } else {
+        newStarred.add(chatId)
+      }
+      return newStarred
+    })
+  }
+
+  const handleNavigateToSource = (chatId: string, messageId: string) => {
+    // Switch to the parent chat
+    switchChat(chatId)
+    
+    // After a short delay to allow the chat to load, scroll to the message
+    setTimeout(() => {
+      const element = document.querySelector(`[data-message-id="${messageId}"]`)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        element.classList.add('highlight-message')
+        setTimeout(() => {
+          element.classList.remove('highlight-message')
+        }, 2000)
+      }
+    }, 100)
+  }
+
+  const handleGoToSource = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId)
+    if (chat?.metadata?.parentChatId && chat?.metadata?.sourceMessageId) {
+      handleNavigateToSource(chat.metadata.parentChatId, chat.metadata.sourceMessageId)
+    }
+  }
+
+  // Sort chats with pinned at top
+  const sortedChats = [...filteredChats].sort((a, b) => {
+    const aPinned = pinnedChats.has(a.id)
+    const bPinned = pinnedChats.has(b.id)
+    if (aPinned && !bPinned) return -1
+    if (!aPinned && bPinned) return 1
+    return b.createdAt.getTime() - a.createdAt.getTime()
+  })
+
   return (
     <div className="h-screen flex bg-dark-bg relative overflow-hidden">
       {/* Gradient overlay for depth */}
@@ -567,10 +703,11 @@ function App() {
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {filteredChats.map((chat) => (
+          {sortedChats.map((chat) => (
             <div
               key={chat.id}
               onClick={() => switchChat(chat.id)}
+              onContextMenu={(e) => handleContextMenu(e, chat.id)}
               className={`
                 group relative rounded-xl p-3 cursor-pointer
                 transition-all duration-200 ease-in-out
@@ -580,6 +717,16 @@ function App() {
                 }
               `}
             >
+              {/* Pin indicator */}
+              {pinnedChats.has(chat.id) && (
+                <Pin className="absolute top-2 right-2 w-3 h-3 text-cyan-400 fill-cyan-400" />
+              )}
+              
+              {/* Star indicator */}
+              {starredChats.has(chat.id) && (
+                <Star className="absolute top-2 right-7 w-3 h-3 text-yellow-400 fill-yellow-400" />
+              )}
+              
               <div className="flex items-start gap-3">
                 {chat.metadata?.isDrift ? (
                   <span className="text-base mt-0.5 flex-shrink-0">🌀</span>
@@ -590,9 +737,29 @@ function App() {
                   `} />
                 )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-text-primary truncate">
-                    {chat.title}
-                  </h3>
+                  {editingChatId === chat.id ? (
+                    <input
+                      type="text"
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onBlur={handleSaveRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRename()
+                        if (e.key === 'Escape') {
+                          setEditingChatId(null)
+                          setEditingTitle('')
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full bg-dark-bg/50 text-text-primary text-sm font-semibold
+                               rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-accent-violet"
+                      autoFocus
+                    />
+                  ) : (
+                    <h3 className="text-sm font-semibold text-text-primary truncate">
+                      {chat.title}
+                    </h3>
+                  )}
                   <p className="text-xs text-text-muted truncate mt-0.5">
                     {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
                   </p>
@@ -609,7 +776,27 @@ function App() {
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-4 border-t border-dark-border/30">
+        <div className="p-4 border-t border-dark-border/30 space-y-3">
+          <button 
+            onClick={() => setGalleryOpen(true)}
+            className="
+            w-full flex items-center justify-between
+            bg-gradient-to-r from-cyan-500/20 to-teal-500/20
+            border border-cyan-500/30
+            text-cyan-400 rounded-lg px-4 py-2.5
+            hover:from-cyan-500/30 hover:to-teal-500/30
+            hover:border-cyan-500/50
+            transition-all duration-200 hover:scale-[1.02]
+          ">
+            <div className="flex items-center gap-2">
+              <Bookmark className="w-4 h-4" />
+              <span className="text-sm font-medium">Snippet Gallery</span>
+            </div>
+            <span className="text-xs bg-cyan-500/20 px-2 py-0.5 rounded-full">
+              {snippetCount}
+            </span>
+          </button>
+          
           <button 
             onClick={createNewChat}
             className="
@@ -944,7 +1131,12 @@ function App() {
       </div>
       
       {/* Selection Tooltip */}
-      <SelectionTooltip onStartDrift={handleStartDrift} />
+      <SelectionTooltip 
+        onStartDrift={handleStartDrift}
+        currentChatId={activeChatId}
+        currentChatTitle={chatHistory.find(c => c.id === activeChatId)?.title || 'Chat'}
+        onSnippetSaved={() => setSnippetCount(snippetStorage.getAllSnippets().length)}
+      />
       
       {/* Drift Panel */}
       <DriftPanel
@@ -958,6 +1150,85 @@ function App() {
         onPushToMain={handlePushDriftToMain}
         useOpenRouter={useOpenRouter}
       />
+      
+      {/* Snippet Gallery */}
+      <SnippetGallery
+        isOpen={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        onNavigateToSource={(chatId, messageId) => {
+          setGalleryOpen(false)
+          switchChat(chatId)
+          setTimeout(() => {
+            const element = document.querySelector(`[data-message-id="${messageId}"]`)
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              element.classList.add('highlight-message')
+              setTimeout(() => {
+                element.classList.remove('highlight-message')
+              }, 2000)
+            }
+          }, 100)
+        }}
+      />
+      
+      {/* Context Menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={(() => {
+            const chat = chatHistory.find(c => c.id === contextMenu.chatId)
+            const isPinned = pinnedChats.has(contextMenu.chatId)
+            const isStarred = starredChats.has(contextMenu.chatId)
+            const isDrift = chat?.metadata?.isDrift
+            
+            const items = [
+              {
+                label: 'Rename',
+                icon: <Edit3 className="w-4 h-4" />,
+                action: () => handleRenameChat(contextMenu.chatId)
+              },
+              {
+                label: 'Duplicate',
+                icon: <Copy className="w-4 h-4" />,
+                action: () => handleDuplicateChat(contextMenu.chatId)
+              },
+              {
+                label: isPinned ? 'Unpin' : 'Pin',
+                icon: isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />,
+                action: () => handleTogglePin(contextMenu.chatId)
+              },
+              {
+                label: isStarred ? 'Unstar' : 'Star',
+                icon: isStarred ? <StarOff className="w-4 h-4" /> : <Star className="w-4 h-4" />,
+                action: () => handleToggleStar(contextMenu.chatId)
+              }
+            ]
+            
+            // Add "Go to Source" for drift chats
+            if (isDrift) {
+              items.push({
+                label: 'Go to Source',
+                icon: <ExternalLink className="w-4 h-4" />,
+                action: () => handleGoToSource(contextMenu.chatId),
+                divider: true
+              })
+            }
+            
+            // Add delete at the end
+            items.push({
+              label: 'Delete',
+              icon: <Trash2 className="w-4 h-4" />,
+              action: () => handleDeleteChat(contextMenu.chatId),
+              danger: true,
+              divider: true
+            })
+            
+            return items
+          })()}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
