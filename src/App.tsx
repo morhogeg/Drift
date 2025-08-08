@@ -13,6 +13,10 @@ interface Message {
   isUser: boolean
   timestamp: Date
   hasDrift?: boolean
+  driftInfo?: {
+    selectedText: string
+    driftChatId: string
+  }
 }
 
 interface ChatSession {
@@ -414,11 +418,6 @@ function App() {
     // Get all messages up to and including the selected message
     const contextMessages = messages.slice(0, messageIndex + 1)
     
-    // Mark the source message as having a drift
-    setMessages(prev => prev.map(msg => 
-      msg.id === messageId ? { ...msg, hasDrift: true } : msg
-    ))
-    
     setDriftContext({
       selectedText,
       sourceMessageId: messageId,
@@ -455,11 +454,27 @@ function App() {
     
     setChatHistory(prev => [newChat, ...prev])
     
-    // Update current chat history to save current messages
+    // Update the source message to include drift info
+    const updatedMessages = messages.map(msg => 
+      msg.id === metadata.sourceMessageId 
+        ? { 
+            ...msg, 
+            hasDrift: true,
+            driftInfo: {
+              selectedText: metadata.selectedText,
+              driftChatId: newChatId
+            }
+          }
+        : msg
+    )
+    
+    setMessages(updatedMessages)
+    
+    // Update current chat history to save current messages with drift info
     setChatHistory(prevHistory => 
       prevHistory.map(chat => 
         chat.id === activeChatId 
-          ? { ...chat, messages: messages }
+          ? { ...chat, messages: updatedMessages }
           : chat
       )
     )
@@ -759,6 +774,54 @@ function App() {
                     >
                       {msg.isUser ? (
                         <p className="text-sm leading-relaxed">{msg.text}</p>
+                      ) : msg.driftInfo ? (
+                        // Render AI message with clickable drift link
+                        <div className="text-sm leading-relaxed">
+                          <ReactMarkdown
+                            className="prose prose-sm prose-invert max-w-none
+                              prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
+                              prose-p:text-text-secondary prose-p:mb-2
+                              prose-strong:text-text-primary prose-strong:font-semibold
+                              prose-ul:my-2 prose-ul:space-y-1
+                              prose-li:text-text-secondary prose-li:ml-4
+                              prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                              prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3
+                              prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted
+                              prose-a:text-accent-violet prose-a:no-underline hover:prose-a:underline"
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              p: ({children}) => {
+                                // Check if this paragraph contains the drift text
+                                const text = String(children)
+                                const driftText = msg.driftInfo?.selectedText
+                                
+                                if (driftText && text.includes(driftText)) {
+                                  const parts = text.split(driftText)
+                                  return (
+                                    <p className="mb-2">
+                                      {parts[0]}
+                                      <button
+                                        onClick={() => switchChat(msg.driftInfo!.driftChatId)}
+                                        className="inline px-1.5 py-0.5 rounded
+                                                 bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
+                                                 border border-accent-violet/30 hover:border-accent-violet/50
+                                                 text-accent-violet hover:text-accent-pink
+                                                 transition-all duration-200"
+                                        title="View drift conversation"
+                                      >
+                                        {driftText}
+                                      </button>
+                                      {parts.slice(1).join(driftText)}
+                                    </p>
+                                  )
+                                }
+                                return <p className="mb-2">{children}</p>
+                              }
+                            }}
+                          >
+                            {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
+                          </ReactMarkdown>
+                        </div>
                       ) : (
                         <ReactMarkdown 
                           className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none
@@ -789,9 +852,6 @@ function App() {
                         >
                           {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                         </ReactMarkdown>
-                      )}
-                      {msg.hasDrift && (
-                        <span className="absolute -top-2 -right-2 text-sm animate-pulse">🌀</span>
                       )}
                     </div>
                   </div>
