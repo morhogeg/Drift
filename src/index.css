@@ -67,3 +67,21 @@
 .animate-fade-up {
   animation: fade-up 0.3s ease-out;
 }
+
+/* Highlight animation for scrolled-to messages */
+@keyframes highlightPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px 10px rgba(168, 85, 247, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0);
+  }
+}
+
+.highlight-message {
+  animation: highlightPulse 1s ease-out 2;
+  border: 1px solid rgba(168, 85, 247, 0.5) !important;
+}

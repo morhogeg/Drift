@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Sparkles, Square } from 'lucide-react'
+import { X, Save, Send, Sparkles, Square, ArrowLeft } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
@@ -20,6 +20,7 @@ interface DriftPanelProps {
   sourceMessageId: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
+  onPushToMain?: (messages: Message[]) => void
   useOpenRouter?: boolean
 }
 
@@ -31,6 +32,7 @@ export default function DriftPanel({
   sourceMessageId,
   parentChatId,
   onSaveAsChat,
+  onPushToMain,
   useOpenRouter = true
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
@@ -187,6 +189,20 @@ export default function DriftPanel({
     onSaveAsChat(driftOnlyMessages, title, metadata)
     onClose()
   }
+  
+  const handlePushToMain = () => {
+    if (onPushToMain && driftOnlyMessages.length > 0) {
+      // Filter out the system message when pushing to main
+      const messagesToPush = driftOnlyMessages.filter(
+        msg => !msg.text.startsWith('🌀 Drift started from:')
+      )
+      
+      if (messagesToPush.length > 0) {
+        onPushToMain(messagesToPush)
+        onClose()
+      }
+    }
+  }
 
   return (
     <div className={`
@@ -232,18 +248,36 @@ export default function DriftPanel({
             <p className="text-sm text-text-secondary italic">"{selectedText}"</p>
           </div>
           
-          {/* Save Button */}
-          <button
-            onClick={handleSaveAsChat}
-            className="mt-3 w-full flex items-center justify-center gap-2
-              bg-dark-elevated/50 border border-accent-violet/30
-              text-text-primary rounded-lg px-3 py-2
-              hover:bg-accent-violet/10 hover:border-accent-violet/50
-              transition-all duration-200"
-          >
-            <Save className="w-4 h-4" />
-            <span className="text-sm">Save Drift as New Chat</span>
-          </button>
+          {/* Action Buttons */}
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handlePushToMain}
+              disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+              className="flex-1 flex items-center justify-center gap-2
+                bg-gradient-to-r from-accent-pink/20 to-accent-violet/20
+                border border-accent-pink/30
+                text-text-primary rounded-lg px-3 py-2
+                hover:from-accent-pink/30 hover:to-accent-violet/30
+                hover:border-accent-pink/50
+                disabled:opacity-50 disabled:cursor-not-allowed
+                transition-all duration-200"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="text-sm">Push to Main</span>
+            </button>
+            
+            <button
+              onClick={handleSaveAsChat}
+              className="flex-1 flex items-center justify-center gap-2
+                bg-dark-elevated/50 border border-accent-violet/30
+                text-text-primary rounded-lg px-3 py-2
+                hover:bg-accent-violet/10 hover:border-accent-violet/50
+                transition-all duration-200"
+            >
+              <Save className="w-4 h-4" />
+              <span className="text-sm">Save as Chat</span>
+            </button>
+          </div>
         </div>
         
         {/* Messages */}
@@ -265,8 +299,8 @@ export default function DriftPanel({
                     }
                   `}
                 >
-                  {msg.id.includes('system') ? (
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  {msg.isUser ? (
+                    <p className="text-sm leading-relaxed">{msg.text}</p>
                   ) : (
                     <ReactMarkdown 
                       className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none

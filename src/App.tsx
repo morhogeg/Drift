@@ -464,6 +464,36 @@ function App() {
       )
     )
   }
+  
+  const handlePushDriftToMain = (driftMessages: Message[]) => {
+    // Add a separator message to indicate where drift was pushed
+    const separatorMessage: Message = {
+      id: 'drift-push-' + Date.now(),
+      text: `📌 *Drift exploration of "${driftContext.selectedText}" pushed to main chat:*`,
+      isUser: false,
+      timestamp: new Date()
+    }
+    
+    // Update messages with the drift content
+    const updatedMessages = [...messages, separatorMessage, ...driftMessages]
+    setMessages(updatedMessages)
+    
+    // Update chat history
+    setChatHistory(prevHistory => 
+      prevHistory.map(chat => 
+        chat.id === activeChatId 
+          ? { 
+              ...chat, 
+              messages: updatedMessages,
+              lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift pushed')
+            }
+          : chat
+      )
+    )
+    
+    // Close drift panel
+    setDriftOpen(false)
+  }
 
   return (
     <div className="h-screen flex bg-dark-bg relative overflow-hidden">
@@ -656,6 +686,58 @@ function App() {
                 </div>
               )}
               
+              {/* Show parent chat link if this is a saved drift */}
+              {(() => {
+                const currentChat = chatHistory.find(c => c.id === activeChatId)
+                if (!currentChat?.metadata?.isDrift) return null
+                
+                const parentChat = chatHistory.find(c => c.id === currentChat.metadata.parentChatId)
+                const parentTitle = parentChat?.title || 'Previous conversation'
+                
+                return (
+                  <div className="mb-4 p-3 bg-gradient-to-r from-accent-violet/10 to-accent-pink/10 rounded-lg border border-accent-violet/30">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm">🌀</span>
+                          <span className="text-sm text-text-primary font-medium">
+                            Drift exploration of "{currentChat.metadata.selectedText}"
+                          </span>
+                        </div>
+                        <span className="text-xs text-text-muted ml-6">
+                          from conversation: <span className="text-accent-violet">{parentTitle}</span>
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (currentChat.metadata.parentChatId) {
+                            switchChat(currentChat.metadata.parentChatId)
+                            // After switching, scroll to the source message
+                            setTimeout(() => {
+                              const sourceElement = document.querySelector(`[data-message-id="${currentChat.metadata.sourceMessageId}"]`)
+                              if (sourceElement) {
+                                sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                // Add a highlight effect
+                                sourceElement.classList.add('highlight-message')
+                                setTimeout(() => {
+                                  sourceElement.classList.remove('highlight-message')
+                                }, 2000)
+                              }
+                            }, 100)
+                          }
+                        }}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-dark-elevated/50 hover:bg-dark-elevated 
+                                 border border-accent-violet/30 hover:border-accent-violet/50 rounded-full
+                                 text-accent-violet transition-all duration-200 ml-4"
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                        Back to source
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+              
               {messages.map((msg, index) => (
                 msg.text ? (
                   <div
@@ -806,6 +888,7 @@ function App() {
         sourceMessageId={driftContext.sourceMessageId}
         parentChatId={activeChatId}
         onSaveAsChat={handleSaveDriftAsChat}
+        onPushToMain={handlePushDriftToMain}
         useOpenRouter={useOpenRouter}
       />
     </div>
