@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink } from 'lucide-react'
+import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
@@ -95,6 +95,14 @@ function App() {
   const [starredChats, setStarredChats] = useState<Set<string>>(new Set())
   const [editingChatId, setEditingChatId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  
+  // Message action states
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set())
+  
+  // Input textarea ref for auto-resize
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Chat history state
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([
@@ -184,14 +192,41 @@ function App() {
   }, [useOpenRouter])
 
   useEffect(() => {
-    // Update snippet count
+    // Update snippet count and load saved message IDs
     try {
-      setSnippetCount(snippetStorage.getAllSnippets().length)
+      const allSnippets = snippetStorage.getAllSnippets()
+      setSnippetCount(allSnippets.length)
+      
+      // Track which messages are saved
+      const savedIds = new Set<string>()
+      allSnippets.forEach(snippet => {
+        if (snippet.source.type === 'message' && snippet.source.messageId) {
+          savedIds.add(snippet.source.messageId)
+        }
+      })
+      setSavedMessageIds(savedIds)
     } catch (error) {
       console.error('Error loading snippets:', error)
       setSnippetCount(0)
     }
   }, [galleryOpen])
+  
+  // Auto-resize textarea and manage scrollbar visibility
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      const scrollHeight = textareaRef.current.scrollHeight
+      const newHeight = Math.min(scrollHeight, 200)
+      textareaRef.current.style.height = newHeight + 'px'
+      
+      // Add scrollable class only when content overflows
+      if (scrollHeight > 200) {
+        textareaRef.current.classList.add('scrollable')
+      } else {
+        textareaRef.current.classList.remove('scrollable')
+      }
+    }
+  }, [message])
 
   useEffect(() => {
     // Monitor scroll position to show/hide scroll button
@@ -435,6 +470,18 @@ function App() {
     if (targetChat) {
       setActiveChatId(chatId)
       setMessages(targetChat.messages || [])
+      
+      // Update saved message IDs for the new chat
+      const allSnippets = snippetStorage.getAllSnippets()
+      const savedIds = new Set<string>()
+      allSnippets.forEach(snippet => {
+        if (snippet.source.type === 'message' && 
+            snippet.source.messageId && 
+            snippet.source.chatId === chatId) {
+          savedIds.add(snippet.source.messageId)
+        }
+      })
+      setSavedMessageIds(savedIds)
     }
   }
 
@@ -473,6 +520,58 @@ function App() {
     }, 100)
   }
 
+  const handleCopyMessage = async (text: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedMessageId(messageId)
+      setTimeout(() => setCopiedMessageId(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy:', error)
+    }
+  }
+  
+  const handleToggleSaveMessage = (message: Message) => {
+    if (savedMessageIds.has(message.id)) {
+      // Unsave: Find and delete the snippet
+      const allSnippets = snippetStorage.getAllSnippets()
+      const snippetToDelete = allSnippets.find(s => 
+        s.source.type === 'message' && 
+        s.source.messageId === message.id &&
+        s.source.chatId === activeChatId
+      )
+      
+      if (snippetToDelete) {
+        snippetStorage.deleteSnippet(snippetToDelete.id)
+        setSavedMessageIds(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(message.id)
+          return newSet
+        })
+        setSnippetCount(prev => Math.max(0, prev - 1))
+      }
+    } else {
+      // Save: Create new snippet
+      const source = {
+        type: 'message' as const,
+        chatId: activeChatId,
+        messageId: message.id,
+        timestamp: message.timestamp
+      }
+      
+      snippetStorage.createSnippet(
+        message.text,
+        source,
+        {
+          tags: [],
+          starred: false
+        }
+      )
+      
+      setSavedMessageIds(prev => new Set(prev).add(message.id))
+      setSnippetCount(prev => prev + 1)
+    }
+  }
+  
   const handleSaveDriftAsChat = (driftMessages: Message[], title: string, metadata: any) => {
     const newChatId = 'drift-' + Date.now().toString()
     const newChat: ChatSession = {
@@ -951,8 +1050,10 @@ function App() {
                 msg.text ? (
                   <div
                     key={msg.id}
-                    className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative`}
+                    className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group`}
                     style={{ animationDelay: `${index * 50}ms` }}
+                    onMouseEnter={() => setHoveredMessageId(msg.id)}
+                    onMouseLeave={() => setHoveredMessageId(null)}
                   >
                     <div
                       className={`
@@ -966,6 +1067,41 @@ function App() {
                       `}
                       data-message-id={msg.id}
                     >
+                      {/* Message actions for AI messages */}
+                      {!msg.isUser && hoveredMessageId === msg.id && (
+                        <div className="absolute -top-8 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <button
+                            onClick={() => handleCopyMessage(msg.text, msg.id)}
+                            className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-dark-border/50
+                                     hover:bg-dark-surface hover:border-accent-violet/30 transition-all duration-200
+                                     shadow-lg hover:scale-110"
+                            title="Copy message"
+                          >
+                            {copiedMessageId === msg.id ? (
+                              <Check className="w-3.5 h-3.5 text-green-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-text-muted hover:text-accent-violet" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleToggleSaveMessage(msg)}
+                            className={`p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border
+                                     ${savedMessageIds.has(msg.id) 
+                                       ? 'border-cyan-500/50 bg-cyan-500/10' 
+                                       : 'border-dark-border/50'}
+                                     hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200
+                                     shadow-lg hover:scale-110`}
+                            title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
+                          >
+                            <Bookmark 
+                              className={`w-3.5 h-3.5 transition-colors
+                                ${savedMessageIds.has(msg.id) 
+                                  ? 'text-cyan-400 fill-cyan-400' 
+                                  : 'text-text-muted hover:text-cyan-400'}`}
+                            />
+                          </button>
+                        </div>
+                      )}
                       {msg.isUser ? (
                         <p className="text-sm leading-relaxed">{msg.text}</p>
                       ) : msg.driftInfo ? (
@@ -1072,59 +1208,74 @@ function App() {
         {/* Modern input area */}
         <div className="relative z-10 p-4 bg-gradient-to-t from-dark-bg to-dark-surface/50 backdrop-blur-sm">
           <div className="max-w-4xl mx-auto">
-            <div className="relative flex gap-3 items-center">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && !isTyping && sendMessage()}
-                placeholder={isTyping ? "AI is responding..." : "Type your message..."}
-                disabled={isTyping}
-                className="
-                  flex-1 bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
-                  rounded-full px-6 py-4 pr-14
-                  border border-dark-border/50
-                  focus:outline-none focus:border-accent-pink/50
-                  focus:shadow-[0_0_0_2px_rgba(255,0,122,0.2)]
-                  placeholder:text-text-muted
-                  transition-all duration-300
-                  disabled:opacity-70
-                "
-              />
-              {isTyping ? (
-                <button
-                  onClick={stopGeneration}
+            <div className="relative flex gap-3 items-end">
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                      e.preventDefault()
+                      sendMessage()
+                    }
+                  }}
+                  placeholder={isTyping ? "AI is responding..." : "Type your message..."}
+                  disabled={isTyping}
+                  rows={1}
                   className="
-                    absolute right-2 top-1/2 -translate-y-1/2
-                    w-10 h-10 rounded-full
-                    bg-gradient-to-br from-accent-pink to-accent-violet
-                    text-white shadow-lg shadow-accent-pink/30
-                    flex items-center justify-center
-                    hover:scale-105 active:scale-95
-                    transition-all duration-200
+                    w-full bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
+                    rounded-2xl px-6 py-4 pr-14
+                    border border-dark-border/50
+                    focus:outline-none focus:border-accent-pink/50
+                    focus:shadow-[0_0_0_2px_rgba(255,0,122,0.2)]
+                    placeholder:text-text-muted
+                    transition-all duration-300
+                    disabled:opacity-70
+                    resize-none
+                    min-h-[56px] max-h-[200px]
+                    overflow-y-auto
+                    custom-scrollbar
                   "
-                  title="Stop generating"
-                >
-                  <Square className="w-4 h-4" fill="currentColor" />
-                </button>
-              ) : (
-                <button
-                  onClick={sendMessage}
-                  disabled={!message.trim()}
-                  className="
-                    absolute right-2 top-1/2 -translate-y-1/2
-                    w-10 h-10 rounded-full
-                    bg-gradient-to-br from-accent-pink to-accent-violet
-                    text-white shadow-lg shadow-accent-pink/30
-                    flex items-center justify-center
-                    hover:scale-105 active:scale-95
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                    transition-all duration-200
-                  "
-                >
-                  <Send className="w-4 h-4 ml-0.5" />
-                </button>
-              )}
+                  style={{
+                    height: '56px'
+                  }}
+                />
+                {isTyping ? (
+                  <button
+                    onClick={stopGeneration}
+                    className="
+                      absolute right-2 bottom-2
+                      w-10 h-10 rounded-full
+                      bg-gradient-to-br from-accent-pink to-accent-violet
+                      text-white shadow-lg shadow-accent-pink/30
+                      flex items-center justify-center
+                      hover:scale-105 active:scale-95
+                      transition-all duration-200
+                    "
+                    title="Stop generating"
+                  >
+                    <Square className="w-4 h-4" fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                    className="
+                      absolute right-2 bottom-2
+                      w-10 h-10 rounded-full
+                      bg-gradient-to-br from-accent-pink to-accent-violet
+                      text-white shadow-lg shadow-accent-pink/30
+                      flex items-center justify-center
+                      hover:scale-105 active:scale-95
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                      transition-all duration-200
+                    "
+                  >
+                    <Send className="w-4 h-4 ml-0.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

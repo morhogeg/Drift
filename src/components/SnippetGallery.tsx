@@ -265,7 +265,7 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
                         e.stopPropagation()
                         toggleSelection(snippet.id)
                       }}
-                      className="absolute top-2 left-2 w-5 h-5 rounded border-2 border-text-muted
+                      className="absolute top-3 left-3 w-5 h-5 rounded border-2 border-text-muted
                                flex items-center justify-center cursor-pointer hover:border-cyan-500"
                     >
                       {selectedIds.has(snippet.id) && (
@@ -278,15 +278,15 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
                     <Star className="absolute top-2 right-2 w-4 h-4 text-cyan-500 fill-cyan-500" />
                   )}
 
-                  <h3 className="font-medium text-text-primary mb-2 line-clamp-1">
+                  <h3 className={`font-medium text-text-primary mb-2 line-clamp-1 ${isMultiSelect ? 'ml-8' : ''}`}>
                     {snippet.title}
                   </h3>
                   
-                  <p className="text-sm text-text-muted line-clamp-3 mb-3">
+                  <p className={`text-sm text-text-muted line-clamp-3 mb-3 ${isMultiSelect ? 'ml-8' : ''}`}>
                     {snippet.preview}
                   </p>
 
-                  <div className="flex items-center justify-between">
+                  <div className={`flex items-center justify-between ${isMultiSelect ? 'ml-8' : ''}`}>
                     <span className="text-xs text-text-muted">
                       {formatDate(snippet.createdAt)}
                     </span>
