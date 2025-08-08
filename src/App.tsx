@@ -559,7 +559,7 @@ function App() {
               </button>
             )}
             
-            <div className="flex-1 flex items-center justify-center gap-3">
+            <div className="flex-1 flex items-center justify-center">
               <div className="flex items-center gap-2 animate-fade-up">
                 <div className="relative">
                   <Sparkles className="w-6 h-6 text-accent-pink" />
@@ -569,17 +569,15 @@ function App() {
                   Drift
                 </h1>
               </div>
-              
-              {/* Connection Status */}
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
-                <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
-                <span className="text-xs text-text-muted">
-                  {ollamaConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
-                </span>
-              </div>
             </div>
             
-            {!sidebarOpen && <div className="w-10" />}
+            {/* Connection Status - moved to right */}
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
+              <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+              <span className="text-xs text-text-muted">
+                {ollamaConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
+              </span>
+            </div>
           </div>
         </header>
         
@@ -611,8 +609,8 @@ function App() {
                 </button>
               )}
               {messages.length === 0 && (
-                <div className="text-center py-20 animate-fade-up">
-                  <Sparkles className="w-12 h-12 text-accent-pink/50 mx-auto mb-4" />
+                <div className={`flex flex-col items-center py-20 animate-fade-up ${sidebarOpen ? '-ml-[150px]' : '-ml-28'}`}>
+                  <Sparkles className="w-12 h-12 text-accent-pink/50 mb-4" />
                   <p className="text-text-muted">Start a conversation with Drift AI</p>
                 </div>
               )}
