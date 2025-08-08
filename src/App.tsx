@@ -82,7 +82,7 @@ function App() {
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([
     {
       id: '1',
-      title: 'Current Conversation',
+      title: 'New Chat',
       messages: [],
       lastMessage: 'Let\'s explore ideas together...',
       createdAt: new Date()
@@ -217,12 +217,19 @@ function App() {
       setTimeout(scrollToBottom, 100)
       
       // Update chat history with new message
+      // Also update title if this is the first message
       setChatHistory(prevHistory => 
-        prevHistory.map(chat => 
-          chat.id === activeChatId 
-            ? { ...chat, messages: updatedMessages, lastMessage: message }
-            : chat
-        )
+        prevHistory.map(chat => {
+          if (chat.id === activeChatId) {
+            const updatedChat = { ...chat, messages: updatedMessages, lastMessage: message }
+            // If this is the first user message and title is still "New Chat", update it
+            if (chat.title === 'New Chat' && updatedMessages.filter(m => m.isUser).length === 1) {
+              updatedChat.title = message.slice(0, 50) + (message.length > 50 ? '...' : '')
+            }
+            return updatedChat
+          }
+          return chat
+        })
       )
       
       // Convert messages to API format
@@ -354,8 +361,8 @@ function App() {
         // Save current messages
         const updatedChat = { ...chat, messages: messages }
         
-        // Update title if there are messages
-        if (messages.length > 0) {
+        // Update title if there are messages and it's still generic
+        if (messages.length > 0 && (chat.title === 'New Chat' || chat.title === 'Current Conversation')) {
           const firstUserMessage = messages.find(m => m.isUser)
           const newTitle = firstUserMessage 
             ? firstUserMessage.text.slice(0, 50) + (firstUserMessage.text.length > 50 ? '...' : '')

@@ -185,8 +185,13 @@ export default function DriftPanel({
       selectedText,
       createdAt: new Date()
     }
-    // Only save the drift-specific messages, not the context
-    onSaveAsChat(driftOnlyMessages, title, metadata)
+    // Filter out the system message when saving as a new chat
+    // The banner will provide all the context needed
+    const messagesToSave = driftOnlyMessages.filter(
+      msg => !msg.text.startsWith('🌀 Drift started from:')
+    )
+    
+    onSaveAsChat(messagesToSave, title, metadata)
     onClose()
   }
   
