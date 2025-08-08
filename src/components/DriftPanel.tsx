@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, Save, Send, Sparkles, Square } from 'lucide-react'
+import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -19,6 +20,7 @@ interface DriftPanelProps {
   sourceMessageId: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
+  useOpenRouter?: boolean
 }
 
 export default function DriftPanel({
@@ -28,7 +30,8 @@ export default function DriftPanel({
   contextMessages,
   sourceMessageId,
   parentChatId,
-  onSaveAsChat
+  onSaveAsChat,
+  useOpenRouter = true
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -75,18 +78,24 @@ export default function DriftPanel({
       setMessage('')
       setIsTyping(true)
       
-      // Convert messages to Ollama format with special Drift context
-      const ollamaMessages: OllamaMessage[] = [
+      // Filter out the system message that's shown in UI (starts with 🌀)
+      const conversationMessages = messages.filter(msg => !msg.text.startsWith('🌀 Drift started from:'))
+      
+      // Convert messages to API format with special Drift context
+      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
         {
           role: 'system',
           content: `The user wants to explore this part more deeply: "${selectedText}" — expand or clarify. Provide focused, detailed exploration of this specific topic.`
         },
-        ...messages.map(msg => ({
+        ...conversationMessages.map(msg => ({
           role: msg.isUser ? 'user' as const : 'assistant' as const,
           content: msg.text
         })),
         { role: 'user' as const, content: message }
       ]
+      
+      console.log('Drift panel - sending message with OpenRouter:', useOpenRouter)
+      console.log('Drift panel - API messages:', apiMessages)
       
       try {
         // Create abort controller for this request
@@ -105,9 +114,11 @@ export default function DriftPanel({
         }
         setMessages(prev => [...prev, aiMessage])
         
-        // Stream the response
-        await sendMessageToOllama(
-          ollamaMessages, 
+        // Stream the response using the selected API
+        const sendMessage = useOpenRouter ? sendMessageToOpenRouter : sendMessageToOllama
+        
+        await sendMessage(
+          apiMessages as any, 
           (chunk) => {
             accumulatedResponse += chunk
             setMessages(prev => 
@@ -121,7 +132,8 @@ export default function DriftPanel({
           abortController.signal
         )
       } catch (error) {
-        const errorMessage = "Failed to get response. Please check your connection."
+        console.error('Drift panel error:', error)
+        const errorMessage = error instanceof Error ? error.message : "Failed to get response. Please check your connection."
         const aiResponse: Message = {
           id: 'drift-error-' + Date.now().toString(),
           text: errorMessage,

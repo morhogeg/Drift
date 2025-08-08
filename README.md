@@ -22,6 +22,7 @@ A beautiful, modern AI chat interface with innovative side-threading capabilitie
 
 - Node.js 18+ 
 - npm or yarn
+- OpenRouter API key (get one at [openrouter.ai/keys](https://openrouter.ai/keys))
 
 ### Installation
 
@@ -36,12 +37,31 @@ cd Drift
 npm install
 ```
 
-3. Start the development server:
+3. Set up your API key:
+   - Copy `.env.example` to `.env`
+   - Add your OpenRouter API key:
+```bash
+cp .env.example .env
+# Edit .env and add your key:
+# VITE_OPENROUTER_API_KEY=your_api_key_here
+```
+
+4. Start the development server:
 ```bash
 npm run dev
 ```
 
-4. Open your browser to `http://localhost:5173`
+5. Open your browser to `http://localhost:5173`
+
+### API Configuration
+
+Drift uses OpenRouter to access the OpenAI OSS-20B model for free. To get started:
+
+1. Sign up at [openrouter.ai](https://openrouter.ai)
+2. Get your API key from [openrouter.ai/keys](https://openrouter.ai/keys)
+3. Add the key to your `.env` file as shown above
+
+The app also supports Ollama for local AI models. You can switch between OpenRouter and Ollama using the toggle button in the header.
 
 ## 🛠️ Tech Stack
 

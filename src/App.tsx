@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown } from 'lucide-react'
+import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
@@ -35,7 +36,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeChatId, setActiveChatId] = useState('1')
-  const [ollamaConnected, setOllamaConnected] = useState(false)
+  const [apiConnected, setApiConnected] = useState(false)
+  const [useOpenRouter, setUseOpenRouter] = useState(true) // Toggle between OpenRouter and Ollama
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -123,16 +125,24 @@ function App() {
   }, [streamingResponse])
 
   useEffect(() => {
-    // Check Ollama connection on mount
-    checkOllamaConnection().then(setOllamaConnected)
+    // Check API connection on mount
+    const checkConnection = async () => {
+      if (useOpenRouter) {
+        const connected = await checkOpenRouterConnection()
+        setApiConnected(connected)
+      } else {
+        const connected = await checkOllamaConnection()
+        setApiConnected(connected)
+      }
+    }
+    
+    checkConnection()
     
     // Check connection every 5 seconds
-    const interval = setInterval(() => {
-      checkOllamaConnection().then(setOllamaConnected)
-    }, 5000)
+    const interval = setInterval(checkConnection, 5000)
     
     return () => clearInterval(interval)
-  }, [])
+  }, [useOpenRouter])
 
   useEffect(() => {
     // Monitor scroll position to show/hide scroll button
@@ -194,8 +204,8 @@ function App() {
         )
       )
       
-      // Convert messages to Ollama format
-      const ollamaMessages: OllamaMessage[] = updatedMessages.map(msg => ({
+      // Convert messages to API format
+      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = updatedMessages.map(msg => ({
         role: msg.isUser ? 'user' : 'assistant',
         content: msg.text
       }))
@@ -218,9 +228,11 @@ function App() {
         }
         setMessages(prev => [...prev, aiMessage])
         
-        // Stream the response
-        await sendMessageToOllama(
-          ollamaMessages, 
+        // Stream the response using the selected API
+        const sendMessage = useOpenRouter ? sendMessageToOpenRouter : sendMessageToOllama
+        
+        await sendMessage(
+          apiMessages as any, 
           (chunk) => {
             accumulatedResponse += chunk
             setStreamingResponse(accumulatedResponse)
@@ -256,10 +268,16 @@ function App() {
         
         setStreamingResponse('')
       } catch (error) {
-        // Fallback message if Ollama isn't running
-        const errorMessage = error instanceof Error && error.message.includes('Ollama is not running')
-          ? "Ollama is not running. Please install and start Ollama:\n1. Download from ollama.com\n2. Run: ollama pull gpt-oss:20b\n3. Run: ollama serve"
-          : "Failed to connect to AI model. Please check your connection."
+        // Fallback message based on which API is being used
+        let errorMessage = "Failed to connect to AI model. Please check your connection."
+        
+        if (error instanceof Error) {
+          if (useOpenRouter && error.message.includes('API key')) {
+            errorMessage = "OpenRouter API key not configured. Please add your API key to the .env file:\n1. Get your API key from https://openrouter.ai/keys\n2. Add to .env: VITE_OPENROUTER_API_KEY=your_key_here\n3. Restart the development server"
+          } else if (!useOpenRouter && error.message.includes('Ollama is not running')) {
+            errorMessage = "Ollama is not running. Please install and start Ollama:\n1. Download from ollama.com\n2. Run: ollama pull gpt-oss:20b\n3. Run: ollama serve"
+          }
+        }
           
         const aiResponse: Message = {
           id: (Date.now() + 1).toString(),
@@ -572,11 +590,20 @@ function App() {
             </div>
             
             {/* Connection Status - moved to right */}
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
-              <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
-              <span className="text-xs text-text-muted">
-                {ollamaConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
-              </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setUseOpenRouter(!useOpenRouter)}
+                className="px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30 hover:bg-dark-elevated transition-colors text-xs text-text-muted"
+                title="Click to switch API"
+              >
+                {useOpenRouter ? 'OpenRouter' : 'Ollama'}
+              </button>
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
+                <div className={`w-2 h-2 rounded-full ${apiConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+                <span className="text-xs text-text-muted">
+                  {apiConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
+                </span>
+              </div>
             </div>
           </div>
         </header>
@@ -765,6 +792,7 @@ function App() {
         sourceMessageId={driftContext.sourceMessageId}
         parentChatId={activeChatId}
         onSaveAsChat={handleSaveDriftAsChat}
+        useOpenRouter={useOpenRouter}
       />
     </div>
   )
