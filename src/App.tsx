@@ -45,6 +45,23 @@ function App() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   
+  // Helper function to strip markdown formatting for preview text
+  const stripMarkdown = (text: string): string => {
+    return text
+      .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold
+      .replace(/\*([^*]+)\*/g, '$1') // Italic
+      .replace(/#{1,6}\s/g, '') // Headers
+      .replace(/`([^`]+)`/g, '$1') // Inline code
+      .replace(/```[^`]*```/g, '') // Code blocks
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Links
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1') // Images
+      .replace(/^[-*+]\s/gm, '') // Lists
+      .replace(/^\d+\.\s/gm, '') // Numbered lists
+      .replace(/>\s/g, '') // Blockquotes
+      .replace(/\n{2,}/g, ' ') // Multiple newlines
+      .trim()
+  }
+  
   // Drift state
   const [driftOpen, setDriftOpen] = useState(false)
   const [driftContext, setDriftContext] = useState<{
@@ -260,7 +277,7 @@ function App() {
                       ? { ...msg, text: accumulatedResponse }
                       : msg
                   ),
-                  lastMessage: accumulatedResponse.slice(0, 100) 
+                  lastMessage: stripMarkdown(accumulatedResponse).slice(0, 100) 
                 }
               : chat
           )
@@ -428,7 +445,7 @@ function App() {
       id: newChatId,
       title,
       messages: driftMessages,
-      lastMessage: driftMessages[driftMessages.length - 1]?.text || 'Drift conversation',
+      lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift conversation'),
       createdAt: new Date(),
       metadata: {
         ...metadata,
@@ -521,14 +538,11 @@ function App() {
                   `} />
                 )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-text-primary truncate flex items-center gap-1">
+                  <h3 className="text-sm font-semibold text-text-primary truncate">
                     {chat.title}
-                    {chat.metadata?.isDrift && (
-                      <span className="text-xs text-accent-violet/70 font-normal">(Drift)</span>
-                    )}
                   </h3>
                   <p className="text-xs text-text-muted truncate mt-0.5">
-                    {chat.lastMessage}
+                    {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
                   </p>
                   <p className="text-xs text-accent-violet/70 mt-1">
                     {formatDate(chat.createdAt)}

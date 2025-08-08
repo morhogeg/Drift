@@ -35,6 +35,7 @@ export default function DriftPanel({
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+  const [driftOnlyMessages, setDriftOnlyMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -48,12 +49,16 @@ export default function DriftPanel({
       // Add system context message
       const systemMessage: Message = {
         id: 'drift-system-' + Date.now(),
-        text: `🌀 Drift started from: "${selectedText}"\n\nLet's explore this part more deeply - expand or clarify this specific concept.`,
+        text: `🌀 Drift started from: "${selectedText}"\n\nLet's explore this specific term or concept. What would you like to know about "${selectedText}"?`,
         isUser: false,
         timestamp: new Date()
       }
       
+      // Set all messages for display (including context)
       setMessages([...driftMessages, systemMessage])
+      
+      // Set drift-only messages (just the system message to start)
+      setDriftOnlyMessages([systemMessage])
     }
   }, [isOpen, contextMessages, selectedText])
 
@@ -75,19 +80,23 @@ export default function DriftPanel({
       }
       
       setMessages(prev => [...prev, newMessage])
+      setDriftOnlyMessages(prev => [...prev, newMessage])
       setMessage('')
       setIsTyping(true)
       
-      // Filter out the system message that's shown in UI (starts with 🌀)
-      const conversationMessages = messages.filter(msg => !msg.text.startsWith('🌀 Drift started from:'))
+      // Only use drift-specific messages, not the context messages
+      // Filter out the system message and any context messages
+      const driftConversation = driftOnlyMessages.filter(
+        msg => !msg.text.startsWith('🌀 Drift started from:') && msg.id !== newMessage.id
+      )
       
       // Convert messages to API format with special Drift context
       const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
         {
           role: 'system',
-          content: `The user wants to explore this part more deeply: "${selectedText}" — expand or clarify. Provide focused, detailed exploration of this specific topic.`
+          content: `The user selected the text "${selectedText}" and wants to understand it better. Focus ONLY on explaining, expanding, or clarifying "${selectedText}". Do not discuss the broader context unless directly relevant to understanding "${selectedText}".`
         },
-        ...conversationMessages.map(msg => ({
+        ...driftConversation.map(msg => ({
           role: msg.isUser ? 'user' as const : 'assistant' as const,
           content: msg.text
         })),
@@ -113,6 +122,7 @@ export default function DriftPanel({
           timestamp: new Date()
         }
         setMessages(prev => [...prev, aiMessage])
+        setDriftOnlyMessages(prev => [...prev, aiMessage])
         
         // Stream the response using the selected API
         const sendMessage = useOpenRouter ? sendMessageToOpenRouter : sendMessageToOllama
@@ -122,6 +132,13 @@ export default function DriftPanel({
           (chunk) => {
             accumulatedResponse += chunk
             setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiResponseId 
+                  ? { ...msg, text: accumulatedResponse }
+                  : msg
+              )
+            )
+            setDriftOnlyMessages(prev => 
               prev.map(msg => 
                 msg.id === aiResponseId 
                   ? { ...msg, text: accumulatedResponse }
@@ -141,6 +158,7 @@ export default function DriftPanel({
           timestamp: new Date()
         }
         setMessages(prev => [...prev, aiResponse])
+        setDriftOnlyMessages(prev => [...prev, aiResponse])
       } finally {
         setIsTyping(false)
         abortControllerRef.current = null
@@ -165,7 +183,8 @@ export default function DriftPanel({
       selectedText,
       createdAt: new Date()
     }
-    onSaveAsChat(messages, title, metadata)
+    // Only save the drift-specific messages, not the context
+    onSaveAsChat(driftOnlyMessages, title, metadata)
     onClose()
   }
 
