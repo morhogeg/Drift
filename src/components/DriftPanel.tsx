@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, Save, Send, Sparkles, Square, ArrowLeft } from 'lucide-react'
-import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
+import { sendMessageToOpenRouter, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -22,6 +22,7 @@ interface DriftPanelProps {
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
   onPushToMain?: (messages: Message[]) => void
   useOpenRouter?: boolean
+  selectedModel?: OpenRouterModel
 }
 
 export default function DriftPanel({
@@ -33,7 +34,8 @@ export default function DriftPanel({
   parentChatId,
   onSaveAsChat,
   onPushToMain,
-  useOpenRouter = true
+  useOpenRouter = true,
+  selectedModel = OPENROUTER_MODELS.OSS
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -124,29 +126,52 @@ export default function DriftPanel({
         setDriftOnlyMessages(prev => [...prev, aiMessage])
         
         // Stream the response using the selected API
-        const sendMessage = useOpenRouter ? sendMessageToOpenRouter : sendMessageToOllama
-        
-        await sendMessage(
-          apiMessages as any, 
-          (chunk) => {
-            accumulatedResponse += chunk
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiResponseId 
-                  ? { ...msg, text: accumulatedResponse }
-                  : msg
+        if (useOpenRouter) {
+          await sendMessageToOpenRouter(
+            apiMessages as any,
+            (chunk) => {
+              accumulatedResponse += chunk
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
               )
-            )
-            setDriftOnlyMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiResponseId 
-                  ? { ...msg, text: accumulatedResponse }
-                  : msg
+              setDriftOnlyMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
               )
-            )
-          },
-          abortController.signal
-        )
+            },
+            abortController.signal,
+            selectedModel
+          )
+        } else {
+          await sendMessageToOllama(
+            apiMessages as any,
+            (chunk) => {
+              accumulatedResponse += chunk
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
+              )
+              setDriftOnlyMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
+              )
+            },
+            abortController.signal
+          )
+        }
       } catch (error) {
         console.error('Drift panel error:', error)
         const errorMessage = error instanceof Error ? error.message : "Failed to get response. Please check your connection."

@@ -21,12 +21,19 @@ export interface OpenRouterResponse {
 }
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'openai/gpt-oss-20b:free'
 
-export async function checkOpenRouterConnection(): Promise<boolean> {
+export const OPENROUTER_MODELS = {
+  OSS: 'openai/gpt-oss-20b:free',
+  MISTRAL_SMALL: 'mistralai/mistral-small-3.2-24b-instruct:free'  // Mistral Small free tier
+} as const
+
+export type OpenRouterModel = typeof OPENROUTER_MODELS[keyof typeof OPENROUTER_MODELS]
+
+export async function checkOpenRouterConnection(model: OpenRouterModel = OPENROUTER_MODELS.OSS): Promise<boolean> {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY
   
   console.log('Checking OpenRouter connection...')
+  console.log('Model:', model)
   console.log('API Key present:', !!apiKey)
   console.log('API Key length:', apiKey?.length)
   
@@ -45,7 +52,7 @@ export async function checkOpenRouterConnection(): Promise<boolean> {
         'X-Title': 'Drift AI Chat'
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [{ role: 'user', content: 'test' }],
         max_tokens: 1,
         stream: false
@@ -56,7 +63,19 @@ export async function checkOpenRouterConnection(): Promise<boolean> {
     
     if (!response.ok) {
       const errorText = await response.text()
-      console.error('OpenRouter connection error:', errorText)
+      console.error('OpenRouter connection error for model', model, ':', errorText)
+      try {
+        const errorJson = JSON.parse(errorText)
+        console.error('Error details:', errorJson)
+        
+        // If it's a 404 (model not found), return false but don't throw
+        if (response.status === 404) {
+          console.warn(`Model ${model} not available. This might be due to regional restrictions or account limitations.`)
+          return false
+        }
+      } catch (e) {
+        // Not JSON, already logged as text
+      }
     }
     
     return response.ok
@@ -69,11 +88,13 @@ export async function checkOpenRouterConnection(): Promise<boolean> {
 export async function sendMessageToOpenRouter(
   messages: ChatMessage[],
   onChunk: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  model: OpenRouterModel = OPENROUTER_MODELS.OSS
 ): Promise<void> {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY
   
   console.log('Sending message to OpenRouter...')
+  console.log('Using model:', model)
   console.log('API Key present:', !!apiKey)
   console.log('Messages:', messages)
   
@@ -83,7 +104,7 @@ export async function sendMessageToOpenRouter(
   
   try {
     const requestBody = {
-      model: MODEL,
+      model,
       messages,
       stream: true,
       temperature: 0.7,
@@ -136,10 +157,12 @@ export async function sendMessageToOpenRouter(
           
           try {
             const json = JSON.parse(data)
-            console.log('Received data:', json)
+            // Log model info if available
+            if (json.model) {
+              console.log('Response from model:', json.model)
+            }
             const content = json.choices?.[0]?.delta?.content
             if (content) {
-              console.log('Chunk content:', content)
               onChunk(content)
             }
           } catch (e) {

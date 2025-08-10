@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check } from 'lucide-react'
-import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage } from './services/openrouter'
+import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown } from 'lucide-react'
+import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
@@ -44,7 +44,9 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeChatId, setActiveChatId] = useState('1')
   const [apiConnected, setApiConnected] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [useOpenRouter, setUseOpenRouter] = useState(true) // Toggle between OpenRouter and Ollama
+  const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(OPENROUTER_MODELS.OSS)
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -173,23 +175,33 @@ function App() {
 
   useEffect(() => {
     // Check API connection on mount
-    const checkConnection = async () => {
-      if (useOpenRouter) {
-        const connected = await checkOpenRouterConnection()
-        setApiConnected(connected)
-      } else {
-        const connected = await checkOllamaConnection()
-        setApiConnected(connected)
+    const checkConnection = async (showConnecting = true) => {
+      if (showConnecting) {
+        setIsConnecting(true)
+      }
+      try {
+        if (useOpenRouter) {
+          const connected = await checkOpenRouterConnection(selectedModel)
+          setApiConnected(connected)
+        } else {
+          const connected = await checkOllamaConnection()
+          setApiConnected(connected)
+        }
+      } finally {
+        if (showConnecting) {
+          setIsConnecting(false)
+        }
       }
     }
     
-    checkConnection()
+    // Initial connection check with "Connecting..." state
+    checkConnection(true)
     
-    // Check connection every 5 seconds
-    const interval = setInterval(checkConnection, 5000)
+    // Check connection every 5 seconds without showing "Connecting..." state
+    const interval = setInterval(() => checkConnection(false), 5000)
     
     return () => clearInterval(interval)
-  }, [useOpenRouter])
+  }, [useOpenRouter, selectedModel])
 
   useEffect(() => {
     // Update snippet count and load saved message IDs
@@ -320,25 +332,44 @@ function App() {
         setMessages(prev => [...prev, aiMessage])
         
         // Stream the response using the selected API
-        const sendMessage = useOpenRouter ? sendMessageToOpenRouter : sendMessageToOllama
-        
-        await sendMessage(
-          apiMessages as any, 
-          (chunk) => {
-            accumulatedResponse += chunk
-            setStreamingResponse(accumulatedResponse)
-            
-            // Update the AI message with streamed content
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiResponseId 
-                  ? { ...msg, text: accumulatedResponse }
-                  : msg
+        if (useOpenRouter) {
+          await sendMessageToOpenRouter(
+            apiMessages as any,
+            (chunk) => {
+              accumulatedResponse += chunk
+              setStreamingResponse(accumulatedResponse)
+              
+              // Update the AI message with streamed content
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
               )
-            )
-          },
-          abortController.signal
-        )
+            },
+            abortController.signal,
+            selectedModel
+          )
+        } else {
+          await sendMessageToOllama(
+            apiMessages as any,
+            (chunk) => {
+              accumulatedResponse += chunk
+              setStreamingResponse(accumulatedResponse)
+              
+              // Update the AI message with streamed content
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiResponseId 
+                    ? { ...msg, text: accumulatedResponse }
+                    : msg
+                )
+              )
+            },
+            abortController.signal
+          )
+        }
         
         // Final update to chat history
         setChatHistory(prevHistory => 
@@ -941,19 +972,59 @@ function App() {
               </div>
             </div>
             
-            {/* Connection Status - moved to right */}
+            {/* Model Selector and Connection Status */}
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setUseOpenRouter(!useOpenRouter)}
-                className="px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30 hover:bg-dark-elevated transition-colors text-xs text-text-muted"
-                title="Click to switch API"
-              >
-                {useOpenRouter ? 'OpenRouter' : 'Ollama'}
-              </button>
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-elevated/50 border border-dark-border/30">
-                <div className={`w-2 h-2 rounded-full ${apiConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
-                <span className="text-xs text-text-muted">
-                  {apiConnected ? 'Connected to OSS-20B' : 'Offline Mode'}
+              {/* Unified Model Selector with custom styling */}
+              <div className="relative">
+                <select
+                  value={useOpenRouter ? selectedModel : 'ollama'}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setIsConnecting(true)  // Show connecting state immediately
+                    if (value === 'ollama') {
+                      setUseOpenRouter(false)
+                    } else {
+                      setUseOpenRouter(true)
+                      setSelectedModel(value as OpenRouterModel)
+                    }
+                  }}
+                  className="appearance-none pl-4 pr-8 py-1.5 rounded-full bg-dark-elevated/70 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-200 text-xs font-medium text-text-primary cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-violet/40 focus:border-transparent backdrop-blur-sm"
+                  title="Select AI model"
+                >
+                  <optgroup label="OpenRouter (Free)">
+                    <option value={OPENROUTER_MODELS.OSS}>OSS-20B</option>
+                    <option value={OPENROUTER_MODELS.MISTRAL_SMALL}>Mistral Small</option>
+                  </optgroup>
+                  <optgroup label="Local">
+                    <option value="ollama">Ollama</option>
+                  </optgroup>
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
+              </div>
+              
+              {/* Connection Status Badge */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-sm transition-all duration-300 ${
+                isConnecting
+                  ? 'bg-amber-500/10 border border-amber-500/30'
+                  : apiConnected 
+                    ? 'bg-emerald-500/10 border border-emerald-500/30' 
+                    : 'bg-red-500/10 border border-red-500/30'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${
+                  isConnecting
+                    ? 'bg-amber-500 animate-pulse'
+                    : apiConnected 
+                      ? 'bg-emerald-500' 
+                      : 'bg-red-500'
+                }`} />
+                <span className={`text-xs font-medium ${
+                  isConnecting
+                    ? 'text-amber-400'
+                    : apiConnected 
+                      ? 'text-emerald-400' 
+                      : 'text-red-400'
+                }`}>
+                  {isConnecting ? 'Connecting...' : apiConnected ? 'Connected' : 'Offline'}
                 </span>
               </div>
             </div>
@@ -1300,6 +1371,7 @@ function App() {
         onSaveAsChat={handleSaveDriftAsChat}
         onPushToMain={handlePushDriftToMain}
         useOpenRouter={useOpenRouter}
+        selectedModel={selectedModel}
       />
       
       {/* Snippet Gallery */}
