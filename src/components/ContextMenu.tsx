@@ -1,8 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { 
-  Edit3, Copy, Trash2, Pin, PinOff, 
-  ExternalLink, Star, StarOff, Archive
-} from 'lucide-react'
 
 interface ContextMenuItem {
   label: string

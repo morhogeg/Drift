@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { 
-  Search, Grid, List, Calendar, Star, Tag, 
-  Download, Trash2, Edit2, Copy, ExternalLink,
+  Search, Grid, List, Calendar, Star, 
+  Download, Trash2, Copy, ExternalLink,
   X, ChevronLeft, Filter, Check
 } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'

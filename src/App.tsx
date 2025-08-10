@@ -1,14 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, X, Plus, Search, MessageCircle, ChevronLeft, AlertCircle, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
+import Settings, { type AISettings } from './components/Settings'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
+import { settingsStorage } from './services/settingsStorage'
 
 interface Message {
   id: string
@@ -86,6 +88,10 @@ function App() {
   // Gallery state
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [snippetCount, setSnippetCount] = useState(0)
+  
+  // Settings state
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [aiSettings, setAiSettings] = useState<AISettings>(settingsStorage.get())
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -180,11 +186,11 @@ function App() {
         setIsConnecting(true)
       }
       try {
-        if (useOpenRouter) {
-          const connected = await checkOpenRouterConnection(selectedModel)
+        if (aiSettings.useOpenRouter) {
+          const connected = await checkOpenRouterConnection(aiSettings.openRouterApiKey, aiSettings.openRouterModel)
           setApiConnected(connected)
         } else {
-          const connected = await checkOllamaConnection()
+          const connected = await checkOllamaConnection(aiSettings.ollamaUrl)
           setApiConnected(connected)
         }
       } finally {
@@ -201,7 +207,7 @@ function App() {
     const interval = setInterval(() => checkConnection(false), 5000)
     
     return () => clearInterval(interval)
-  }, [useOpenRouter, selectedModel])
+  }, [aiSettings])
 
   useEffect(() => {
     // Update snippet count and load saved message IDs
@@ -212,7 +218,7 @@ function App() {
       // Track which messages are saved
       const savedIds = new Set<string>()
       allSnippets.forEach(snippet => {
-        if (snippet.source.type === 'message' && snippet.source.messageId) {
+        if (snippet.source.messageId) {
           savedIds.add(snippet.source.messageId)
         }
       })
@@ -245,7 +251,7 @@ function App() {
     const chatContainer = document.querySelector('.chat-messages-container')
     if (!chatContainer) return
     
-    let scrollTimeout: NodeJS.Timeout
+    let scrollTimeout: ReturnType<typeof setTimeout>
     
     const handleScroll = () => {
       const atBottom = isAtBottom()
@@ -332,7 +338,7 @@ function App() {
         setMessages(prev => [...prev, aiMessage])
         
         // Stream the response using the selected API
-        if (useOpenRouter) {
+        if (aiSettings.useOpenRouter) {
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
@@ -348,8 +354,9 @@ function App() {
                 )
               )
             },
+            aiSettings.openRouterApiKey,
             abortController.signal,
-            selectedModel
+            aiSettings.openRouterModel
           )
         } else {
           await sendMessageToOllama(
@@ -367,7 +374,9 @@ function App() {
                 )
               )
             },
-            abortController.signal
+            abortController.signal,
+            aiSettings.ollamaUrl,
+            aiSettings.ollamaModel
           )
         }
         
@@ -434,6 +443,17 @@ function App() {
       abortControllerRef.current = null
       setIsTyping(false)
       setStreamingResponse('')
+    }
+  }
+
+  const handleSaveSettings = (newSettings: AISettings) => {
+    console.log('Saving settings:', newSettings)
+    setAiSettings(newSettings)
+    settingsStorage.save(newSettings)
+    // Update the connection states - these are now redundant since we use aiSettings directly
+    setUseOpenRouter(newSettings.useOpenRouter)
+    if (newSettings.useOpenRouter) {
+      setSelectedModel(newSettings.openRouterModel)
     }
   }
 
@@ -506,8 +526,7 @@ function App() {
       const allSnippets = snippetStorage.getAllSnippets()
       const savedIds = new Set<string>()
       allSnippets.forEach(snippet => {
-        if (snippet.source.type === 'message' && 
-            snippet.source.messageId && 
+        if (snippet.source.messageId && 
             snippet.source.chatId === chatId) {
           savedIds.add(snippet.source.messageId)
         }
@@ -566,7 +585,6 @@ function App() {
       // Unsave: Find and delete the snippet
       const allSnippets = snippetStorage.getAllSnippets()
       const snippetToDelete = allSnippets.find(s => 
-        s.source.type === 'message' && 
         s.source.messageId === message.id &&
         s.source.chatId === activeChatId
       )
@@ -582,10 +600,12 @@ function App() {
       }
     } else {
       // Save: Create new snippet
+      const currentChat = chatHistory.find(c => c.id === activeChatId)
       const source = {
-        type: 'message' as const,
         chatId: activeChatId,
+        chatTitle: currentChat?.title || 'Untitled Chat',
         messageId: message.id,
+        isFullMessage: true,
         timestamp: message.timestamp
       }
       
@@ -908,6 +928,20 @@ function App() {
         {/* Sidebar Footer */}
         <div className="p-4 border-t border-dark-border/30 space-y-3">
           <button 
+            onClick={() => setSettingsOpen(true)}
+            className="
+            w-full flex items-center gap-2
+            bg-dark-elevated border border-dark-border
+            text-text-secondary rounded-lg px-4 py-2.5
+            hover:bg-dark-surface hover:text-text-primary
+            hover:border-violet-500/30
+            transition-all duration-200
+          ">
+            <SettingsIcon className="w-4 h-4" />
+            <span className="text-sm font-medium">AI Settings</span>
+          </button>
+          
+          <button 
             onClick={() => setGalleryOpen(true)}
             className="
             w-full flex items-center justify-between
@@ -1070,7 +1104,7 @@ function App() {
                 const currentChat = chatHistory.find(c => c.id === activeChatId)
                 if (!currentChat?.metadata?.isDrift) return null
                 
-                const parentChat = chatHistory.find(c => c.id === currentChat.metadata.parentChatId)
+                const parentChat = chatHistory.find(c => c.id === currentChat.metadata?.parentChatId)
                 const parentTitle = parentChat?.title || 'Previous conversation'
                 
                 return (
@@ -1080,7 +1114,7 @@ function App() {
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-sm">🌀</span>
                           <span className="text-sm text-text-primary font-medium">
-                            Drift exploration of "{currentChat.metadata.selectedText}"
+                            Drift exploration of "{currentChat.metadata?.selectedText}"
                           </span>
                         </div>
                         <span className="text-xs text-text-muted ml-6">
@@ -1089,11 +1123,11 @@ function App() {
                       </div>
                       <button
                         onClick={() => {
-                          if (currentChat.metadata.parentChatId) {
+                          if (currentChat.metadata?.parentChatId) {
                             switchChat(currentChat.metadata.parentChatId)
                             // After switching, scroll to the source message
                             setTimeout(() => {
-                              const sourceElement = document.querySelector(`[data-message-id="${currentChat.metadata.sourceMessageId}"]`)
+                              const sourceElement = document.querySelector(`[data-message-id="${currentChat.metadata?.sourceMessageId}"]`)
                               if (sourceElement) {
                                 sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
                                 // Add a highlight effect
@@ -1370,10 +1404,17 @@ function App() {
         parentChatId={activeChatId}
         onSaveAsChat={handleSaveDriftAsChat}
         onPushToMain={handlePushDriftToMain}
-        useOpenRouter={useOpenRouter}
-        selectedModel={selectedModel}
+        aiSettings={aiSettings}
       />
       
+      {/* Settings Modal */}
+      <Settings
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSave={handleSaveSettings}
+        currentSettings={aiSettings}
+      />
+
       {/* Snippet Gallery */}
       <SnippetGallery
         isOpen={galleryOpen}
@@ -1433,8 +1474,7 @@ function App() {
               items.push({
                 label: 'Go to Source',
                 icon: <ExternalLink className="w-4 h-4" />,
-                action: () => handleGoToSource(contextMenu.chatId),
-                divider: true
+                action: () => handleGoToSource(contextMenu.chatId)
               })
             }
             
@@ -1442,9 +1482,7 @@ function App() {
             items.push({
               label: 'Delete',
               icon: <Trash2 className="w-4 h-4" />,
-              action: () => handleDeleteChat(contextMenu.chatId),
-              danger: true,
-              divider: true
+              action: () => handleDeleteChat(contextMenu.chatId)
             })
             
             return items

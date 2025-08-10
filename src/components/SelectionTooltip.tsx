@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Sparkles, Bookmark } from 'lucide-react'
+import { Bookmark } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
 interface SelectionTooltipProps {

@@ -24,40 +24,59 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 export const OPENROUTER_MODELS = {
   OSS: 'openai/gpt-oss-20b:free',
-  MISTRAL_SMALL: 'mistralai/mistral-small-3.2-24b-instruct:free'  // Mistral Small free tier
+  MISTRAL_SMALL: 'mistralai/mistral-7b-instruct:free'  // Mistral 7B free tier
 } as const
 
 export type OpenRouterModel = typeof OPENROUTER_MODELS[keyof typeof OPENROUTER_MODELS]
 
-export async function checkOpenRouterConnection(model: OpenRouterModel = OPENROUTER_MODELS.OSS): Promise<boolean> {
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY
-  
+export async function checkOpenRouterConnection(apiKey: string, model: OpenRouterModel = OPENROUTER_MODELS.OSS): Promise<boolean> {
   console.log('Checking OpenRouter connection...')
   console.log('Model:', model)
   console.log('API Key present:', !!apiKey)
   console.log('API Key length:', apiKey?.length)
+  console.log('API Key first chars:', apiKey ? apiKey.substring(0, 10) + '...' : 'none')
   
-  if (!apiKey) {
-    console.warn('OpenRouter API key not configured')
+  if (!apiKey || apiKey.trim() === '') {
+    console.warn('OpenRouter API key not configured or empty')
     return false
   }
   
   try {
+    // OpenRouter requires specific headers
+    const trimmedKey = apiKey.trim()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'http://localhost:5174',  // Use explicit localhost URL
+      'X-Title': 'Drift AI Chat'
+    }
+    
+    // Only add Authorization header if API key exists
+    if (trimmedKey) {
+      headers['Authorization'] = `Bearer ${trimmedKey}`
+    }
+    
+    console.log('Request headers (without full key):', {
+      ...headers,
+      'Authorization': `Bearer ${apiKey.substring(0, 10)}...`
+    })
+    
+    // Add timeout to prevent hanging
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+    
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'Drift AI Chat'
-      },
+      headers,
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: 'test' }],
         max_tokens: 1,
         stream: false
-      })
+      }),
+      signal: controller.signal
     })
+    
+    clearTimeout(timeoutId)
     
     console.log('OpenRouter connection response:', response.status, response.ok)
     
@@ -68,11 +87,16 @@ export async function checkOpenRouterConnection(model: OpenRouterModel = OPENROU
         const errorJson = JSON.parse(errorText)
         console.error('Error details:', errorJson)
         
-        // If it's a 404 (model not found), return false but don't throw
-        if (response.status === 404) {
+        // Common error messages
+        if (response.status === 401) {
+          console.error('Authentication failed. Please check your API key.')
+        } else if (response.status === 404) {
           console.warn(`Model ${model} not available. This might be due to regional restrictions or account limitations.`)
-          return false
+        } else if (response.status === 429) {
+          console.warn('Rate limit exceeded. Please wait a moment and try again.')
         }
+        
+        return false
       } catch (e) {
         // Not JSON, already logged as text
       }
@@ -81,6 +105,13 @@ export async function checkOpenRouterConnection(model: OpenRouterModel = OPENROU
     return response.ok
   } catch (error) {
     console.error('OpenRouter connection check failed:', error)
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.error('Connection check timed out after 5 seconds')
+      } else if (error.message.includes('Failed to fetch')) {
+        console.error('Network error. Check if you have internet connection and CORS is not blocking the request.')
+      }
+    }
     return false
   }
 }
@@ -88,18 +119,18 @@ export async function checkOpenRouterConnection(model: OpenRouterModel = OPENROU
 export async function sendMessageToOpenRouter(
   messages: ChatMessage[],
   onChunk: (chunk: string) => void,
+  apiKey: string,
   signal?: AbortSignal,
   model: OpenRouterModel = OPENROUTER_MODELS.OSS
 ): Promise<void> {
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY
-  
   console.log('Sending message to OpenRouter...')
   console.log('Using model:', model)
   console.log('API Key present:', !!apiKey)
+  console.log('API Key first chars:', apiKey ? apiKey.substring(0, 10) + '...' : 'none')
   console.log('Messages:', messages)
   
-  if (!apiKey) {
-    throw new Error('OpenRouter API key not configured. Please add VITE_OPENROUTER_API_KEY to your .env file')
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error('OpenRouter API key not configured. Please configure it in Settings.')
   }
   
   try {
@@ -113,14 +144,20 @@ export async function sendMessageToOpenRouter(
     
     console.log('Request body:', requestBody)
     
+    const trimmedKey = apiKey.trim()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'http://localhost:5174',
+      'X-Title': 'Drift AI Chat'
+    }
+    
+    if (trimmedKey) {
+      headers['Authorization'] = `Bearer ${trimmedKey}`
+    }
+    
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'Drift AI Chat'
-      },
+      headers,
       body: JSON.stringify(requestBody),
       signal
     })

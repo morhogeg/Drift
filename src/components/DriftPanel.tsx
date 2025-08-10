@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Sparkles, Square, ArrowLeft } from 'lucide-react'
-import { sendMessageToOpenRouter, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from '../services/openrouter'
+import { X, Save, Send, Square, ArrowLeft } from 'lucide-react'
+import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { AISettings } from './Settings'
 
 interface Message {
   id: string
@@ -21,21 +22,19 @@ interface DriftPanelProps {
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
   onPushToMain?: (messages: Message[]) => void
-  useOpenRouter?: boolean
-  selectedModel?: OpenRouterModel
+  aiSettings: AISettings
 }
 
 export default function DriftPanel({
   isOpen,
   onClose,
   selectedText,
-  contextMessages,
+  contextMessages: _contextMessages,
   sourceMessageId,
   parentChatId,
   onSaveAsChat,
   onPushToMain,
-  useOpenRouter = true,
-  selectedModel = OPENROUTER_MODELS.OSS
+  aiSettings
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -104,7 +103,7 @@ export default function DriftPanel({
         { role: 'user' as const, content: message }
       ]
       
-      console.log('Drift panel - sending message with OpenRouter:', useOpenRouter)
+      console.log('Drift panel - sending message with OpenRouter:', aiSettings.useOpenRouter)
       console.log('Drift panel - API messages:', apiMessages)
       
       try {
@@ -126,7 +125,7 @@ export default function DriftPanel({
         setDriftOnlyMessages(prev => [...prev, aiMessage])
         
         // Stream the response using the selected API
-        if (useOpenRouter) {
+        if (aiSettings.useOpenRouter) {
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
@@ -146,8 +145,9 @@ export default function DriftPanel({
                 )
               )
             },
+            aiSettings.openRouterApiKey,
             abortController.signal,
-            selectedModel
+            aiSettings.openRouterModel
           )
         } else {
           await sendMessageToOllama(
@@ -169,7 +169,9 @@ export default function DriftPanel({
                 )
               )
             },
-            abortController.signal
+            abortController.signal,
+            aiSettings.ollamaUrl,
+            aiSettings.ollamaModel
           )
         }
       } catch (error) {

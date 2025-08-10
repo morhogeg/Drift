@@ -1,9 +1,3 @@
-import { Ollama } from 'ollama'
-
-const ollama = new Ollama({
-  host: 'http://localhost:11434'
-})
-
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -12,29 +6,56 @@ export interface ChatMessage {
 export async function sendMessageToOllama(
   messages: ChatMessage[],
   onStream?: (chunk: string) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  ollamaUrl: string = 'http://localhost:11434',
+  modelName: string = 'llama2'
 ): Promise<string> {
   try {
-    const response = await ollama.chat({
-      model: 'gpt-oss:20b',
-      messages: messages,
-      stream: true,
-      options: {
-        signal: abortSignal
-      }
+    const response = await fetch(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages: messages,
+        stream: true
+      }),
+      signal: abortSignal
     })
 
+    if (!response.ok) {
+      throw new Error(`Ollama API error: ${response.status} ${response.statusText}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
     let fullResponse = ''
-    
-    for await (const part of response) {
-      if (abortSignal?.aborted) {
-        break
-      }
-      
-      if (part.message?.content) {
-        fullResponse += part.message.content
-        if (onStream) {
-          onStream(part.message.content)
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const json = JSON.parse(line)
+            if (json.message?.content) {
+              fullResponse += json.message.content
+              if (onStream) {
+                onStream(json.message.content)
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing Ollama response:', e)
+          }
         }
       }
     }
@@ -49,27 +70,30 @@ export async function sendMessageToOllama(
     }
     
     // Fallback to a helpful error message
-    if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
-      throw new Error('Ollama is not running. Please start Ollama with: ollama serve')
+    if (error instanceof Error && error.message.includes('fetch')) {
+      throw new Error('Cannot connect to Ollama. Please ensure Ollama is running with: ollama serve')
     }
     
     throw error
   }
 }
 
-export async function checkOllamaConnection(): Promise<boolean> {
+export async function checkOllamaConnection(ollamaUrl: string = 'http://localhost:11434'): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:11434/api/tags')
+    const response = await fetch(`${ollamaUrl}/api/tags`)
     return response.ok
   } catch {
     return false
   }
 }
 
-export async function listAvailableModels(): Promise<string[]> {
+export async function listAvailableModels(ollamaUrl: string = 'http://localhost:11434'): Promise<string[]> {
   try {
-    const list = await ollama.list()
-    return list.models.map(model => model.name)
+    const response = await fetch(`${ollamaUrl}/api/tags`)
+    if (!response.ok) return []
+    
+    const data = await response.json()
+    return data.models?.map((model: any) => model.name) || []
   } catch {
     return []
   }
