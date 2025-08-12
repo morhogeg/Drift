@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Square, ArrowLeft } from 'lucide-react'
+import { X, Save, Send, Square, ArrowLeft, Check } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
@@ -21,7 +21,7 @@ interface DriftPanelProps {
   sourceMessageId: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[]) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string) => void
   aiSettings: AISettings
 }
 
@@ -40,6 +40,8 @@ export default function DriftPanel({
   const [messages, setMessages] = useState<Message[]>([])
   const [driftOnlyMessages, setDriftOnlyMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  const [pushedToMain, setPushedToMain] = useState(false)
+  const [savedAsChat, setSavedAsChat] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -59,6 +61,10 @@ export default function DriftPanel({
       
       // Set drift-only messages (just the system message to start)
       setDriftOnlyMessages([systemMessage])
+      
+      // Reset states when opening new drift
+      setPushedToMain(false)
+      setSavedAsChat(false)
     }
   }, [isOpen, selectedText])
 
@@ -126,6 +132,13 @@ export default function DriftPanel({
         
         // Stream the response using the selected API
         if (aiSettings.useOpenRouter) {
+          // ALWAYS use env variable if available, fallback to settings
+          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+          
+          if (!apiKey) {
+            throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
+          }
+          
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
@@ -145,7 +158,7 @@ export default function DriftPanel({
                 )
               )
             },
-            aiSettings.openRouterApiKey,
+            apiKey,
             abortController.signal,
             aiSettings.openRouterModel
           )
@@ -216,7 +229,9 @@ export default function DriftPanel({
     )
     
     onSaveAsChat(messagesToSave, title, metadata)
-    onClose()
+    setSavedAsChat(true)
+    // Don't close - let user decide if they want to continue or close
+    // onClose()
   }
   
   const handlePushToMain = () => {
@@ -227,87 +242,109 @@ export default function DriftPanel({
       )
       
       if (messagesToPush.length > 0) {
-        onPushToMain(messagesToPush)
-        onClose()
+        onPushToMain(messagesToPush, selectedText, sourceMessageId)
+        setPushedToMain(true)
+        // Don't close - let user decide if they also want to save as chat
+        // onClose()
       }
     }
   }
 
   return (
     <div className={`
-      fixed top-0 right-0 h-full z-30
+      fixed top-0 right-0 h-full z-20
+      w-[450px]
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
     `}>
-      {/* Backdrop */}
-      {isOpen && (
-        <div 
-          className="fixed inset-0 bg-black/30 backdrop-blur-sm"
-          onClick={onClose}
-        />
-      )}
-      
       {/* Panel */}
       <div className={`
-        relative w-[500px] h-full bg-dark-surface/95 backdrop-blur-md
+        w-full h-full bg-dark-surface/95 backdrop-blur-md
         border-l border-accent-violet/30 shadow-2xl
         flex flex-col overflow-hidden
         ${isOpen ? 'shadow-[0_0_50px_rgba(168,85,247,0.2)]' : ''}
       `}>
-        {/* Header */}
-        <div className="p-4 border-b border-dark-border/30 bg-dark-elevated/50">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-gradient-to-br from-accent-pink/20 to-accent-violet/20 border border-accent-violet/30">
-                <span className="text-lg">🌀</span>
+        {/* Header - matching main chat header */}
+        <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
+          <div className="px-6 py-4 flex items-center justify-between">
+            <div className="flex-1 flex items-center justify-center">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <span className="text-2xl">🌀</span>
+                  <div className="absolute inset-0 blur-lg bg-accent-violet/50 animate-pulse" />
+                </div>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">Drift Mode</h2>
               </div>
-              <h2 className="text-lg font-semibold text-text-primary">Drift Mode</h2>
             </div>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-dark-elevated rounded-lg transition-colors"
+              className="absolute right-6 p-2 hover:bg-dark-elevated rounded-lg transition-colors"
             >
               <X className="w-5 h-5 text-text-muted" />
             </button>
           </div>
           
-          {/* Selected Text Context */}
-          <div className="p-3 bg-dark-bg/50 rounded-lg border border-accent-violet/20">
-            <p className="text-sm text-accent-violet font-medium mb-1">Exploring:</p>
-            <p className="text-sm text-text-secondary italic">"{selectedText}"</p>
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={handlePushToMain}
-              disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
-              className="flex-1 flex items-center justify-center gap-2
-                bg-gradient-to-r from-accent-pink/20 to-accent-violet/20
-                border border-accent-pink/30
-                text-text-primary rounded-lg px-3 py-2
-                hover:from-accent-pink/30 hover:to-accent-violet/30
-                hover:border-accent-pink/50
-                disabled:opacity-50 disabled:cursor-not-allowed
-                transition-all duration-200"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="text-sm">Push to Main</span>
-            </button>
+          {/* Selected Text Context and Action Buttons */}
+          <div className="px-6 pb-4">
+            <div className="p-3 bg-dark-bg/50 rounded-lg border border-accent-violet/20 mb-3">
+              <p className="text-sm text-accent-violet font-medium mb-1">Exploring:</p>
+              <p className="text-sm text-text-secondary italic">"{selectedText}"</p>
+            </div>
             
-            <button
-              onClick={handleSaveAsChat}
-              className="flex-1 flex items-center justify-center gap-2
-                bg-dark-elevated/50 border border-accent-violet/30
-                text-text-primary rounded-lg px-3 py-2
-                hover:bg-accent-violet/10 hover:border-accent-violet/50
-                transition-all duration-200"
-            >
-              <Save className="w-4 h-4" />
-              <span className="text-sm">Save as Chat</span>
-            </button>
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              <button
+                onClick={handlePushToMain}
+                disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                className={`flex-1 flex items-center justify-center gap-2
+                  ${pushedToMain 
+                    ? 'bg-green-500/20 border-green-500/30 hover:bg-green-500/30 hover:border-green-500/50' 
+                    : 'bg-gradient-to-r from-accent-pink/20 to-accent-violet/20 border-accent-pink/30 hover:from-accent-pink/30 hover:to-accent-violet/30 hover:border-accent-pink/50'
+                  }
+                  border text-text-primary rounded-lg px-3 py-2
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  transition-all duration-200`}
+              >
+                {pushedToMain ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span className="text-sm">Pushed to Main</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="text-sm">Push to Main</span>
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={handleSaveAsChat}
+                disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                className={`flex-1 flex items-center justify-center gap-2
+                  ${savedAsChat 
+                    ? 'bg-green-500/20 border-green-500/30 hover:bg-green-500/30 hover:border-green-500/50' 
+                    : 'bg-dark-elevated/50 border border-accent-violet/30 hover:bg-accent-violet/10 hover:border-accent-violet/50'
+                  }
+                  border text-text-primary rounded-lg px-3 py-2
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  transition-all duration-200`}
+              >
+                {savedAsChat ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span className="text-sm">Saved as Chat</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span className="text-sm">Save as Chat</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
+        </header>
         
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -380,61 +417,77 @@ export default function DriftPanel({
           <div ref={messagesEndRef} />
         </div>
         
-        {/* Input */}
-        <div className="p-4 border-t border-dark-border/30 bg-dark-elevated/30">
-          <div className="relative flex gap-2">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && !isTyping && sendMessage()}
-              placeholder={isTyping ? "AI is responding..." : "Explore this drift..."}
-              disabled={isTyping}
-              className="
-                flex-1 bg-dark-bg/70 text-text-primary 
-                rounded-full px-4 py-3 pr-12
-                border border-accent-violet/30
-                focus:outline-none focus:border-accent-violet/50
-                focus:shadow-[0_0_0_2px_rgba(168,85,247,0.2)]
-                placeholder:text-text-muted
-                transition-all duration-200
-                disabled:opacity-70
-              "
-            />
-            {isTyping ? (
-              <button
-                onClick={stopGeneration}
-                className="
-                  absolute right-2 top-1/2 -translate-y-1/2
-                  w-8 h-8 rounded-full
-                  bg-gradient-to-br from-accent-pink to-accent-violet
-                  text-white shadow-lg shadow-accent-violet/30
-                  flex items-center justify-center
-                  hover:scale-105 active:scale-95
-                  transition-all duration-200
-                "
-                title="Stop generating"
-              >
-                <Square className="w-3.5 h-3.5" fill="currentColor" />
-              </button>
-            ) : (
-              <button
-                onClick={sendMessage}
-                disabled={!message.trim()}
-                className="
-                  absolute right-2 top-1/2 -translate-y-1/2
-                  w-8 h-8 rounded-full
-                  bg-gradient-to-br from-accent-pink to-accent-violet
-                  text-white shadow-lg shadow-accent-violet/30
-                  flex items-center justify-center
-                  hover:scale-105 active:scale-95
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  transition-all duration-200
-                "
-              >
-                <Send className="w-3.5 h-3.5 ml-0.5" />
-              </button>
-            )}
+        {/* Input - matching main chat input */}
+        <div className="relative z-10 p-4 bg-gradient-to-t from-dark-bg to-dark-surface/50 backdrop-blur-sm">
+          <div className="max-w-4xl mx-auto">
+            <div className="relative flex gap-3 items-end">
+              <div className="flex-1 relative">
+                <textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                      e.preventDefault()
+                      sendMessage()
+                    }
+                  }}
+                  placeholder={isTyping ? "AI is responding..." : "Explore this drift..."}
+                  disabled={isTyping}
+                  rows={1}
+                  className="
+                    w-full bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
+                    rounded-2xl px-6 py-4 pr-14
+                    border border-dark-border/50
+                    focus:outline-none focus:border-accent-violet/50
+                    focus:shadow-[0_0_0_2px_rgba(168,85,247,0.2)]
+                    placeholder:text-text-muted
+                    transition-all duration-300
+                    disabled:opacity-70
+                    resize-none
+                    min-h-[56px] max-h-[200px]
+                    overflow-y-auto
+                    custom-scrollbar
+                  "
+                  style={{
+                    height: '56px'
+                  }}
+                />
+                {isTyping ? (
+                  <button
+                    onClick={stopGeneration}
+                    className="
+                      absolute right-3 bottom-3
+                      w-10 h-10 rounded-full
+                      bg-gradient-to-br from-accent-pink to-accent-violet
+                      text-white shadow-lg shadow-accent-violet/30
+                      flex items-center justify-center
+                      hover:scale-105 active:scale-95
+                      transition-all duration-200
+                    "
+                    title="Stop generating"
+                  >
+                    <Square className="w-4 h-4" fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                    className="
+                      absolute right-3 bottom-3
+                      w-10 h-10 rounded-full
+                      bg-gradient-to-br from-accent-pink to-accent-violet
+                      text-white shadow-lg shadow-accent-violet/30
+                      flex items-center justify-center
+                      hover:scale-105 active:scale-95
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                      transition-all duration-200
+                    "
+                  >
+                    <Send className="w-4 h-4 ml-0.5" />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

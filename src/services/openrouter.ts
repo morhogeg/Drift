@@ -23,8 +23,7 @@ export interface OpenRouterResponse {
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 export const OPENROUTER_MODELS = {
-  OSS: 'openai/gpt-oss-20b:free',
-  MISTRAL_SMALL: 'mistralai/mistral-7b-instruct:free'  // Mistral 7B free tier
+  OSS: 'openai/gpt-oss-20b:free'
 } as const
 
 export type OpenRouterModel = typeof OPENROUTER_MODELS[keyof typeof OPENROUTER_MODELS]
@@ -46,7 +45,7 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
     const trimmedKey = apiKey.trim()
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:5174',  // Use explicit localhost URL
+      'HTTP-Referer': window.location.origin || 'http://localhost:3000',
       'X-Title': 'Drift AI Chat'
     }
     
@@ -147,13 +146,25 @@ export async function sendMessageToOpenRouter(
     const trimmedKey = apiKey.trim()
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:5174',
+      'HTTP-Referer': window.location.origin || 'http://localhost:3000',
       'X-Title': 'Drift AI Chat'
     }
     
     if (trimmedKey) {
       headers['Authorization'] = `Bearer ${trimmedKey}`
+      console.log('Sending with Authorization header')
+    } else {
+      console.error('NO API KEY BEING SENT!')
     }
+    
+    console.log('Full request details:', {
+      url: OPENROUTER_API_URL,
+      headers: {
+        ...headers,
+        'Authorization': headers['Authorization'] ? `Bearer ${trimmedKey.substring(0, 10)}...` : 'MISSING'
+      },
+      body: requestBody
+    })
     
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',

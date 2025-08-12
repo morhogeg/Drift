@@ -207,14 +207,9 @@ export default function Settings({ isOpen, onClose, onSave, currentSettings }: S
                   <label className="block text-sm text-[#9ca3af] mb-2">
                     Model
                   </label>
-                  <select
-                    value={settings.openRouterModel}
-                    onChange={(e) => handleChange('openRouterModel', e.target.value as OpenRouterModel)}
-                    className="w-full px-4 py-2 bg-[#0a0a0a] border border-[#333333] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                  >
-                    <option value={OPENROUTER_MODELS.OSS}>OpenAI OSS-20B (Free)</option>
-                    <option value={OPENROUTER_MODELS.MISTRAL_SMALL}>Mistral 7B Instruct (Free)</option>
-                  </select>
+                  <div className="w-full px-4 py-2 bg-[#0a0a0a] border border-[#333333] rounded-lg text-white">
+                    OpenAI OSS-20B (Free)
+                  </div>
                 </div>
 
                 <div className="flex items-start gap-2 p-3 bg-[#0a0a0a] rounded-lg">

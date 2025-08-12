@@ -18,6 +18,10 @@ export const settingsStorage = {
       if (!stored) return defaultSettings
       
       const parsed = JSON.parse(stored)
+      // If the stored API key is empty but we have one in env, use the env one
+      if (!parsed.openRouterApiKey && defaultSettings.openRouterApiKey) {
+        parsed.openRouterApiKey = defaultSettings.openRouterApiKey
+      }
       // Merge with defaults to ensure all fields exist
       return { ...defaultSettings, ...parsed }
     } catch (error) {

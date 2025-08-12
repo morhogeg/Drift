@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
@@ -21,6 +21,12 @@ interface Message {
   driftInfo?: {
     selectedText: string
     driftChatId: string
+  }
+  isDriftPush?: boolean  // Marks messages that were pushed from drift
+  driftPushMetadata?: {   // Metadata for pushed drift messages
+    selectedText: string
+    sourceMessageId: string
+    parentChatId: string
   }
 }
 
@@ -91,7 +97,14 @@ function App() {
   
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [aiSettings, setAiSettings] = useState<AISettings>(settingsStorage.get())
+  const [aiSettings, setAiSettings] = useState<AISettings>(() => {
+    const settings = settingsStorage.get()
+    // Ensure we always have the API key from env if settings don't have it
+    if (!settings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
+      settings.openRouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY
+    }
+    return settings
+  })
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -187,12 +200,38 @@ function App() {
       }
       try {
         if (aiSettings.useOpenRouter) {
-          const connected = await checkOpenRouterConnection(aiSettings.openRouterApiKey, aiSettings.openRouterModel)
+          // ALWAYS use env variable if available
+          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+          console.log('Attempting to connect with OpenRouter:', {
+            hasEnvKey: !!import.meta.env.VITE_OPENROUTER_API_KEY,
+            hasSettingsKey: !!aiSettings.openRouterApiKey,
+            keyLength: apiKey?.length
+          })
+          
+          // If no API key is configured, open settings automatically
+          if (!apiKey || apiKey.trim() === '') {
+            console.log('No API key found, opening settings...')
+            setSettingsOpen(true)
+            setApiConnected(false)
+            setIsConnecting(false)
+            return
+          }
+          
+          const connected = await checkOpenRouterConnection(apiKey, aiSettings.openRouterModel)
           setApiConnected(connected)
+          
+          // If connection failed and no env key, open settings
+          if (!connected && !import.meta.env.VITE_OPENROUTER_API_KEY) {
+            setSettingsOpen(true)
+          }
         } else {
+          console.log('Attempting to connect with Ollama:', aiSettings.ollamaUrl)
           const connected = await checkOllamaConnection(aiSettings.ollamaUrl)
           setApiConnected(connected)
         }
+      } catch (error) {
+        console.error('Connection check error:', error)
+        setApiConnected(false)
       } finally {
         if (showConnecting) {
           setIsConnecting(false)
@@ -339,6 +378,13 @@ function App() {
         
         // Stream the response using the selected API
         if (aiSettings.useOpenRouter) {
+          // ALWAYS use env variable if available, fallback to settings
+          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+          
+          if (!apiKey) {
+            throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
+          }
+          
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
@@ -354,7 +400,7 @@ function App() {
                 )
               )
             },
-            aiSettings.openRouterApiKey,
+            apiKey,
             abortController.signal,
             aiSettings.openRouterModel
           )
@@ -447,6 +493,10 @@ function App() {
   }
 
   const handleSaveSettings = (newSettings: AISettings) => {
+    // If API key is empty, use the one from environment
+    if (!newSettings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
+      newSettings.openRouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY
+    }
     console.log('Saving settings:', newSettings)
     setAiSettings(newSettings)
     settingsStorage.save(newSettings)
@@ -665,18 +715,54 @@ function App() {
     )
   }
   
-  const handlePushDriftToMain = (driftMessages: Message[]) => {
+  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string) => {
     // Add a separator message to indicate where drift was pushed
     const separatorMessage: Message = {
       id: 'drift-push-' + Date.now(),
-      text: `📌 *Drift exploration of "${driftContext.selectedText}" pushed to main chat:*`,
+      text: `📌 *Drift exploration of "${selectedText}" pushed to main chat:*`,
       isUser: false,
-      timestamp: new Date()
+      timestamp: new Date(),
+      isDriftPush: true,
+      driftPushMetadata: {
+        selectedText: selectedText,
+        sourceMessageId: sourceMessageId,
+        parentChatId: activeChatId
+      }
     }
     
-    // Update messages with the drift content
-    const updatedMessages = [...messages, separatorMessage, ...driftMessages]
+    // First, update the original message to mark it as having a drift
+    const driftChatId = 'drift-pushed-' + Date.now()
+    const messagesWithDriftMarked = messages.map(msg => 
+      msg.id === sourceMessageId 
+        ? { 
+            ...msg, 
+            hasDrift: true,
+            driftInfo: {
+              selectedText: selectedText,
+              driftChatId: driftChatId
+            }
+          }
+        : msg
+    )
+    
+    // Add metadata to all pushed drift messages
+    const driftMessagesWithMetadata = driftMessages.map(msg => ({
+      ...msg,
+      isDriftPush: true,
+      driftPushMetadata: {
+        selectedText: selectedText,
+        sourceMessageId: sourceMessageId,
+        parentChatId: activeChatId
+      }
+    }))
+    
+    // Then add the pushed drift messages
+    const updatedMessages = [...messagesWithDriftMarked, separatorMessage, ...driftMessagesWithMetadata]
     setMessages(updatedMessages)
+    
+    // Get the last message text safely
+    const lastDriftMessage = driftMessagesWithMetadata[driftMessagesWithMetadata.length - 1]
+    const lastMessageText = lastDriftMessage?.text || 'Drift pushed'
     
     // Update chat history
     setChatHistory(prevHistory => 
@@ -685,14 +771,14 @@ function App() {
           ? { 
               ...chat, 
               messages: updatedMessages,
-              lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift pushed')
+              lastMessage: stripMarkdown(lastMessageText)
             }
           : chat
       )
     )
     
-    // Close drift panel
-    setDriftOpen(false)
+    // Don't close drift panel - let user decide if they also want to save it as a chat
+    // setDriftOpen(false)
   }
 
   // Context menu handlers
@@ -792,6 +878,68 @@ function App() {
     if (chat?.metadata?.parentChatId && chat?.metadata?.sourceMessageId) {
       handleNavigateToSource(chat.metadata.parentChatId, chat.metadata.sourceMessageId)
     }
+  }
+
+  const handleSavePushedDriftAsChat = (msg: Message) => {
+    if (!msg.isDriftPush || !msg.driftPushMetadata) return
+    
+    // Find all drift messages that were pushed together (they share the same metadata)
+    const driftMessages = messages.filter(m => 
+      m.isDriftPush && 
+      m.driftPushMetadata?.sourceMessageId === msg.driftPushMetadata?.sourceMessageId &&
+      !m.text.startsWith('📌 *Drift exploration')  // Exclude the separator message
+    )
+    
+    if (driftMessages.length === 0) return
+    
+    // Create a new chat with the drift messages
+    const newChatId = Date.now().toString()
+    const title = `Drift: ${msg.driftPushMetadata.selectedText.slice(0, 30)}${msg.driftPushMetadata.selectedText.length > 30 ? '...' : ''}`
+    
+    const newChat: ChatSession = {
+      id: newChatId,
+      title,
+      messages: driftMessages.map(m => ({
+        ...m,
+        isDriftPush: false,  // Remove the drift push marker
+        driftPushMetadata: undefined
+      })),
+      lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift conversation'),
+      createdAt: new Date(),
+      metadata: {
+        isDrift: true,
+        parentChatId: msg.driftPushMetadata.parentChatId,
+        sourceMessageId: msg.driftPushMetadata.sourceMessageId,
+        selectedText: msg.driftPushMetadata.selectedText
+      }
+    }
+    
+    setChatHistory(prev => [newChat, ...prev])
+    
+    // Update the source message to include drift info pointing to the new chat
+    const updatedMessages = messages.map(m => 
+      m.id === msg.driftPushMetadata?.sourceMessageId 
+        ? { 
+            ...m, 
+            hasDrift: true,
+            driftInfo: {
+              selectedText: msg.driftPushMetadata.selectedText,
+              driftChatId: newChatId
+            }
+          }
+        : m
+    )
+    
+    setMessages(updatedMessages)
+    
+    // Update current chat history
+    setChatHistory(prevHistory => 
+      prevHistory.map(chat => 
+        chat.id === activeChatId 
+          ? { ...chat, messages: updatedMessages }
+          : chat
+      )
+    )
   }
 
   // Sort chats with pinned at top
@@ -981,6 +1129,7 @@ function App() {
         flex-1 flex flex-col relative
         transition-all duration-300 ease-in-out
         ${sidebarOpen ? 'ml-[300px]' : 'ml-0'}
+        ${driftOpen ? 'mr-[450px]' : 'mr-0'}
       `}>
         {/* Header with Drift branding */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
@@ -1027,7 +1176,6 @@ function App() {
                 >
                   <optgroup label="OpenRouter (Free)">
                     <option value={OPENROUTER_MODELS.OSS}>OSS-20B</option>
-                    <option value={OPENROUTER_MODELS.MISTRAL_SMALL}>Mistral Small</option>
                   </optgroup>
                   <optgroup label="Local">
                     <option value="ollama">Ollama</option>
@@ -1068,7 +1216,7 @@ function App() {
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0 bg-dark-surface rounded-t-2xl shadow-inner">
-            <div className="h-full overflow-y-auto px-4 py-6 space-y-4 chat-messages-container">
+            <div className="h-full overflow-y-auto py-6 space-y-4 chat-messages-container">
               
               {/* Scroll to bottom button */}
               {showScrollButton && (
@@ -1093,7 +1241,7 @@ function App() {
                 </button>
               )}
               {messages.length === 0 && (
-                <div className={`flex flex-col items-center py-20 animate-fade-up ${sidebarOpen ? '-ml-[150px]' : '-ml-28'}`}>
+                <div className="flex flex-col items-center py-20 animate-fade-up max-w-5xl mx-auto">
                   <Sparkles className="w-12 h-12 text-accent-pink/50 mb-4" />
                   <p className="text-text-muted">Start a conversation with Drift AI</p>
                 </div>
@@ -1108,7 +1256,7 @@ function App() {
                 const parentTitle = parentChat?.title || 'Previous conversation'
                 
                 return (
-                  <div className="mb-4 p-3 bg-gradient-to-r from-accent-violet/10 to-accent-pink/10 rounded-lg border border-accent-violet/30">
+                  <div className="mb-4 p-3 bg-gradient-to-r from-accent-violet/10 to-accent-pink/10 rounded-lg border border-accent-violet/30 max-w-5xl mx-auto">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
@@ -1153,25 +1301,25 @@ function App() {
               
               {messages.map((msg, index) => (
                 msg.text ? (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group`}
-                    style={{ animationDelay: `${index * 50}ms` }}
-                    onMouseEnter={() => setHoveredMessageId(msg.id)}
-                    onMouseLeave={() => setHoveredMessageId(null)}
-                  >
+                  <div className="max-w-5xl mx-auto px-6" key={msg.id}>
                     <div
-                      className={`
-                        max-w-[70%] rounded-2xl px-5 py-3 relative
-                        ${msg.isUser 
-                          ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20' 
-                          : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
-                        }
-                        transition-all duration-200 hover:scale-[1.02]
-                        ${!msg.isUser ? 'select-text' : ''}
-                      `}
-                      data-message-id={msg.id}
+                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group`}
+                      style={{ animationDelay: `${index * 50}ms` }}
+                      onMouseEnter={() => setHoveredMessageId(msg.id)}
+                      onMouseLeave={() => setHoveredMessageId(null)}
                     >
+                      <div
+                        className={`
+                          max-w-[85%] rounded-2xl px-5 py-3 relative
+                          ${msg.isUser 
+                            ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20' 
+                            : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                          }
+                          transition-all duration-200 hover:scale-[1.02]
+                          ${!msg.isUser ? 'select-text' : ''}
+                        `}
+                        data-message-id={msg.id}
+                      >
                       {/* Message actions for AI messages */}
                       {!msg.isUser && hoveredMessageId === msg.id && (
                         <div className="absolute -top-8 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -1205,6 +1353,18 @@ function App() {
                                   : 'text-text-muted hover:text-cyan-400'}`}
                             />
                           </button>
+                          {/* Show "Save as Chat" button for drift pushed messages */}
+                          {msg.isDriftPush && !msg.text.startsWith('📌') && (
+                            <button
+                              onClick={() => handleSavePushedDriftAsChat(msg)}
+                              className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-accent-violet/50
+                                       hover:bg-accent-violet/10 hover:border-accent-violet/70 transition-all duration-200
+                                       shadow-lg hover:scale-110"
+                              title="Save drift as new chat"
+                            >
+                              <Save className="w-3.5 h-3.5 text-accent-violet" />
+                            </button>
+                          )}
                         </div>
                       )}
                       {msg.isUser ? (
@@ -1288,18 +1448,21 @@ function App() {
                           {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                         </ReactMarkdown>
                       )}
+                      </div>
                     </div>
                   </div>
                 ) : null
               ))}
               
               {isTyping && !streamingResponse && (
-                <div className="flex justify-start animate-fade-up">
-                  <div className="bg-dark-bubble border border-dark-border/50 rounded-2xl px-5 py-3 shadow-lg">
-                    <div className="flex gap-1">
-                      <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="max-w-5xl mx-auto px-6">
+                  <div className="flex justify-start animate-fade-up">
+                    <div className="bg-dark-bubble border border-dark-border/50 rounded-2xl px-5 py-3 shadow-lg">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1398,9 +1561,9 @@ function App() {
       <DriftPanel
         isOpen={driftOpen}
         onClose={handleCloseDrift}
-        selectedText={driftContext.selectedText}
-        contextMessages={driftContext.contextMessages}
-        sourceMessageId={driftContext.sourceMessageId}
+        selectedText={driftContext?.selectedText || ''}
+        contextMessages={driftContext?.contextMessages || []}
+        sourceMessageId={driftContext?.sourceMessageId || ''}
         parentChatId={activeChatId}
         onSaveAsChat={handleSaveDriftAsChat}
         onPushToMain={handlePushDriftToMain}
