@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Square, ArrowLeft, Check, Undo2 } from 'lucide-react'
+import { X, Save, Send, Square, ArrowLeft, Check, Undo2, Bookmark } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
+import { snippetStorage } from '../services/snippetStorage'
 
 interface Message {
   id: string
@@ -25,6 +26,7 @@ interface DriftPanelProps {
   onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
   onUndoPushToMain?: (sourceMessageId: string) => void
   onUndoSaveAsChat?: (chatId: string) => void
+  onSnippetCountUpdate?: () => void
   aiSettings: AISettings
 }
 
@@ -40,6 +42,7 @@ export default function DriftPanel({
   onUpdatePushedDriftSaveStatus,
   onUndoPushToMain,
   onUndoSaveAsChat,
+  onSnippetCountUpdate,
   aiSettings
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
@@ -49,6 +52,8 @@ export default function DriftPanel({
   const [pushedToMain, setPushedToMain] = useState(false)
   const [savedAsChat, setSavedAsChat] = useState(false)
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set())
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -73,6 +78,16 @@ export default function DriftPanel({
       setPushedToMain(false)
       setSavedAsChat(false)
       setSavedChatId(null)
+      
+      // Load saved message IDs for this drift
+      const allSnippets = snippetStorage.getAllSnippets()
+      const savedIds = new Set<string>()
+      allSnippets.forEach(snippet => {
+        if (snippet.source.messageId) {
+          savedIds.add(snippet.source.messageId)
+        }
+      })
+      setSavedMessageIds(savedIds)
     }
   }, [isOpen, selectedText])
 
@@ -83,6 +98,56 @@ export default function DriftPanel({
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  const handleToggleSaveMessage = (message: Message) => {
+    if (savedMessageIds.has(message.id)) {
+      // Unsave: Find and delete the snippet
+      const allSnippets = snippetStorage.getAllSnippets()
+      const snippetToDelete = allSnippets.find(s => 
+        s.source.messageId === message.id
+      )
+      
+      if (snippetToDelete) {
+        snippetStorage.deleteSnippet(snippetToDelete.id)
+        setSavedMessageIds(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(message.id)
+          return newSet
+        })
+        // Update the snippet count in the parent component
+        onSnippetCountUpdate?.()
+      }
+    } else {
+      // Save: Create new snippet
+      const driftTitle = savedChatId 
+        ? `Drift: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
+        : `Drift from: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
+      
+      const source = {
+        chatId: savedChatId || `drift-temp-${sourceMessageId}`,
+        chatTitle: driftTitle,
+        messageId: message.id,
+        isFullMessage: true,
+        timestamp: message.timestamp,
+        isDrift: true,
+        parentChatId,
+        selectedText
+      }
+      
+      snippetStorage.createSnippet(
+        message.text,
+        source,
+        {
+          tags: [],
+          starred: false
+        }
+      )
+      
+      setSavedMessageIds(prev => new Set(prev).add(message.id))
+      // Update the snippet count in the parent component
+      onSnippetCountUpdate?.()
+    }
+  }
 
   const sendMessage = async () => {
     if (message.trim()) {
@@ -394,19 +459,22 @@ export default function DriftPanel({
             msg.text ? (
               <div
                 key={msg.id}
-                className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} group`}
+                onMouseEnter={() => setHoveredMessageId(msg.id)}
+                onMouseLeave={() => setHoveredMessageId(null)}
               >
-                <div
-                  className={`
-                    max-w-[85%] rounded-2xl px-4 py-2.5
-                    ${msg.isUser 
-                      ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' 
-                      : msg.id.includes('system') 
-                        ? 'bg-gradient-to-br from-accent-violet/10 to-accent-pink/10 border border-accent-violet/30 text-text-secondary'
-                        : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'
-                    }
-                  `}
-                >
+                <div className="relative max-w-[85%]">
+                  <div
+                    className={`
+                      rounded-2xl px-4 py-2.5
+                      ${msg.isUser 
+                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' 
+                        : msg.id.includes('system') 
+                          ? 'bg-gradient-to-br from-accent-violet/10 to-accent-pink/10 border border-accent-violet/30 text-text-secondary'
+                          : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'
+                      }
+                    `}
+                  >
                   {msg.isUser ? (
                     <p className="text-sm leading-relaxed">{msg.text}</p>
                   ) : (
@@ -438,6 +506,32 @@ export default function DriftPanel({
                     >
                       {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                     </ReactMarkdown>
+                  )}
+                  </div>
+                  
+                  {/* Save to Snippet Button - positioned to the side */}
+                  {!msg.id.includes('system') && (
+                    <button
+                      onClick={() => handleToggleSaveMessage(msg)}
+                      className={`absolute ${msg.isUser ? '-left-9' : '-right-9'} 
+                                 top-2 p-1.5 rounded-lg
+                                 bg-dark-elevated border 
+                                 ${savedMessageIds.has(msg.id) 
+                                   ? 'border-cyan-500/50 bg-cyan-500/10' 
+                                   : 'border-dark-border/50'}
+                                 hover:bg-dark-surface hover:border-cyan-500/50 
+                                 transition-all duration-200
+                                 ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}
+                                 shadow-lg hover:scale-110`}
+                      title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
+                    >
+                      <Bookmark 
+                        className={`w-3.5 h-3.5 transition-colors
+                          ${savedMessageIds.has(msg.id) 
+                            ? 'text-cyan-400 fill-cyan-400' 
+                            : 'text-text-muted hover:text-cyan-400'}`} 
+                      />
+                    </button>
                   )}
                 </div>
               </div>

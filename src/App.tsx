@@ -1651,6 +1651,7 @@ function App() {
         onUpdatePushedDriftSaveStatus={handleUpdatePushedDriftSaveStatus}
         onUndoPushToMain={handleUndoPushToMain}
         onUndoSaveAsChat={handleUndoSaveAsChat}
+        onSnippetCountUpdate={() => setSnippetCount(snippetStorage.getAllSnippets().length)}
         aiSettings={aiSettings}
       />
       
