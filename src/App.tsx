@@ -27,6 +27,7 @@ interface Message {
     selectedText: string
     sourceMessageId: string
     parentChatId: string
+    wasSavedAsChat?: boolean
   }
 }
 
@@ -674,7 +675,8 @@ function App() {
   }
   
   const handleSaveDriftAsChat = (driftMessages: Message[], title: string, metadata: any) => {
-    const newChatId = 'drift-' + Date.now().toString()
+    // Use the ID from metadata if provided (for undo tracking), otherwise generate new one
+    const newChatId = metadata.id || 'drift-' + Date.now().toString()
     const newChat: ChatSession = {
       id: newChatId,
       title,
@@ -683,7 +685,8 @@ function App() {
       createdAt: new Date(),
       metadata: {
         ...metadata,
-        parentChatId: activeChatId
+        parentChatId: activeChatId,
+        id: newChatId
       }
     }
     
@@ -715,7 +718,80 @@ function App() {
     )
   }
   
-  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string) => {
+  const handleUndoPushToMain = (sourceMessageId: string) => {
+    // Remove all pushed drift messages from this source
+    const updatedMessages = messages.filter(msg => {
+      // Keep message if it's not a drift push OR if it's from a different source
+      return !msg.isDriftPush || msg.driftPushMetadata?.sourceMessageId !== sourceMessageId
+    })
+    
+    setMessages(updatedMessages)
+    
+    // Update chat history as well
+    setChatHistory(prevHistory =>
+      prevHistory.map(chat =>
+        chat.id === activeChatId
+          ? { ...chat, messages: updatedMessages }
+          : chat
+      )
+    )
+  }
+  
+  const handleUndoSaveAsChat = (chatId: string) => {
+    // Remove the saved drift chat from history
+    setChatHistory(prevHistory => prevHistory.filter(chat => 
+      !(chat.metadata?.id === chatId || chat.id === chatId)
+    ))
+    
+    // Also remove the drift info from the source message
+    const updatedMessages = messages.map(msg => {
+      if (msg.hasDrift && msg.driftInfo?.driftChatId === chatId) {
+        const { driftInfo, hasDrift, ...restMsg } = msg
+        return restMsg
+      }
+      return msg
+    })
+    
+    setMessages(updatedMessages)
+    
+    // Update chat history for current chat
+    setChatHistory(prevHistory =>
+      prevHistory.map(chat =>
+        chat.id === activeChatId
+          ? { ...chat, messages: updatedMessages }
+          : chat
+      )
+    )
+  }
+
+  const handleUpdatePushedDriftSaveStatus = (sourceMessageId: string) => {
+    // Update all pushed drift messages from this source to mark them as saved
+    const updatedMessages = messages.map(msg => {
+      if (msg.isDriftPush && msg.driftPushMetadata?.sourceMessageId === sourceMessageId) {
+        return {
+          ...msg,
+          driftPushMetadata: {
+            ...msg.driftPushMetadata,
+            wasSavedAsChat: true
+          }
+        }
+      }
+      return msg
+    })
+    
+    setMessages(updatedMessages)
+    
+    // Update chat history as well
+    setChatHistory(prevHistory =>
+      prevHistory.map(chat =>
+        chat.id === activeChatId
+          ? { ...chat, messages: updatedMessages }
+          : chat
+      )
+    )
+  }
+
+  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean) => {
     // Add a separator message to indicate where drift was pushed
     const separatorMessage: Message = {
       id: 'drift-push-' + Date.now(),
@@ -726,7 +802,8 @@ function App() {
       driftPushMetadata: {
         selectedText: selectedText,
         sourceMessageId: sourceMessageId,
-        parentChatId: activeChatId
+        parentChatId: activeChatId,
+        wasSavedAsChat: wasSavedAsChat
       }
     }
     
@@ -752,7 +829,8 @@ function App() {
       driftPushMetadata: {
         selectedText: selectedText,
         sourceMessageId: sourceMessageId,
-        parentChatId: activeChatId
+        parentChatId: activeChatId,
+        wasSavedAsChat: wasSavedAsChat
       }
     }))
     
@@ -1301,12 +1379,15 @@ function App() {
               
               {messages.map((msg, index) => (
                 msg.text ? (
-                  <div className="max-w-5xl mx-auto px-6" key={msg.id}>
+                  <div 
+                    className="max-w-5xl mx-auto px-6 group" 
+                    key={msg.id}
+                    onMouseEnter={() => !msg.isUser && setHoveredMessageId(msg.id)}
+                    onMouseLeave={() => setHoveredMessageId(null)}
+                  >
                     <div
-                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group`}
+                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative`}
                       style={{ animationDelay: `${index * 50}ms` }}
-                      onMouseEnter={() => setHoveredMessageId(msg.id)}
-                      onMouseLeave={() => setHoveredMessageId(null)}
                     >
                       <div
                         className={`
@@ -1321,8 +1402,8 @@ function App() {
                         data-message-id={msg.id}
                       >
                       {/* Message actions for AI messages */}
-                      {!msg.isUser && hoveredMessageId === msg.id && (
-                        <div className="absolute -top-8 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      {!msg.isUser && (
+                        <div className={`absolute -top-9 right-0 flex gap-1 transition-all duration-200 ${hoveredMessageId === msg.id ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
                           <button
                             onClick={() => handleCopyMessage(msg.text, msg.id)}
                             className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-dark-border/50
@@ -1353,8 +1434,8 @@ function App() {
                                   : 'text-text-muted hover:text-cyan-400'}`}
                             />
                           </button>
-                          {/* Show "Save as Chat" button for drift pushed messages */}
-                          {msg.isDriftPush && !msg.text.startsWith('📌') && (
+                          {/* Show "Save as Chat" button for drift pushed messages (only if not already saved) */}
+                          {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                             <button
                               onClick={() => handleSavePushedDriftAsChat(msg)}
                               className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-accent-violet/50
@@ -1567,6 +1648,9 @@ function App() {
         parentChatId={activeChatId}
         onSaveAsChat={handleSaveDriftAsChat}
         onPushToMain={handlePushDriftToMain}
+        onUpdatePushedDriftSaveStatus={handleUpdatePushedDriftSaveStatus}
+        onUndoPushToMain={handleUndoPushToMain}
+        onUndoSaveAsChat={handleUndoSaveAsChat}
         aiSettings={aiSettings}
       />
       

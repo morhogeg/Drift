@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Square, ArrowLeft, Check } from 'lucide-react'
+import { X, Save, Send, Square, ArrowLeft, Check, Undo2 } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
@@ -21,7 +21,10 @@ interface DriftPanelProps {
   sourceMessageId: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean) => void
+  onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
+  onUndoPushToMain?: (sourceMessageId: string) => void
+  onUndoSaveAsChat?: (chatId: string) => void
   aiSettings: AISettings
 }
 
@@ -34,6 +37,9 @@ export default function DriftPanel({
   parentChatId,
   onSaveAsChat,
   onPushToMain,
+  onUpdatePushedDriftSaveStatus,
+  onUndoPushToMain,
+  onUndoSaveAsChat,
   aiSettings
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
@@ -42,6 +48,7 @@ export default function DriftPanel({
   const [isTyping, setIsTyping] = useState(false)
   const [pushedToMain, setPushedToMain] = useState(false)
   const [savedAsChat, setSavedAsChat] = useState(false)
+  const [savedChatId, setSavedChatId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -65,6 +72,7 @@ export default function DriftPanel({
       // Reset states when opening new drift
       setPushedToMain(false)
       setSavedAsChat(false)
+      setSavedChatId(null)
     }
   }, [isOpen, selectedText])
 
@@ -214,6 +222,20 @@ export default function DriftPanel({
   }
 
   const handleSaveAsChat = () => {
+    // If already saved, handle undo
+    if (savedAsChat && savedChatId && onUndoSaveAsChat) {
+      onUndoSaveAsChat(savedChatId)
+      setSavedAsChat(false)
+      setSavedChatId(null)
+      
+      // Also update pushed messages if they exist
+      if (pushedToMain && onUpdatePushedDriftSaveStatus) {
+        // This will mark them as not saved
+        onPushToMain?.(driftOnlyMessages.filter(msg => !msg.text.startsWith('🌀 Drift started from:')), selectedText, sourceMessageId, false)
+      }
+      return
+    }
+    
     const title = `Drift: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
     const metadata = {
       isDrift: true,
@@ -228,13 +250,31 @@ export default function DriftPanel({
       msg => !msg.text.startsWith('🌀 Drift started from:')
     )
     
-    onSaveAsChat(messagesToSave, title, metadata)
+    const newChatId = 'drift-' + Date.now().toString()
+    setSavedChatId(newChatId)
+    
+    onSaveAsChat(messagesToSave, title, { ...metadata, id: newChatId })
     setSavedAsChat(true)
+    
+    // If already pushed to main, update those messages to mark as saved
+    if (pushedToMain && onUpdatePushedDriftSaveStatus) {
+      onUpdatePushedDriftSaveStatus(sourceMessageId)
+    }
     // Don't close - let user decide if they want to continue or close
     // onClose()
   }
   
   const handlePushToMain = () => {
+    // If already pushed, handle undo
+    if (pushedToMain && onUndoPushToMain) {
+      onUndoPushToMain(sourceMessageId)
+      setPushedToMain(false)
+      return
+    }
+    
+    // Prevent multiple pushes
+    if (pushedToMain) return
+    
     if (onPushToMain && driftOnlyMessages.length > 0) {
       // Filter out the system message when pushing to main
       const messagesToPush = driftOnlyMessages.filter(
@@ -242,7 +282,7 @@ export default function DriftPanel({
       )
       
       if (messagesToPush.length > 0) {
-        onPushToMain(messagesToPush, selectedText, sourceMessageId)
+        onPushToMain(messagesToPush, selectedText, sourceMessageId, savedAsChat)
         setPushedToMain(true)
         // Don't close - let user decide if they also want to save as chat
         // onClose()
@@ -295,20 +335,21 @@ export default function DriftPanel({
             <div className="flex gap-2">
               <button
                 onClick={handlePushToMain}
-                disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                disabled={!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
                 className={`flex-1 flex items-center justify-center gap-2
                   ${pushedToMain 
-                    ? 'bg-green-500/20 border-green-500/30 hover:bg-green-500/30 hover:border-green-500/50' 
+                    ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
                     : 'bg-gradient-to-r from-accent-pink/20 to-accent-violet/20 border-accent-pink/30 hover:from-accent-pink/30 hover:to-accent-violet/30 hover:border-accent-pink/50'
                   }
                   border text-text-primary rounded-lg px-3 py-2
                   disabled:opacity-50 disabled:cursor-not-allowed
                   transition-all duration-200`}
+                title={pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
               >
                 {pushedToMain ? (
                   <>
-                    <Check className="w-4 h-4" />
-                    <span className="text-sm">Pushed to Main</span>
+                    <Undo2 className="w-4 h-4" />
+                    <span className="text-sm">Undo Push</span>
                   </>
                 ) : (
                   <>
@@ -320,20 +361,21 @@ export default function DriftPanel({
               
               <button
                 onClick={handleSaveAsChat}
-                disabled={driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
                 className={`flex-1 flex items-center justify-center gap-2
                   ${savedAsChat 
-                    ? 'bg-green-500/20 border-green-500/30 hover:bg-green-500/30 hover:border-green-500/50' 
+                    ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
                     : 'bg-dark-elevated/50 border border-accent-violet/30 hover:bg-accent-violet/10 hover:border-accent-violet/50'
                   }
                   border text-text-primary rounded-lg px-3 py-2
                   disabled:opacity-50 disabled:cursor-not-allowed
                   transition-all duration-200`}
+                title={savedAsChat ? 'Undo save as chat' : 'Save drift as new chat'}
               >
                 {savedAsChat ? (
                   <>
-                    <Check className="w-4 h-4" />
-                    <span className="text-sm">Saved as Chat</span>
+                    <Undo2 className="w-4 h-4" />
+                    <span className="text-sm">Undo Save</span>
                   </>
                 ) : (
                   <>
