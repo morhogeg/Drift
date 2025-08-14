@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
@@ -1091,13 +1091,26 @@ function App() {
               placeholder="Search chats..."
               className="
                 w-full bg-dark-elevated/50 text-text-primary
-                rounded-full pl-8 pr-3 py-1.5 text-sm
+                rounded-full pl-8 pr-8 py-1.5 text-sm
                 border border-dark-border/30
                 focus:outline-none focus:border-accent-violet/50
                 placeholder:text-text-muted
                 transition-all duration-200
               "
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full
+                         bg-dark-border/30 hover:bg-accent-violet/20
+                         flex items-center justify-center
+                         transition-all duration-200 hover:scale-110
+                         group"
+                title="Clear search"
+              >
+                <X className="w-2.5 h-2.5 text-text-muted group-hover:text-accent-violet transition-colors" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1519,7 +1532,7 @@ function App() {
                       >
                       {/* Message actions for AI messages */}
                       {!msg.isUser && (
-                        <div className={`absolute -right-10 top-2 flex flex-col gap-1 transition-all duration-200 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className={`absolute -right-2 top-2 flex flex-col gap-1 transition-all duration-200 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
                           <button
                             onClick={() => handleCopyMessage(msg.text, msg.id)}
                             className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 pointer-events-auto
