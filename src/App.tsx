@@ -985,6 +985,9 @@ function App() {
   const handleSavePushedDriftAsChat = (msg: Message) => {
     if (!msg.isDriftPush || !msg.driftPushMetadata) return
     
+    // Check if already saved
+    if (msg.driftPushMetadata.wasSavedAsChat) return
+    
     // Find all drift messages that were pushed together (they share the same metadata)
     const driftMessages = messages.filter(m => 
       m.isDriftPush && 
@@ -1018,19 +1021,32 @@ function App() {
     
     setChatHistory(prev => [newChat, ...prev])
     
-    // Update the source message to include drift info pointing to the new chat
-    const updatedMessages = messages.map(m => 
-      m.id === msg.driftPushMetadata?.sourceMessageId 
-        ? { 
-            ...m, 
+    // Update all pushed messages to mark them as saved
+    const updatedMessages = messages.map(m => {
+      // Update the source message to include drift info
+      if (m.id === msg.driftPushMetadata?.sourceMessageId) {
+        return { 
+          ...m, 
             hasDrift: true,
             driftInfo: {
-              selectedText: msg.driftPushMetadata.selectedText,
+              selectedText: msg.driftPushMetadata!.selectedText,
               driftChatId: newChatId
             }
           }
-        : m
-    )
+      }
+      // Update all drift pushed messages to mark them as saved
+      if (m.isDriftPush && m.driftPushMetadata?.sourceMessageId === msg.driftPushMetadata?.sourceMessageId) {
+        return {
+          ...m,
+          driftPushMetadata: {
+            ...m.driftPushMetadata,
+            wasSavedAsChat: true,
+            driftChatId: newChatId
+          }
+        }
+      }
+      return m
+    })
     
     setMessages(updatedMessages)
     
@@ -1434,6 +1450,12 @@ function App() {
                 const isLastDriftMessage = isDriftMessage && (!nextMsg?.isDriftPush || nextMsg?.text.startsWith('📌'));
                 const isMiddleDriftMessage = isDriftMessage && !isFirstDriftMessage && !isLastDriftMessage;
                 
+                // Check if this is part of a multi-message drift (not a single message)
+                const hasMultipleDriftMessages = isDriftMessage && (
+                  (nextMsg?.isDriftPush && !nextMsg?.text.startsWith('📌')) || 
+                  (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌'))
+                );
+                
                 // Skip rendering drift headers entirely
                 if (isDriftHeader) return null;
                 
@@ -1442,8 +1464,8 @@ function App() {
                     className={`max-w-5xl mx-auto`}
                     key={msg.id}
                   >
-                    {/* Drift group header - only show for first message */}
-                    {isFirstDriftMessage && (
+                    {/* Drift group header - only show for first message in multi-message groups */}
+                    {isFirstDriftMessage && hasMultipleDriftMessages && (
                       <div className="px-6 mb-2">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-sm">🌀</span>
@@ -1459,19 +1481,19 @@ function App() {
                       </div>
                     )}
                     
-                    {/* Drift message container with connected background */}
+                    {/* Drift message container with connected background only for multi-message groups */}
                     <div className={`
-                      ${isDriftMessage ? 'px-6' : 'px-6'}
-                      ${isDriftMessage && isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-t-xl border-t border-x border-accent-violet/20 pt-3' : ''}
-                      ${isDriftMessage && isMiddleDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 border-x border-accent-violet/20' : ''}
-                      ${isDriftMessage && isLastDriftMessage && !isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-b-xl border-b border-x border-accent-violet/20 pb-3' : ''}
-                      ${isDriftMessage && isFirstDriftMessage && isLastDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-xl border border-accent-violet/20 py-3' : ''}
-                      ${isDriftMessage ? 'border-l-4 border-l-accent-violet/50' : ''}
+                      px-6
+                      ${isDriftMessage && hasMultipleDriftMessages && isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-t-xl border-t border-x border-accent-violet/20 pt-3' : ''}
+                      ${isDriftMessage && hasMultipleDriftMessages && isMiddleDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 border-x border-accent-violet/20' : ''}
+                      ${isDriftMessage && hasMultipleDriftMessages && isLastDriftMessage && !isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-b-xl border-b border-x border-accent-violet/20 pb-3' : ''}
+                      ${isDriftMessage && hasMultipleDriftMessages && isFirstDriftMessage && isLastDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-xl border border-accent-violet/20 py-3' : ''}
+                      ${isDriftMessage && hasMultipleDriftMessages ? 'border-l-4 border-l-accent-violet/50' : ''}
                     `}>
                     
                     <div
                       className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group
-                                  ${isDriftMessage && !isLastDriftMessage ? 'mb-2' : ''}`}
+                                  ${isDriftMessage && hasMultipleDriftMessages && !isLastDriftMessage ? 'mb-2' : ''}`}
                       style={{ animationDelay: `${index * 50}ms` }}
                       onMouseEnter={() => !msg.isUser && setHoveredMessageId(msg.id)}
                       onMouseLeave={() => setHoveredMessageId(null)}
@@ -1577,8 +1599,8 @@ function App() {
                           )}
                         </div>
                       )}
-                      {/* Add drift context for first AI drift message */}
-                      {isFirstDriftMessage && !msg.isUser && (
+                      {/* Add drift context for first AI drift message in multi-message groups or single messages */}
+                      {isDriftMessage && !msg.isUser && (isFirstDriftMessage || !hasMultipleDriftMessages) && (
                         <div className="absolute top-2 left-3 right-3 text-[10px] text-text-muted">
                           <div className="italic truncate mb-1">
                             From: "{msg.driftPushMetadata?.selectedText}"
