@@ -28,6 +28,8 @@ interface Message {
     sourceMessageId: string
     parentChatId: string
     wasSavedAsChat?: boolean
+    userQuestion?: string
+    driftChatId?: string
   }
 }
 
@@ -520,6 +522,11 @@ function App() {
   }
 
   const createNewChat = () => {
+    // Close drift panel if it's open (it belongs to the previous chat context)
+    if (driftOpen) {
+      setDriftOpen(false)
+    }
+    
     // Update the title and save messages of the current active chat
     const updatedHistory = chatHistory.map(chat => {
       if (chat.id === activeChatId) {
@@ -791,11 +798,25 @@ function App() {
     )
   }
 
-  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean) => {
+  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => {
+    // Check if messages from this source are already pushed
+    const existingPushedMessages = messages.filter(msg => 
+      msg.isDriftPush && msg.driftPushMetadata?.sourceMessageId === sourceMessageId
+    )
+    
+    // If already pushed, don't push again
+    if (existingPushedMessages.length > 0) {
+      console.log('Drift messages already pushed from this source')
+      return
+    }
+    
+    // Generate a drift chat ID if not provided (for when it's saved later)
+    const actualDriftChatId = driftChatId || 'drift-pushed-' + Date.now()
+    
     // Add a separator message to indicate where drift was pushed
     const separatorMessage: Message = {
       id: 'drift-push-' + Date.now(),
-      text: `📌 *Drift exploration of "${selectedText}" pushed to main chat:*`,
+      text: `📌 Drift exploration of "${selectedText}"`,
       isUser: false,
       timestamp: new Date(),
       isDriftPush: true,
@@ -803,12 +824,13 @@ function App() {
         selectedText: selectedText,
         sourceMessageId: sourceMessageId,
         parentChatId: activeChatId,
-        wasSavedAsChat: wasSavedAsChat
+        wasSavedAsChat: wasSavedAsChat,
+        userQuestion: userQuestion,
+        driftChatId: actualDriftChatId
       }
     }
     
     // First, update the original message to mark it as having a drift
-    const driftChatId = 'drift-pushed-' + Date.now()
     const messagesWithDriftMarked = messages.map(msg => 
       msg.id === sourceMessageId 
         ? { 
@@ -816,7 +838,7 @@ function App() {
             hasDrift: true,
             driftInfo: {
               selectedText: selectedText,
-              driftChatId: driftChatId
+              driftChatId: actualDriftChatId
             }
           }
         : msg
@@ -830,7 +852,9 @@ function App() {
         selectedText: selectedText,
         sourceMessageId: sourceMessageId,
         parentChatId: activeChatId,
-        wasSavedAsChat: wasSavedAsChat
+        wasSavedAsChat: wasSavedAsChat,
+        userQuestion: userQuestion,
+        driftChatId: actualDriftChatId
       }
     }))
     
@@ -965,13 +989,13 @@ function App() {
     const driftMessages = messages.filter(m => 
       m.isDriftPush && 
       m.driftPushMetadata?.sourceMessageId === msg.driftPushMetadata?.sourceMessageId &&
-      !m.text.startsWith('📌 *Drift exploration')  // Exclude the separator message
+      !m.text.startsWith('📌')  // Exclude the separator message
     )
     
     if (driftMessages.length === 0) return
     
-    // Create a new chat with the drift messages
-    const newChatId = Date.now().toString()
+    // Use the existing drift chat ID from metadata or create a new one
+    const newChatId = msg.driftPushMetadata.driftChatId || Date.now().toString()
     const title = `Drift: ${msg.driftPushMetadata.selectedText.slice(0, 30)}${msg.driftPushMetadata.selectedText.length > 30 ? '...' : ''}`
     
     const newChat: ChatSession = {
@@ -1036,30 +1060,30 @@ function App() {
       
       {/* Sidebar */}
       <aside className={`
-        fixed z-20 w-[300px] h-full bg-dark-surface/95 backdrop-blur-sm
+        fixed z-20 w-[260px] h-full bg-dark-surface/95 backdrop-blur-sm
         border-r border-dark-border/30 flex flex-col
         transition-all duration-300 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         shadow-[inset_-8px_0_10px_-8px_rgba(0,0,0,0.4)]
       `}>
         {/* Sidebar Header */}
-        <div className="p-4 border-b border-dark-border/30">
-          <div className="flex items-center justify-between mb-4">
+        <div className="p-3 border-b border-dark-border/30">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-accent-pink" />
-              <h2 className="text-lg font-semibold text-text-primary">Chat History</h2>
+              <Sparkles className="w-4 h-4 text-accent-pink" />
+              <h2 className="text-base font-semibold text-text-primary">Chat History</h2>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="p-1.5 hover:bg-dark-elevated rounded-lg transition-colors"
+              className="p-1 hover:bg-dark-elevated rounded-lg transition-colors"
             >
-              <ChevronLeft className="w-4 h-4 text-text-muted" />
+              <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
             </button>
           </div>
           
           {/* Search Bar */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
             <input
               type="text"
               value={searchQuery}
@@ -1067,7 +1091,7 @@ function App() {
               placeholder="Search chats..."
               className="
                 w-full bg-dark-elevated/50 text-text-primary
-                rounded-full pl-10 pr-4 py-2 text-sm
+                rounded-full pl-8 pr-3 py-1.5 text-sm
                 border border-dark-border/30
                 focus:outline-none focus:border-accent-violet/50
                 placeholder:text-text-muted
@@ -1078,18 +1102,18 @@ function App() {
         </div>
 
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {sortedChats.map((chat) => (
             <div
               key={chat.id}
               onClick={() => switchChat(chat.id)}
               onContextMenu={(e) => handleContextMenu(e, chat.id)}
               className={`
-                group relative rounded-xl p-3 cursor-pointer
+                group relative rounded-lg p-2.5 cursor-pointer
                 transition-all duration-200 ease-in-out
                 ${activeChatId === chat.id 
-                  ? 'bg-dark-elevated border-l-4 border-accent-pink shadow-lg' 
-                  : 'bg-dark-elevated/30 hover:bg-dark-elevated/50 hover:scale-[1.02]'
+                  ? 'bg-dark-elevated border-l-2 border-accent-pink shadow-lg' 
+                  : 'bg-dark-elevated/30 hover:bg-dark-elevated/50'
                 }
               `}
             >
@@ -1105,10 +1129,10 @@ function App() {
               
               <div className="flex items-start gap-3">
                 {chat.metadata?.isDrift ? (
-                  <span className="text-base mt-0.5 flex-shrink-0">🌀</span>
+                  <span className="text-xs mt-0.5 flex-shrink-0">🌀</span>
                 ) : (
                   <MessageCircle className={`
-                    w-4 h-4 mt-0.5 flex-shrink-0
+                    w-3.5 h-3.5 mt-0.5 flex-shrink-0
                     ${activeChatId === chat.id ? 'text-accent-pink' : 'text-text-muted'}
                   `} />
                 )}
@@ -1127,19 +1151,19 @@ function App() {
                         }
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-dark-bg/50 text-text-primary text-sm font-semibold
+                      className="w-full bg-dark-bg/50 text-text-primary text-sm font-medium
                                rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-accent-violet"
                       autoFocus
                     />
                   ) : (
-                    <h3 className="text-sm font-semibold text-text-primary truncate">
+                    <h3 className="text-sm font-medium text-text-primary truncate">
                       {chat.title}
                     </h3>
                   )}
                   <p className="text-xs text-text-muted truncate mt-0.5">
                     {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
                   </p>
-                  <p className="text-xs text-accent-violet/70 mt-1">
+                  <p className="text-[11px] text-accent-violet/60 mt-0.5">
                     {formatDate(chat.createdAt)}
                   </p>
                 </div>
@@ -1152,51 +1176,59 @@ function App() {
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-4 border-t border-dark-border/30 space-y-3">
-          <button 
-            onClick={() => setSettingsOpen(true)}
-            className="
-            w-full flex items-center gap-2
-            bg-dark-elevated border border-dark-border
-            text-text-secondary rounded-lg px-4 py-2.5
-            hover:bg-dark-surface hover:text-text-primary
-            hover:border-violet-500/30
-            transition-all duration-200
-          ">
-            <SettingsIcon className="w-4 h-4" />
-            <span className="text-sm font-medium">AI Settings</span>
-          </button>
-          
-          <button 
-            onClick={() => setGalleryOpen(true)}
-            className="
-            w-full flex items-center justify-between
-            bg-gradient-to-r from-cyan-500/20 to-teal-500/20
-            border border-cyan-500/30
-            text-cyan-400 rounded-lg px-4 py-2.5
-            hover:from-cyan-500/30 hover:to-teal-500/30
-            hover:border-cyan-500/50
-            transition-all duration-200 hover:scale-[1.02]
-          ">
-            <div className="flex items-center gap-2">
+        <div className="p-3 border-t border-dark-border/30">
+          <div className="flex items-center gap-2 mb-3">
+            {/* Settings Icon Button */}
+            <button 
+              onClick={() => setSettingsOpen(true)}
+              className="
+              flex-1 flex items-center justify-center
+              bg-dark-elevated border border-dark-border
+              text-text-secondary rounded-lg p-2
+              hover:bg-dark-surface hover:text-text-primary
+              hover:border-violet-500/30
+              transition-all duration-200
+              group relative
+            "
+              title="AI Settings"
+            >
+              <SettingsIcon className="w-4 h-4" />
+            </button>
+            
+            {/* Snippet Gallery Icon Button */}
+            <button 
+              onClick={() => setGalleryOpen(true)}
+              className="
+              flex-1 flex items-center justify-center
+              bg-gradient-to-r from-cyan-500/20 to-teal-500/20
+              border border-cyan-500/30
+              text-cyan-400 rounded-lg p-2
+              hover:from-cyan-500/30 hover:to-teal-500/30
+              hover:border-cyan-500/50
+              transition-all duration-200
+              relative
+            "
+              title="Snippet Gallery"
+            >
               <Bookmark className="w-4 h-4" />
-              <span className="text-sm font-medium">Snippet Gallery</span>
-            </div>
-            <span className="text-xs bg-cyan-500/20 px-2 py-0.5 rounded-full">
-              {snippetCount}
-            </span>
-          </button>
+              {snippetCount > 0 && (
+                <span className="absolute -top-1 -right-1 text-[10px] bg-cyan-500 text-dark-bg px-1.5 py-0.5 rounded-full min-w-[18px] text-center font-medium">
+                  {snippetCount}
+                </span>
+              )}
+            </button>
+          </div>
           
           <button 
             onClick={createNewChat}
             className="
             w-full flex items-center justify-center gap-2
             bg-gradient-to-r from-accent-pink to-accent-violet
-            text-white rounded-full px-4 py-2.5
+            text-white rounded-full px-3 py-2
             hover:shadow-lg hover:shadow-accent-pink/20
             transition-all duration-200 hover:scale-[1.02]
           ">
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             <span className="text-sm font-medium">New Chat</span>
           </button>
         </div>
@@ -1206,7 +1238,7 @@ function App() {
       <div className={`
         flex-1 flex flex-col relative
         transition-all duration-300 ease-in-out
-        ${sidebarOpen ? 'ml-[300px]' : 'ml-0'}
+        ${sidebarOpen ? 'ml-[260px]' : 'ml-0'}
         ${driftOpen ? 'mr-[450px]' : 'mr-0'}
       `}>
         {/* Header with Drift branding */}
@@ -1377,36 +1409,120 @@ function App() {
                 )
               })()}
               
-              {messages.map((msg, index) => (
-                msg.text ? (
+              {messages.map((msg, index) => {
+                // Check if this is a drift message
+                const isDriftHeader = msg.isDriftPush && msg.text.startsWith('📌');
+                const isDriftMessage = msg.isDriftPush && !msg.text.startsWith('📌');
+                
+                // Find if this is the first/last drift message in a group
+                const prevMsg = index > 0 ? messages[index - 1] : null;
+                const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
+                const isFirstDriftMessage = isDriftMessage && prevMsg?.isDriftPush && prevMsg?.text.startsWith('📌');
+                const isLastDriftMessage = isDriftMessage && (!nextMsg?.isDriftPush || nextMsg?.text.startsWith('📌'));
+                const isMiddleDriftMessage = isDriftMessage && !isFirstDriftMessage && !isLastDriftMessage;
+                
+                // Skip rendering drift headers entirely
+                if (isDriftHeader) return null;
+                
+                return msg.text ? (
                   <div 
-                    className="max-w-5xl mx-auto px-6 group" 
+                    className={`max-w-5xl mx-auto`}
                     key={msg.id}
-                    onMouseEnter={() => !msg.isUser && setHoveredMessageId(msg.id)}
-                    onMouseLeave={() => setHoveredMessageId(null)}
                   >
+                    {/* Drift group header - only show for first message */}
+                    {isFirstDriftMessage && (
+                      <div className="px-6 mb-2">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm">🌀</span>
+                          <span className="text-xs font-medium text-accent-violet">
+                            Drift conversation
+                          </span>
+                          {msg.driftPushMetadata?.selectedText && (
+                            <span className="text-xs text-text-muted italic">
+                              • "{msg.driftPushMetadata.selectedText}"
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Drift message container with connected background */}
+                    <div className={`
+                      ${isDriftMessage ? 'px-6' : 'px-6'}
+                      ${isDriftMessage && isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-t-xl border-t border-x border-accent-violet/20 pt-3' : ''}
+                      ${isDriftMessage && isMiddleDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 border-x border-accent-violet/20' : ''}
+                      ${isDriftMessage && isLastDriftMessage && !isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-b-xl border-b border-x border-accent-violet/20 pb-3' : ''}
+                      ${isDriftMessage && isFirstDriftMessage && isLastDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-xl border border-accent-violet/20 py-3' : ''}
+                      ${isDriftMessage ? 'border-l-4 border-l-accent-violet/50' : ''}
+                    `}>
+                    
                     <div
-                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative`}
+                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group
+                                  ${isDriftMessage && !isLastDriftMessage ? 'mb-2' : ''}`}
                       style={{ animationDelay: `${index * 50}ms` }}
+                      onMouseEnter={() => !msg.isUser && setHoveredMessageId(msg.id)}
+                      onMouseLeave={() => setHoveredMessageId(null)}
                     >
                       <div
                         className={`
-                          max-w-[85%] rounded-2xl px-5 py-3 relative
+                          max-w-[85%] rounded-2xl px-5 ${isFirstDriftMessage && !msg.isUser ? 'pt-12 pb-3' : 'py-3'} relative
                           ${msg.isUser 
-                            ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20' 
-                            : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                            ? isDriftMessage
+                              ? 'bg-gradient-to-br from-accent-violet/30 to-accent-pink/30 text-text-primary border border-accent-violet/30 shadow-lg'
+                              : 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
+                            : isDriftMessage
+                              ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-accent-violet/50'
+                              : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                           }
                           transition-all duration-200 hover:scale-[1.02]
                           ${!msg.isUser ? 'select-text' : ''}
                         `}
                         data-message-id={msg.id}
+                        onClick={() => {
+                          if (isDriftMessage && msg.driftPushMetadata) {
+                            // Check if drift was saved as a chat
+                            if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
+                              // Navigate to the saved drift chat
+                              const driftChat = chatHistory.find(c => c.id === msg.driftPushMetadata?.driftChatId)
+                              if (driftChat) {
+                                switchChat(msg.driftPushMetadata.driftChatId)
+                              } else {
+                                // Drift chat was deleted, navigate to parent and highlight source
+                                switchChat(msg.driftPushMetadata.parentChatId)
+                                setTimeout(() => {
+                                  const sourceElement = document.querySelector(`[data-message-id="${msg.driftPushMetadata?.sourceMessageId}"]`)
+                                  if (sourceElement) {
+                                    sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                    sourceElement.classList.add('highlight-message')
+                                    setTimeout(() => {
+                                      sourceElement.classList.remove('highlight-message')
+                                    }, 2000)
+                                  }
+                                }, 100)
+                              }
+                            } else {
+                              // Drift wasn't saved, navigate to parent and highlight source
+                              switchChat(msg.driftPushMetadata.parentChatId)
+                              setTimeout(() => {
+                                const sourceElement = document.querySelector(`[data-message-id="${msg.driftPushMetadata?.sourceMessageId}"]`)
+                                if (sourceElement) {
+                                  sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                  sourceElement.classList.add('highlight-message')
+                                  setTimeout(() => {
+                                    sourceElement.classList.remove('highlight-message')
+                                  }, 2000)
+                                }
+                              }, 100)
+                            }
+                          }
+                        }}
                       >
                       {/* Message actions for AI messages */}
                       {!msg.isUser && (
-                        <div className={`absolute -top-9 right-0 flex gap-1 transition-all duration-200 ${hoveredMessageId === msg.id ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
+                        <div className={`absolute -right-10 top-2 flex flex-col gap-1 transition-all duration-200 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
                           <button
                             onClick={() => handleCopyMessage(msg.text, msg.id)}
-                            className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-dark-border/50
+                            className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 pointer-events-auto
                                      hover:bg-dark-surface hover:border-accent-violet/30 transition-all duration-200
                                      shadow-lg hover:scale-110"
                             title="Copy message"
@@ -1419,7 +1535,7 @@ function App() {
                           </button>
                           <button
                             onClick={() => handleToggleSaveMessage(msg)}
-                            className={`p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border
+                            className={`p-1.5 rounded-lg bg-dark-elevated border pointer-events-auto
                                      ${savedMessageIds.has(msg.id) 
                                        ? 'border-cyan-500/50 bg-cyan-500/10' 
                                        : 'border-dark-border/50'}
@@ -1438,7 +1554,7 @@ function App() {
                           {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                             <button
                               onClick={() => handleSavePushedDriftAsChat(msg)}
-                              className="p-1.5 rounded-lg bg-dark-elevated/90 backdrop-blur-sm border border-accent-violet/50
+                              className="p-1.5 rounded-lg bg-dark-elevated border border-accent-violet/50 pointer-events-auto
                                        hover:bg-accent-violet/10 hover:border-accent-violet/70 transition-all duration-200
                                        shadow-lg hover:scale-110"
                               title="Save drift as new chat"
@@ -1448,6 +1564,28 @@ function App() {
                           )}
                         </div>
                       )}
+                      {/* Add drift context for first AI drift message */}
+                      {isFirstDriftMessage && !msg.isUser && (
+                        <div className="absolute top-2 left-3 right-3 text-[10px] text-text-muted">
+                          <div className="italic truncate mb-1">
+                            From: "{msg.driftPushMetadata?.selectedText}"
+                          </div>
+                          {msg.driftPushMetadata?.userQuestion && (
+                            <div className="italic truncate">
+                              Q: "{msg.driftPushMetadata.userQuestion}"
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Add subtle drift badge for all drift messages */}
+                      {isDriftMessage && (
+                        <div className="absolute -top-2.5 -left-2.5 bg-gradient-to-r from-accent-violet to-accent-pink 
+                                      text-white text-[9px] px-1.5 py-0.5 rounded-full font-medium shadow-md">
+                          Drift
+                        </div>
+                      )}
+                      
                       {msg.isUser ? (
                         <p className="text-sm leading-relaxed">{msg.text}</p>
                       ) : msg.driftInfo ? (
@@ -1531,9 +1669,10 @@ function App() {
                       )}
                       </div>
                     </div>
+                    </div>
                   </div>
                 ) : null
-              ))}
+              })}
               
               {isTyping && !streamingResponse && (
                 <div className="max-w-5xl mx-auto px-6">

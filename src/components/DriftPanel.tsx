@@ -22,7 +22,7 @@ interface DriftPanelProps {
   sourceMessageId: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => void
   onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
   onUndoPushToMain?: (sourceMessageId: string) => void
   onUndoSaveAsChat?: (chatId: string) => void
@@ -98,6 +98,28 @@ export default function DriftPanel({
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  const handlePushSingleMessage = (message: Message) => {
+    if (onPushToMain) {
+      // Create a mini conversation with just this message
+      const singleMessageArray = [message]
+      
+      // Find the user message before this one
+      const messageIndex = driftOnlyMessages.findIndex(m => m.id === message.id)
+      const previousUserMessage = driftOnlyMessages.slice(0, messageIndex).reverse().find(m => m.isUser)
+      const userQuestion = previousUserMessage?.text || selectedText
+      
+      // Push just this message to main with context about it being a single message
+      onPushToMain(
+        singleMessageArray, 
+        selectedText,
+        sourceMessageId,
+        savedAsChat,
+        userQuestion,
+        savedChatId || undefined
+      )
+    }
+  }
 
   const handleToggleSaveMessage = (message: Message) => {
     if (savedMessageIds.has(message.id)) {
@@ -295,8 +317,8 @@ export default function DriftPanel({
       
       // Also update pushed messages if they exist
       if (pushedToMain && onUpdatePushedDriftSaveStatus) {
-        // This will mark them as not saved
-        onPushToMain?.(driftOnlyMessages.filter(msg => !msg.text.startsWith('🌀 Drift started from:')), selectedText, sourceMessageId, false)
+        // Just update the save status, don't re-push
+        onUpdatePushedDriftSaveStatus(sourceMessageId)
       }
       return
     }
@@ -347,7 +369,11 @@ export default function DriftPanel({
       )
       
       if (messagesToPush.length > 0) {
-        onPushToMain(messagesToPush, selectedText, sourceMessageId, savedAsChat)
+        // Find the last user question in the drift conversation
+        const lastUserMessage = messagesToPush.filter(m => m.isUser).pop()
+        const userQuestion = lastUserMessage?.text || selectedText
+        
+        onPushToMain(messagesToPush, selectedText, sourceMessageId, savedAsChat, userQuestion, savedChatId || undefined)
         setPushedToMain(true)
         // Don't close - let user decide if they also want to save as chat
         // onClose()
@@ -509,12 +535,52 @@ export default function DriftPanel({
                   )}
                   </div>
                   
-                  {/* Save to Snippet Button - positioned to the side */}
-                  {!msg.id.includes('system') && (
+                  {/* Action Buttons - positioned to the side */}
+                  {!msg.id.includes('system') && !msg.isUser && (
+                    <div className={`absolute -right-8 top-2 flex flex-col gap-1
+                                    ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}
+                                    transition-all duration-200 pointer-events-none`}>
+                      {/* Push to Main Button */}
+                      <button
+                        onClick={() => handlePushSingleMessage(msg)}
+                        className="p-1.5 rounded-lg pointer-events-auto
+                                 bg-dark-elevated border border-dark-border/50
+                                 hover:bg-dark-surface hover:border-accent-pink/50 
+                                 transition-all duration-200
+                                 shadow-lg hover:scale-110"
+                        title="Push this message to main chat"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
+                      </button>
+                      
+                      {/* Save to Snippet Button */}
+                      <button
+                        onClick={() => handleToggleSaveMessage(msg)}
+                        className={`p-1.5 rounded-lg pointer-events-auto
+                                   bg-dark-elevated border 
+                                   ${savedMessageIds.has(msg.id) 
+                                     ? 'border-cyan-500/50 bg-cyan-500/10' 
+                                     : 'border-dark-border/50'}
+                                   hover:bg-dark-surface hover:border-cyan-500/50 
+                                   transition-all duration-200
+                                   shadow-lg hover:scale-110`}
+                        title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
+                      >
+                        <Bookmark 
+                          className={`w-3.5 h-3.5 transition-colors
+                            ${savedMessageIds.has(msg.id) 
+                              ? 'text-cyan-400 fill-cyan-400' 
+                              : 'text-text-muted hover:text-cyan-400'}`} 
+                        />
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* Save to Snippet Button for User Messages */}
+                  {!msg.id.includes('system') && msg.isUser && (
                     <button
                       onClick={() => handleToggleSaveMessage(msg)}
-                      className={`absolute ${msg.isUser ? '-left-9' : '-right-9'} 
-                                 top-2 p-1.5 rounded-lg
+                      className={`absolute -left-8 top-2 p-1.5 rounded-lg pointer-events-auto
                                  bg-dark-elevated border 
                                  ${savedMessageIds.has(msg.id) 
                                    ? 'border-cyan-500/50 bg-cyan-500/10' 
