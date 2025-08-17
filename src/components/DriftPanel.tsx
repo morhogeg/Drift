@@ -537,7 +537,7 @@ export default function DriftPanel({
                   
                   {/* Action Buttons - positioned to the side */}
                   {!msg.id.includes('system') && !msg.isUser && (
-                    <div className={`absolute -right-2 top-2 flex flex-col gap-1
+                    <div className={`absolute -right-9 top-2 flex flex-col gap-1
                                     ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}
                                     transition-all duration-200 pointer-events-none`}>
                       {/* Push to Main Button */}
@@ -580,7 +580,7 @@ export default function DriftPanel({
                   {!msg.id.includes('system') && msg.isUser && (
                     <button
                       onClick={() => handleToggleSaveMessage(msg)}
-                      className={`absolute -left-2 top-2 p-1.5 rounded-lg pointer-events-auto
+                      className={`absolute -left-9 top-2 p-1.5 rounded-lg pointer-events-auto
                                  bg-dark-elevated border 
                                  ${savedMessageIds.has(msg.id) 
                                    ? 'border-cyan-500/50 bg-cyan-500/10' 
@@ -685,7 +685,7 @@ export default function DriftPanel({
                       transition-all duration-200
                     "
                   >
-                    <Send className="w-4 h-4 ml-0.5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 )}
               </div>

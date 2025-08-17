@@ -1379,12 +1379,6 @@ function App() {
                   <ArrowDown className="w-4 h-4" />
                 </button>
               )}
-              {messages.length === 0 && (
-                <div className="flex flex-col items-center py-20 animate-fade-up max-w-5xl mx-auto">
-                  <Sparkles className="w-12 h-12 text-accent-pink/50 mb-4" />
-                  <p className="text-text-muted">Start a conversation with Drift AI</p>
-                </div>
-              )}
               
               {/* Show parent chat link if this is a saved drift */}
               {(() => {
@@ -1768,7 +1762,7 @@ function App() {
                   <button
                     onClick={stopGeneration}
                     className="
-                      absolute right-2 bottom-2
+                      absolute right-3 bottom-3
                       w-10 h-10 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
                       text-white shadow-lg shadow-accent-pink/30
@@ -1785,7 +1779,7 @@ function App() {
                     onClick={sendMessage}
                     disabled={!message.trim()}
                     className="
-                      absolute right-2 bottom-2
+                      absolute right-3 bottom-3
                       w-10 h-10 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
                       text-white shadow-lg shadow-accent-pink/30
@@ -1795,7 +1789,7 @@ function App() {
                       transition-all duration-200
                     "
                   >
-                    <Send className="w-4 h-4 ml-0.5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 )}
               </div>
