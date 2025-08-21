@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
@@ -15,109 +15,195 @@ export default function SelectionTooltip({
   currentChatTitle = 'Chat',
   onSnippetSaved 
 }: SelectionTooltipProps) {
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const [isVisible, setIsVisible] = useState(false)
-  const [selectedText, setSelectedText] = useState('')
-  const [messageId, setMessageId] = useState('')
+  const [tooltip, setTooltip] = useState<{
+    visible: boolean
+    x: number
+    y: number
+    text: string
+    messageId: string
+  } | null>(null)
+  
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const savedDataRef = useRef<{ text: string; messageId: string } | null>(null)
 
   useEffect(() => {
-    const handleSelection = () => {
-      const selection = window.getSelection()
-      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-        setIsVisible(false)
+    let isTooltipHovered = false
+
+    const handleMouseUp = (e: MouseEvent) => {
+      // Don't process if clicking on the tooltip
+      if ((e.target as HTMLElement).closest('.drift-tooltip')) {
         return
       }
 
-      const text = selection.toString().trim()
-      const range = selection.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      
-      // Check if selection is within an AI message
-      let element = selection.anchorNode?.parentElement
-      let foundMessageEl = null
-      
-      while (element && element !== document.body) {
-        if (element.classList?.contains('ai-message')) {
-          foundMessageEl = element
-          break
+      // Small delay to let selection complete
+      setTimeout(() => {
+        const selection = window.getSelection()
+        
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+          // Only hide if not hovering tooltip
+          if (!isTooltipHovered && tooltip) {
+            setTimeout(() => {
+              if (!isTooltipHovered) {
+                setTooltip(null)
+                savedDataRef.current = null
+              }
+            }, 200)
+          }
+          return
         }
-        element = element.parentElement
-      }
-      
-      if (!foundMessageEl) {
-        setIsVisible(false)
-        return
-      }
-      
-      const msgId = foundMessageEl.getAttribute('data-message-id')
-      if (!msgId) {
-        setIsVisible(false)
-        return
-      }
 
-      setSelectedText(text)
-      setMessageId(msgId)
-      setPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top - 10
-      })
-      setIsVisible(true)
+        const text = selection.toString().trim()
+        const range = selection.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        
+        // Find element with data-message-id
+        let element = selection.anchorNode?.parentElement
+        let messageEl = null
+        
+        while (element && element !== document.body) {
+          if (element.hasAttribute && element.hasAttribute('data-message-id')) {
+            messageEl = element
+            break
+          }
+          element = element.parentElement
+        }
+        
+        if (!messageEl) {
+          return
+        }
+        
+        const msgId = messageEl.getAttribute('data-message-id')
+        if (!msgId) {
+          return
+        }
+
+        // Check if user message
+        const isUserMessage = messageEl.className.includes('from-accent-pink') || 
+                              messageEl.className.includes('from-accent-violet')
+        
+        if (isUserMessage) {
+          return
+        }
+
+        // Save the data
+        savedDataRef.current = { text, messageId: msgId }
+        
+        // Show tooltip
+        setTooltip({
+          visible: true,
+          x: rect.left + rect.width / 2,
+          y: rect.top - 10,
+          text: text,
+          messageId: msgId
+        })
+      }, 10)
     }
 
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.drift-tooltip')) {
-        // Small delay to allow text selection to complete
-        setTimeout(handleSelection, 10)
-      }
+    // Track tooltip hover state
+    const handleTooltipEnter = () => {
+      isTooltipHovered = true
+    }
+    
+    const handleTooltipLeave = () => {
+      isTooltipHovered = false
+      // Hide after a delay if no selection
+      setTimeout(() => {
+        const selection = window.getSelection()
+        if (!selection || selection.isCollapsed) {
+          setTooltip(null)
+          savedDataRef.current = null
+        }
+      }, 200)
     }
 
-    document.addEventListener('mouseup', handleClick)
-    document.addEventListener('selectionchange', handleSelection)
+    // Add event listeners
+    document.addEventListener('mouseup', handleMouseUp)
+    
+    // Add tooltip hover tracking if tooltip exists
+    const tooltipEl = tooltipRef.current
+    if (tooltipEl) {
+      tooltipEl.addEventListener('mouseenter', handleTooltipEnter)
+      tooltipEl.addEventListener('mouseleave', handleTooltipLeave)
+    }
 
     return () => {
-      document.removeEventListener('mouseup', handleClick)
-      document.removeEventListener('selectionchange', handleSelection)
-    }
-  }, [])
-
-  const handleStartDrift = () => {
-    onStartDrift(selectedText, messageId)
-    setIsVisible(false)
-    window.getSelection()?.removeAllRanges()
-  }
-
-  const handleSaveSnippet = () => {
-    snippetStorage.createSnippet(
-      selectedText,
-      {
-        chatId: currentChatId,
-        chatTitle: currentChatTitle,
-        messageId: messageId,
-        isFullMessage: false,
-        timestamp: new Date()
+      document.removeEventListener('mouseup', handleMouseUp)
+      if (tooltipEl) {
+        tooltipEl.removeEventListener('mouseenter', handleTooltipEnter)
+        tooltipEl.removeEventListener('mouseleave', handleTooltipLeave)
       }
-    )
+    }
+  }, [tooltip])
+
+  const handleDrift = () => {
+    // Use saved data instead of current selection
+    const data = savedDataRef.current || (tooltip ? { text: tooltip.text, messageId: tooltip.messageId } : null)
     
-    setIsVisible(false)
-    window.getSelection()?.removeAllRanges()
-    onSnippetSaved?.()
+    if (data) {
+      console.log('Drift clicked with saved data:', data)
+      onStartDrift(data.text, data.messageId)
+      
+      setTooltip(null)
+      savedDataRef.current = null
+      window.getSelection()?.removeAllRanges()
+    } else {
+      console.error('No data available for drift')
+    }
   }
 
-  if (!isVisible) return null
+  const handleSave = () => {
+    // Use saved data instead of current selection
+    const data = savedDataRef.current || (tooltip ? { text: tooltip.text, messageId: tooltip.messageId } : null)
+    
+    if (data) {
+      console.log('Save clicked with saved data:', data)
+      snippetStorage.createSnippet(
+        data.text,
+        {
+          chatId: currentChatId,
+          chatTitle: currentChatTitle,
+          messageId: data.messageId,
+          isFullMessage: false,
+          timestamp: new Date()
+        }
+      )
+      
+      setTooltip(null)
+      savedDataRef.current = null
+      window.getSelection()?.removeAllRanges()
+      onSnippetSaved?.()
+    }
+  }
+
+  if (!tooltip || !tooltip.visible) return null
 
   return (
     <div
-      className="drift-tooltip fixed z-40 animate-fade-up"
+      ref={tooltipRef}
+      className="drift-tooltip fixed z-[99999] animate-fade-up"
       style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        transform: 'translate(-50%, -100%)'
+        left: `${tooltip.x}px`,
+        top: `${tooltip.y}px`,
+        transform: 'translate(-50%, -100%)',
+        pointerEvents: 'auto'
+      }}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
       }}
     >
-      <div className="flex gap-2">
+      <div className="flex gap-2 bg-dark-elevated/95 backdrop-blur rounded-full p-1 border border-dark-border shadow-2xl">
         <button
-          onClick={handleStartDrift}
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleDrift()
+          }}
           className="
             flex items-center gap-1.5 px-3 py-1.5
             bg-gradient-to-r from-accent-pink to-accent-violet
@@ -126,6 +212,7 @@ export default function SelectionTooltip({
             hover:scale-105 active:scale-95
             transition-all duration-200
             border border-white/20
+            cursor-pointer
           "
         >
           <span className="text-base">🌀</span>
@@ -133,7 +220,16 @@ export default function SelectionTooltip({
         </button>
         
         <button
-          onClick={handleSaveSnippet}
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleSave()
+          }}
           className="
             flex items-center gap-1.5 px-3 py-1.5
             bg-gradient-to-r from-cyan-500 to-teal-500
@@ -142,6 +238,7 @@ export default function SelectionTooltip({
             hover:scale-105 active:scale-95
             transition-all duration-200
             border border-white/20
+            cursor-pointer
           "
         >
           <Bookmark className="w-3.5 h-3.5" />
@@ -149,7 +246,7 @@ export default function SelectionTooltip({
         </button>
       </div>
       
-      {/* Arrow pointing down */}
+      {/* Arrow */}
       <div className="
         absolute left-1/2 -translate-x-1/2 top-full
         w-0 h-0 

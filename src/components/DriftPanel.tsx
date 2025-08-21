@@ -20,6 +20,7 @@ interface DriftPanelProps {
   selectedText: string
   contextMessages: Message[]
   sourceMessageId: string
+  highlightMessageId?: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
   onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => void
@@ -36,6 +37,7 @@ export default function DriftPanel({
   selectedText,
   contextMessages: _contextMessages,
   sourceMessageId,
+  highlightMessageId,
   parentChatId,
   onSaveAsChat,
   onPushToMain,
@@ -54,6 +56,8 @@ export default function DriftPanel({
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
   const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set())
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
+  const [pushedMessageCount, setPushedMessageCount] = useState(0)
+  const [lastPushSourceId, setLastPushSourceId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -78,6 +82,8 @@ export default function DriftPanel({
       setPushedToMain(false)
       setSavedAsChat(false)
       setSavedChatId(null)
+      setPushedMessageCount(0)
+      setLastPushSourceId(null)
       
       // Load saved message IDs for this drift
       const allSnippets = snippetStorage.getAllSnippets()
@@ -99,6 +105,45 @@ export default function DriftPanel({
     scrollToBottom()
   }, [messages])
 
+  // Highlight specific message when opened from clicked drift message
+  useEffect(() => {
+    if (isOpen && highlightMessageId && driftOnlyMessages.length > 0) {
+      setTimeout(() => {
+        // Find the message element that corresponds to the pushed message
+        const targetMessage = driftOnlyMessages.find(m => 
+          m.text === highlightMessageId // We'll need to pass the text instead
+        )
+        
+        if (targetMessage) {
+          const element = document.querySelector(`[data-drift-message-id="${targetMessage.id}"]`)
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            element.classList.add('highlight-message')
+            setTimeout(() => {
+              element.classList.remove('highlight-message')
+            }, 2000)
+          }
+        }
+      }, 300)
+    }
+  }, [isOpen, highlightMessageId, driftOnlyMessages])
+
+  // Reset push button if new messages are added after pushing
+  useEffect(() => {
+    if (pushedToMain && pushedMessageCount > 0) {
+      // Filter out the system message
+      const currentMessageCount = driftOnlyMessages.filter(
+        msg => !msg.text.startsWith('🌀 Drift started from:')
+      ).length
+      
+      // If there are more messages now than when we pushed, reset the button
+      if (currentMessageCount > pushedMessageCount) {
+        setPushedToMain(false)
+        setPushedMessageCount(0)
+      }
+    }
+  }, [driftOnlyMessages, pushedToMain, pushedMessageCount])
+
   const handlePushSingleMessage = (message: Message) => {
     if (onPushToMain) {
       // Create a mini conversation with just this message
@@ -109,11 +154,14 @@ export default function DriftPanel({
       const previousUserMessage = driftOnlyMessages.slice(0, messageIndex).reverse().find(m => m.isUser)
       const userQuestion = previousUserMessage?.text || selectedText
       
+      // Use a unique source ID for single messages to allow multiple individual pushes
+      const singleMessageSourceId = `${sourceMessageId}-single-${message.id}`
+      
       // Push just this message to main with context about it being a single message
       onPushToMain(
         singleMessageArray, 
         selectedText,
-        sourceMessageId,
+        singleMessageSourceId,
         savedAsChat,
         userQuestion,
         savedChatId || undefined
@@ -353,13 +401,14 @@ export default function DriftPanel({
   
   const handlePushToMain = () => {
     // If already pushed, handle undo
-    if (pushedToMain && onUndoPushToMain) {
-      onUndoPushToMain(sourceMessageId)
+    if (pushedToMain && lastPushSourceId && onUndoPushToMain) {
+      onUndoPushToMain(lastPushSourceId)
       setPushedToMain(false)
+      setLastPushSourceId(null)
       return
     }
     
-    // Prevent multiple pushes
+    // Prevent multiple pushes of the same state
     if (pushedToMain) return
     
     if (onPushToMain && driftOnlyMessages.length > 0) {
@@ -373,8 +422,13 @@ export default function DriftPanel({
         const lastUserMessage = messagesToPush.filter(m => m.isUser).pop()
         const userQuestion = lastUserMessage?.text || selectedText
         
-        onPushToMain(messagesToPush, selectedText, sourceMessageId, savedAsChat, userQuestion, savedChatId || undefined)
+        // Use a unique source ID for each push to avoid deduplication issues
+        const pushSourceId = `${sourceMessageId}-push-${Date.now()}`
+        
+        onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, savedChatId || undefined)
         setPushedToMain(true)
+        setPushedMessageCount(messagesToPush.length)
+        setLastPushSourceId(pushSourceId)
         // Don't close - let user decide if they also want to save as chat
         // onClose()
       }
@@ -489,7 +543,7 @@ export default function DriftPanel({
                 onMouseEnter={() => setHoveredMessageId(msg.id)}
                 onMouseLeave={() => setHoveredMessageId(null)}
               >
-                <div className="relative max-w-[85%]">
+                <div className="relative max-w-[85%]" data-drift-message-id={msg.id}>
                   <div
                     className={`
                       rounded-2xl px-4 py-2.5
