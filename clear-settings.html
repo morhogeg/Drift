@@ -1,0 +1,18 @@
+<\!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Drift Settings</title>
+</head>
+<body>
+    <h1>Clear Drift Settings</h1>
+    <button onclick="clearSettings()">Clear Settings and Reload</button>
+    <script>
+        function clearSettings() {
+            localStorage.removeItem('drift_ai_settings');
+            alert('Settings cleared\! Redirecting to app...');
+            window.location.href = 'http://localhost:5174';
+        }
+    </script>
+</body>
+</html>
+EOF < /dev/null

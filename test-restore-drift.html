@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Drift Conversation Restoration</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #0a0a0a;
+            color: #ffffff;
+        }
+        .test-section {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #a855f7;
+            margin-top: 0;
+        }
+        .test-step {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 3px solid #ff006e;
+        }
+        .expected {
+            color: #14b8a6;
+            margin-top: 10px;
+        }
+        .code {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            border: 1px solid #333;
+        }
+        .important {
+            background: linear-gradient(to right, #ff006e20, #a855f720);
+            border: 1px solid #a855f7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌀 Drift Conversation Restoration - Test Plan</h1>
+    
+    <div class="important">
+        <strong>✨ New Feature:</strong> Drift conversations are now preserved when you close and reopen them!
+        When you click on a highlighted drift link, it will restore the entire conversation that took place.
+    </div>
+
+    <div class="test-section">
+        <h2>Test Scenario: Complete Drift Restoration</h2>
+        
+        <div class="test-step">
+            <strong>Step 1: Create an AI response with multiple concepts</strong>
+            <p>Ask a question that generates a response with distinct topics:</p>
+            <div class="code">
+                "Tell me about Apple Inc, Microsoft, and Google"
+            </div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 2: Start a drift on "Apple Inc"</strong>
+            <p>Select "Apple Inc" and click the 🌀 button to open drift panel</p>
+            <div class="expected">✅ Expected: Drift panel opens with system message about "Apple Inc"</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 3: Have a conversation in the drift</strong>
+            <p>Ask multiple questions about Apple Inc:</p>
+            <div class="code">
+                - "What was their first product?"
+                - "Who founded the company?"
+                - "What's their market cap?"
+            </div>
+            <div class="expected">✅ Expected: Full conversation takes place in drift panel</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 4: Close the drift panel</strong>
+            <p>Click the X button to close the drift</p>
+            <div class="expected">✅ Expected: "Apple Inc" remains highlighted as a purple link in the main chat</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 5: Start a different drift on "Microsoft"</strong>
+            <p>Select "Microsoft" and start another drift conversation</p>
+            <div class="expected">✅ Expected: New drift opens with fresh system message about "Microsoft"</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 6: Have conversation and close</strong>
+            <p>Ask questions about Microsoft, then close the drift</p>
+            <div class="expected">✅ Expected: Both "Apple Inc" and "Microsoft" are now purple drift links</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 7: Click on "Apple Inc" link to restore</strong>
+            <p>Click on the highlighted "Apple Inc" text in the main message</p>
+            <div class="expected">
+                ✅ Expected: Drift panel reopens showing:<br>
+                - Original system message<br>
+                - All your questions about Apple<br>
+                - All AI responses<br>
+                - Complete conversation history preserved
+            </div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 8: Continue the conversation</strong>
+            <p>Add new questions to the restored drift</p>
+            <div class="expected">✅ Expected: New messages are added to the existing conversation</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 9: Click on "Microsoft" link</strong>
+            <p>Close Apple drift and click on "Microsoft" link</p>
+            <div class="expected">✅ Expected: Microsoft drift conversation is fully restored with all previous Q&A</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Edge Cases to Test</h2>
+        
+        <div class="test-step">
+            <strong>Multiple reopens of same drift</strong>
+            <p>Open and close the same drift multiple times</p>
+            <div class="expected">✅ Expected: Conversation persists and accumulates across all sessions</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Save drift as chat</strong>
+            <p>Save a drift conversation as a new chat</p>
+            <div class="expected">✅ Expected: Link changes from temporary to permanent, clicking opens saved chat</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Push drift to main</strong>
+            <p>Push a drift conversation back to main chat</p>
+            <div class="expected">✅ Expected: Original drift link still works and shows the conversation</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Page refresh</strong>
+            <p>Refresh the page after creating temporary drifts</p>
+            <div class="expected">⚠️ Note: Temporary drifts are not persisted across page reloads (only saved chats persist)</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Visual Indicators</h2>
+        <ul>
+            <li>✅ Temporary drift links show "Open drift panel" tooltip</li>
+            <li>✅ Saved drift links show "View drift conversation" tooltip</li>
+            <li>✅ Purple gradient background on all drift links</li>
+            <li>✅ Pink hover effect on drift links</li>
+            <li>✅ Multiple drift links can coexist in same message</li>
+        </ul>
+    </div>
+
+</body>
+</html>

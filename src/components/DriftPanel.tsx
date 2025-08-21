@@ -16,7 +16,7 @@ interface Message {
 
 interface DriftPanelProps {
   isOpen: boolean
-  onClose: () => void
+  onClose: (driftMessages?: Message[]) => void
   selectedText: string
   contextMessages: Message[]
   sourceMessageId: string
@@ -29,6 +29,8 @@ interface DriftPanelProps {
   onUndoSaveAsChat?: (chatId: string) => void
   onSnippetCountUpdate?: () => void
   aiSettings: AISettings
+  existingMessages?: Message[]
+  driftChatId?: string
 }
 
 export default function DriftPanel({
@@ -45,7 +47,9 @@ export default function DriftPanel({
   onUndoPushToMain,
   onUndoSaveAsChat,
   onSnippetCountUpdate,
-  aiSettings
+  aiSettings,
+  existingMessages,
+  driftChatId
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -61,22 +65,29 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  // Initialize Drift with only system message (no context)
+  // Initialize Drift with existing messages or system message
   useEffect(() => {
     if (isOpen) {
-      // Add system context message
-      const systemMessage: Message = {
-        id: 'drift-system-' + Date.now(),
-        text: `🌀 Drift started from: "${selectedText}"\n\nLet's explore this specific term or concept. What would you like to know about "${selectedText}"?`,
-        isUser: false,
-        timestamp: new Date()
+      // Check if we have existing messages for this drift
+      if (existingMessages && existingMessages.length > 0) {
+        // Restore the existing conversation
+        setMessages(existingMessages)
+        setDriftOnlyMessages(existingMessages)
+      } else {
+        // Add system context message for new drift
+        const systemMessage: Message = {
+          id: 'drift-system-' + Date.now(),
+          text: `🌀 Drift started from: "${selectedText}"\n\nLet's explore this specific term or concept. What would you like to know about "${selectedText}"?`,
+          isUser: false,
+          timestamp: new Date()
+        }
+        
+        // Set only the system message - no context messages
+        setMessages([systemMessage])
+        
+        // Set drift-only messages (just the system message to start)
+        setDriftOnlyMessages([systemMessage])
       }
-      
-      // Set only the system message - no context messages
-      setMessages([systemMessage])
-      
-      // Set drift-only messages (just the system message to start)
-      setDriftOnlyMessages([systemMessage])
       
       // Reset states when opening new drift
       setPushedToMain(false)
@@ -95,7 +106,7 @@ export default function DriftPanel({
       })
       setSavedMessageIds(savedIds)
     }
-  }, [isOpen, selectedText])
+  }, [isOpen, selectedText, existingMessages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -462,7 +473,7 @@ export default function DriftPanel({
               </div>
             </div>
             <button
-              onClick={onClose}
+              onClick={() => onClose(driftOnlyMessages)}
               className="absolute right-6 p-2 hover:bg-dark-elevated rounded-lg transition-colors"
             >
               <X className="w-5 h-5 text-text-muted" />

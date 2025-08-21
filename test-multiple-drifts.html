@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Multiple Drifts per Message</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #0a0a0a;
+            color: #ffffff;
+        }
+        .test-section {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #a855f7;
+            margin-top: 0;
+        }
+        .test-step {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 3px solid #ff006e;
+        }
+        .expected {
+            color: #14b8a6;
+            margin-top: 10px;
+        }
+        .code {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌀 Multiple Drifts per Message - Test Plan</h1>
+    
+    <div class="test-section">
+        <h2>Feature Overview</h2>
+        <p>Users can now create multiple drift conversations from different parts of the same AI message. Each selected text will become a clickable drift link that can be explored independently.</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Scenario 1: Creating Multiple Drifts</h2>
+        
+        <div class="test-step">
+            <strong>Step 1: Generate a long AI response</strong>
+            <p>Ask a question that generates a response with multiple interesting concepts:</p>
+            <div class="code">
+                "Explain quantum computing, machine learning, and blockchain technology in simple terms"
+            </div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 2: Create first drift</strong>
+            <p>Select the text "quantum computing" and click the 🌀 button to start a drift</p>
+            <div class="expected">✅ Expected: Drift panel opens with "quantum computing" context</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 3: Close first drift and create second drift</strong>
+            <p>Close the drift panel, then select "machine learning" from the same message and start another drift</p>
+            <div class="expected">✅ Expected: New drift panel opens with "machine learning" context</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 4: Verify both drift links are visible</strong>
+            <p>Look at the original AI message in the main chat</p>
+            <div class="expected">✅ Expected: Both "quantum computing" and "machine learning" should appear as purple gradient clickable links</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 5: Create third drift</strong>
+            <p>Select "blockchain technology" and create another drift</p>
+            <div class="expected">✅ Expected: Three drift links should now be visible in the same message</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Scenario 2: Saving Multiple Drifts</h2>
+        
+        <div class="test-step">
+            <strong>Step 1: Save first drift as chat</strong>
+            <p>Open the "quantum computing" drift and save it as a new chat</p>
+            <div class="expected">✅ Expected: New chat appears in sidebar, link in main message becomes permanent</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 2: Save second drift as chat</strong>
+            <p>Open the "machine learning" drift and save it as well</p>
+            <div class="expected">✅ Expected: Two saved drift chats in sidebar, both links functional</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Step 3: Navigate between saved drifts</strong>
+            <p>Click on each drift link to navigate to the saved conversations</p>
+            <div class="expected">✅ Expected: Each link takes you to the correct saved drift conversation</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Scenario 3: Edge Cases</h2>
+        
+        <div class="test-step">
+            <strong>Overlapping text selections</strong>
+            <p>Try to create a drift with text that overlaps with an existing drift</p>
+            <div class="expected">✅ Expected: Should create a new drift, both should be accessible</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Same text, different occurrences</strong>
+            <p>If the same word appears multiple times, create drifts for different occurrences</p>
+            <div class="expected">✅ Expected: Each occurrence can have its own drift</div>
+        </div>
+
+        <div class="test-step">
+            <strong>Delete a drift chat</strong>
+            <p>Delete one of the saved drift chats from the sidebar</p>
+            <div class="expected">✅ Expected: That drift link should be removed, others remain functional</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Scenario 4: Push Multiple Drifts</h2>
+        
+        <div class="test-step">
+            <strong>Push drifts back to main chat</strong>
+            <p>Push one or more drift conversations back to the main chat</p>
+            <div class="expected">✅ Expected: Original message should retain all drift links, pushed content appears below</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Visual Verification</h2>
+        <ul>
+            <li>✅ Each drift link has purple gradient background</li>
+            <li>✅ Hover effect changes text color to pink</li>
+            <li>✅ Multiple drift links are properly spaced</li>
+            <li>✅ Links don't interfere with markdown formatting</li>
+            <li>✅ Temporary drift links show "Open drift panel" tooltip</li>
+            <li>✅ Saved drift links show "View drift conversation" tooltip</li>
+        </ul>
+    </div>
+
+</body>
+</html>

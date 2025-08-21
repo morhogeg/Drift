@@ -18,10 +18,10 @@ interface Message {
   isUser: boolean
   timestamp: Date
   hasDrift?: boolean
-  driftInfo?: {
+  driftInfos?: Array<{
     selectedText: string
     driftChatId: string
-  }
+  }>
   isDriftPush?: boolean  // Marks messages that were pushed from drift
   driftPushMetadata?: {   // Metadata for pushed drift messages
     selectedText: string
@@ -89,6 +89,8 @@ function App() {
     sourceMessageId: string
     contextMessages: Message[]
     highlightMessageId?: string
+    driftChatId?: string
+    existingMessages?: Message[]
   }>({
     selectedText: '',
     sourceMessageId: '',
@@ -98,6 +100,9 @@ function App() {
   // Gallery state
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [snippetCount, setSnippetCount] = useState(0)
+  
+  // Store temporary drift conversations - key is driftChatId
+  const [tempDriftConversations, setTempDriftConversations] = useState<Map<string, Message[]>>(new Map())
   
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -609,8 +614,8 @@ function App() {
   }
 
   // Drift handlers
-  const handleStartDrift = (selectedText: string, messageId: string) => {
-    console.log('handleStartDrift called with:', { selectedText, messageId })
+  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string) => {
+    console.log('handleStartDrift called with:', { selectedText, messageId, existingDriftChatId })
     
     // Save scroll position
     const chatContainer = document.querySelector('.chat-messages-container')
@@ -667,15 +672,22 @@ function App() {
     
     // Mark the source message as having a drift (for visual indication)
     if (actualMessage) {
+      // Check if there's already a drift for this text from this message
+      const existingDrift = actualMessage.driftInfos?.find(d => d.selectedText === selectedText)
+      const driftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
+      
       const updatedMessages = currentMessages.map(msg => 
         msg.id === actualMessage.id 
           ? { 
               ...msg, 
               hasDrift: true, 
-              driftInfo: { 
-                selectedText, 
-                driftChatId: `drift-temp-${Date.now()}` // Temporary ID for current drift
-              } 
+              driftInfos: existingDrift ? msg.driftInfos : [
+                ...(msg.driftInfos || []),
+                { 
+                  selectedText, 
+                  driftChatId
+                }
+              ]
             }
           : msg
       )
@@ -693,17 +705,32 @@ function App() {
     console.log('Setting drift context with sourceMessageId:', finalSourceMessageId)
     console.log('actualMessage:', actualMessage)
     
+    // Check if we have an existing drift conversation for this drift ID
+    const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
+    const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
+    
     setDriftContext({
       selectedText,
       sourceMessageId: finalSourceMessageId,
       contextMessages,
-      highlightMessageId: actualMessage?.id
+      highlightMessageId: actualMessage?.id,
+      driftChatId: finalDriftChatId,
+      existingMessages: tempDriftConversations.get(finalDriftChatId) || []
     })
     setDriftOpen(true)
     console.log('Drift panel opened with', contextMessages.length, 'context messages')
   }
 
-  const handleCloseDrift = () => {
+  const handleCloseDrift = (driftMessages?: Message[]) => {
+    // Save drift conversation if provided
+    if (driftMessages && driftContext.driftChatId) {
+      setTempDriftConversations(prev => {
+        const newMap = new Map(prev)
+        newMap.set(driftContext.driftChatId!, driftMessages)
+        return newMap
+      })
+    }
+    
     setDriftOpen(false)
     
     // Restore scroll position
@@ -790,15 +817,19 @@ function App() {
     const updatedMessages = messages.map(msg => {
       // Update if it's the source message OR if it has a temporary drift ID for this drift
       if (msg.id === metadata.sourceMessageId || 
-          (msg.driftInfo && msg.driftInfo.selectedText === metadata.selectedText && 
-           msg.driftInfo.driftChatId.startsWith('drift-temp-'))) {
+          (msg.driftInfos && msg.driftInfos.some(d => 
+            d.selectedText === metadata.selectedText && 
+            d.driftChatId.startsWith('drift-temp-')))) {
         return { 
           ...msg, 
           hasDrift: true,
-          driftInfo: {
-            selectedText: metadata.selectedText,
-            driftChatId: newChatId
-          }
+          driftInfos: [
+            ...(msg.driftInfos?.filter(d => d.selectedText !== metadata.selectedText) || []),
+            {
+              selectedText: metadata.selectedText,
+              driftChatId: newChatId
+            }
+          ]
         }
       }
       return msg
@@ -816,15 +847,19 @@ function App() {
           // Also update messages in other chats if they contain the source message
           const updatedChatMessages = chat.messages.map(msg => {
             if (msg.id === metadata.sourceMessageId || 
-                (msg.driftInfo && msg.driftInfo.selectedText === metadata.selectedText && 
-                 msg.driftInfo.driftChatId.startsWith('drift-temp-'))) {
+                (msg.driftInfos && msg.driftInfos.some(d => 
+                  d.selectedText === metadata.selectedText && 
+                  d.driftChatId.startsWith('drift-temp-')))) {
               return { 
                 ...msg, 
                 hasDrift: true,
-                driftInfo: {
-                  selectedText: metadata.selectedText,
-                  driftChatId: newChatId
-                }
+                driftInfos: [
+                  ...(msg.driftInfos?.filter(d => d.selectedText !== metadata.selectedText) || []),
+                  {
+                    selectedText: metadata.selectedText,
+                    driftChatId: newChatId
+                  }
+                ]
               }
             }
             return msg
@@ -863,9 +898,14 @@ function App() {
     
     // Also remove the drift info from the source message
     const updatedMessages = messages.map(msg => {
-      if (msg.hasDrift && msg.driftInfo?.driftChatId === chatId) {
-        const { driftInfo, hasDrift, ...restMsg } = msg
-        return restMsg
+      if (msg.hasDrift && msg.driftInfos?.some(d => d.driftChatId === chatId)) {
+        const remainingDrifts = msg.driftInfos.filter(d => d.driftChatId !== chatId)
+        if (remainingDrifts.length === 0) {
+          const { driftInfos, hasDrift, ...restMsg } = msg
+          return restMsg
+        } else {
+          return { ...msg, driftInfos: remainingDrifts }
+        }
       }
       return msg
     })
@@ -952,10 +992,13 @@ function App() {
         ? { 
             ...msg, 
             hasDrift: true,
-            driftInfo: {
-              selectedText: selectedText,
-              driftChatId: actualDriftChatId
-            }
+            driftInfos: [
+              ...(msg.driftInfos || []),
+              {
+                selectedText: selectedText,
+                driftChatId: actualDriftChatId
+              }
+            ]
           }
         : msg
     )
@@ -1173,10 +1216,13 @@ function App() {
         return { 
           ...m, 
           hasDrift: true,
-          driftInfo: {
-            selectedText: msg.driftPushMetadata!.selectedText,
-            driftChatId: newChatId
-          }
+          driftInfos: [
+            ...(m.driftInfos || []),
+            {
+              selectedText: msg.driftPushMetadata!.selectedText,
+              driftChatId: newChatId
+            }
+          ]
         }
       }
       // Update all drift pushed messages to mark them as saved
@@ -1696,7 +1742,7 @@ function App() {
                                   handleStartDrift(
                                     msg.driftPushMetadata!.selectedText,
                                     originalSourceId,
-                                    msg.text // Pass the message text to find and highlight
+                                    msg.driftPushMetadata!.driftChatId
                                   )
                                 }
                               }, 150)
@@ -1794,16 +1840,16 @@ function App() {
                             } else if (msg.driftPushMetadata) {
                               // Otherwise, just start a new drift from the original source
                               // This is simpler and more predictable
-                              handleStartDrift(msg.driftPushMetadata.selectedText, msg.driftPushMetadata.sourceMessageId || msg.id)
+                              handleStartDrift(msg.driftPushMetadata.selectedText, msg.driftPushMetadata.sourceMessageId || msg.id, msg.driftPushMetadata.driftChatId)
                             }
                           }}
                           title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
                         >
-                          <div className="italic truncate mb-1">
+                          <div className="italic mb-1">
                             From: "{msg.driftPushMetadata?.selectedText}"
                           </div>
                           {msg.driftPushMetadata?.userQuestion && (
-                            <div className="italic truncate">
+                            <div className="italic">
                               Q: "{msg.driftPushMetadata.userQuestion}"
                             </div>
                           )}
@@ -1813,8 +1859,8 @@ function App() {
                       
                       {msg.isUser ? (
                         <p className="text-sm leading-relaxed">{msg.text}</p>
-                      ) : msg.driftInfo ? (
-                        // Render AI message with clickable drift link
+                      ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
+                        // Render AI message with clickable drift links
                         <div className="text-sm leading-relaxed">
                           <ReactMarkdown
                             className="prose prose-sm prose-invert max-w-none
@@ -1830,23 +1876,37 @@ function App() {
                             remarkPlugins={[remarkGfm]}
                             components={{
                               p: ({children}) => {
-                                // Check if this paragraph contains the drift text
-                                const text = String(children)
-                                const driftText = msg.driftInfo?.selectedText
+                                let text = String(children)
+                                let result: React.ReactNode[] = []
+                                let lastIndex = 0
                                 
-                                if (driftText && text.includes(driftText)) {
-                                  const parts = text.split(driftText)
-                                  return (
-                                    <p className="mb-2">
-                                      {parts[0]}
+                                // Sort drifts by their position in the text to handle them in order
+                                const sortedDrifts = [...msg.driftInfos!].sort((a, b) => {
+                                  const aIndex = text.indexOf(a.selectedText)
+                                  const bIndex = text.indexOf(b.selectedText)
+                                  return aIndex - bIndex
+                                })
+                                
+                                // Process each drift
+                                sortedDrifts.forEach((drift, idx) => {
+                                  const driftIndex = text.indexOf(drift.selectedText, lastIndex)
+                                  if (driftIndex !== -1) {
+                                    // Add text before the drift
+                                    if (driftIndex > lastIndex) {
+                                      result.push(text.substring(lastIndex, driftIndex))
+                                    }
+                                    
+                                    // Add the drift button
+                                    result.push(
                                       <button
+                                        key={`drift-${idx}-${drift.driftChatId}`}
                                         onClick={() => {
                                           // If it's a temporary drift, reopen the drift panel
-                                          if (msg.driftInfo!.driftChatId.startsWith('drift-temp-')) {
-                                            handleStartDrift(msg.driftInfo!.selectedText, msg.id)
+                                          if (drift.driftChatId.startsWith('drift-temp-')) {
+                                            handleStartDrift(drift.selectedText, msg.id, drift.driftChatId)
                                           } else {
                                             // Otherwise switch to the saved drift chat
-                                            switchChat(msg.driftInfo!.driftChatId)
+                                            switchChat(drift.driftChatId)
                                           }
                                         }}
                                         className="inline px-1.5 py-0.5 rounded
@@ -1854,17 +1914,29 @@ function App() {
                                                  border border-accent-violet/30 hover:border-accent-violet/50
                                                  text-accent-violet hover:text-accent-pink
                                                  transition-all duration-100"
-                                        title={msg.driftInfo!.driftChatId.startsWith('drift-temp-') 
+                                        title={drift.driftChatId.startsWith('drift-temp-') 
                                           ? "Open drift panel" 
                                           : "View drift conversation"}
                                       >
-                                        {driftText}
+                                        {drift.selectedText}
                                       </button>
-                                      {parts.slice(1).join(driftText)}
-                                    </p>
-                                  )
+                                    )
+                                    
+                                    lastIndex = driftIndex + drift.selectedText.length
+                                  }
+                                })
+                                
+                                // Add any remaining text
+                                if (lastIndex < text.length) {
+                                  result.push(text.substring(lastIndex))
                                 }
-                                return <p className="mb-2">{children}</p>
+                                
+                                // If no drifts were found in the text, just return the original
+                                if (result.length === 0) {
+                                  return <p className="mb-2">{children}</p>
+                                }
+                                
+                                return <p className="mb-2">{result}</p>
                               }
                             }}
                           >
@@ -2028,6 +2100,8 @@ function App() {
         onUndoSaveAsChat={handleUndoSaveAsChat}
         onSnippetCountUpdate={() => setSnippetCount(snippetStorage.getAllSnippets().length)}
         aiSettings={aiSettings}
+        existingMessages={driftContext?.existingMessages}
+        driftChatId={driftContext?.driftChatId}
       />
       
       {/* Settings Modal */}
