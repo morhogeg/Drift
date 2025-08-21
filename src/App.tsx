@@ -196,6 +196,20 @@ function App() {
     }
   }, [streamingResponse])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Command+Option+N or Ctrl+Alt+N for new chat
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'n') {
+        e.preventDefault()
+        createNewChat()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [chatHistory, activeChatId, messages]) // Dependencies needed by createNewChat
+
   useEffect(() => {
     // Check API connection on mount
     const checkConnection = async (showConnecting = true) => {
@@ -1215,7 +1229,7 @@ function App() {
       <aside className={`
         fixed z-20 w-[260px] h-full bg-dark-surface/95 backdrop-blur-sm
         border-r border-dark-border/30 flex flex-col
-        transition-all duration-300 ease-in-out
+        transition-all duration-150 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         shadow-[inset_-8px_0_10px_-8px_rgba(0,0,0,0.4)]
       `}>
@@ -1228,7 +1242,7 @@ function App() {
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="p-1 hover:bg-dark-elevated rounded-lg transition-colors"
+              className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
             >
               <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
             </button>
@@ -1248,7 +1262,7 @@ function App() {
                 border border-dark-border/30
                 focus:outline-none focus:border-accent-violet/50
                 placeholder:text-text-muted
-                transition-all duration-200
+                transition-all duration-100
               "
             />
             {searchQuery && (
@@ -1257,11 +1271,11 @@ function App() {
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full
                          bg-dark-border/30 hover:bg-accent-violet/20
                          flex items-center justify-center
-                         transition-all duration-200 hover:scale-110
+                         transition-all duration-100 hover:scale-110
                          group"
                 title="Clear search"
               >
-                <X className="w-2.5 h-2.5 text-text-muted group-hover:text-accent-violet transition-colors" />
+                <X className="w-2.5 h-2.5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
               </button>
             )}
           </div>
@@ -1276,7 +1290,7 @@ function App() {
               onContextMenu={(e) => handleContextMenu(e, chat.id)}
               className={`
                 group relative rounded-lg p-2.5 cursor-pointer
-                transition-all duration-200 ease-in-out
+                transition-all duration-100 ease-in-out
                 ${activeChatId === chat.id 
                   ? 'bg-dark-elevated border-l-2 border-accent-pink shadow-lg' 
                   : 'bg-dark-elevated/30 hover:bg-dark-elevated/50'
@@ -1341,83 +1355,69 @@ function App() {
           ))}
         </div>
 
-        {/* Sidebar Footer */}
-        <div className="p-3 border-t border-dark-border/30">
-          <div className="flex items-center gap-2 mb-3">
-            {/* Settings Icon Button */}
-            <button 
-              onClick={() => setSettingsOpen(true)}
-              className="
-              flex-1 flex items-center justify-center
-              bg-dark-elevated border border-dark-border
-              text-text-secondary rounded-lg p-2
-              hover:bg-dark-surface hover:text-text-primary
-              hover:border-violet-500/30
-              transition-all duration-200
-              group relative
-            "
-              title="AI Settings"
-            >
-              <SettingsIcon className="w-4 h-4" />
-            </button>
-            
-            {/* Snippet Gallery Icon Button */}
-            <button 
-              onClick={() => setGalleryOpen(true)}
-              className="
-              flex-1 flex items-center justify-center
-              bg-gradient-to-r from-cyan-500/20 to-teal-500/20
-              border border-cyan-500/30
-              text-cyan-400 rounded-lg p-2
-              hover:from-cyan-500/30 hover:to-teal-500/30
-              hover:border-cyan-500/50
-              transition-all duration-200
-              relative
-            "
-              title="Snippet Gallery"
-            >
-              <Bookmark className="w-4 h-4" />
-              {snippetCount > 0 && (
-                <span className="absolute -top-1 -right-1 text-[10px] bg-cyan-500 text-dark-bg px-1.5 py-0.5 rounded-full min-w-[18px] text-center font-medium">
-                  {snippetCount}
-                </span>
-              )}
-            </button>
-          </div>
-          
-          <button 
-            onClick={createNewChat}
-            className="
-            w-full flex items-center justify-center gap-2
-            bg-gradient-to-r from-accent-pink to-accent-violet
-            text-white rounded-full px-3 py-2
-            hover:shadow-lg hover:shadow-accent-pink/20
-            transition-all duration-200 hover:scale-[1.02]
-          ">
-            <Plus className="w-3.5 h-3.5" />
-            <span className="text-sm font-medium">New Chat</span>
-          </button>
-        </div>
       </aside>
 
       {/* Main Chat Area */}
       <div className={`
         flex-1 flex flex-col relative
-        transition-all duration-300 ease-in-out
+        transition-all duration-150 ease-in-out
         ${sidebarOpen ? 'ml-[260px]' : 'ml-0'}
         ${driftOpen ? 'mr-[450px]' : 'mr-0'}
       `}>
         {/* Header with Drift branding */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
           <div className="px-6 py-4 flex items-center justify-between">
-            {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-2 hover:bg-dark-elevated rounded-lg transition-colors"
-              >
-                <Menu className="w-5 h-5 text-text-muted" />
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {!sidebarOpen ? (
+                <>
+                  <button
+                    onClick={() => setSidebarOpen(true)}
+                    className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
+                    title="Open sidebar"
+                  >
+                    <Menu className="w-5 h-5 text-text-muted" />
+                  </button>
+                  <div className="w-px h-6 bg-dark-border/30" />
+                </>
+              ) : (
+                <div className="w-[41px]" />
+              )}
+              
+              {/* Action buttons - always visible */}
+              <div className="flex items-center gap-2">
+                {/* New Chat Button */}
+                <button
+                  onClick={createNewChat}
+                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                  title="New chat (⌘⌥N)"
+                >
+                  <Plus className="w-5 h-5 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
+                </button>
+                
+                {/* Settings Button */}
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                  title="AI Settings"
+                >
+                  <SettingsIcon className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
+                </button>
+                
+                {/* Snippet Gallery Button */}
+                <button
+                  onClick={() => setGalleryOpen(true)}
+                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative"
+                  title="Snippet Gallery"
+                >
+                  <Bookmark className="w-5 h-5 text-text-muted group-hover:text-cyan-400 transition-colors duration-75" />
+                  {snippetCount > 0 && (
+                    <span className="absolute -top-1 -right-1 text-[10px] bg-cyan-500 text-dark-bg px-1.5 py-0.5 rounded-full min-w-[18px] text-center font-medium">
+                      {snippetCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
             
             <div className="flex-1 flex items-center justify-center">
               <div className="flex items-center gap-2 animate-fade-up">
@@ -1447,7 +1447,7 @@ function App() {
                       setSelectedModel(value as OpenRouterModel)
                     }
                   }}
-                  className="appearance-none pl-4 pr-8 py-1.5 rounded-full bg-dark-elevated/70 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-200 text-xs font-medium text-text-primary cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-violet/40 focus:border-transparent backdrop-blur-sm"
+                  className="appearance-none pl-4 pr-8 py-1.5 rounded-full bg-dark-elevated/70 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-violet/40 focus:border-transparent backdrop-blur-sm"
                   title="Select AI model"
                 >
                   <optgroup label="OpenRouter (Free)">
@@ -1461,7 +1461,7 @@ function App() {
               </div>
               
               {/* Connection Status Badge */}
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-sm transition-all duration-300 ${
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-sm transition-all duration-150 ${
                 isConnecting
                   ? 'bg-amber-500/10 border border-amber-500/30'
                   : apiConnected 
@@ -1508,7 +1508,7 @@ function App() {
                     text-text-muted shadow-lg
                     flex items-center justify-center
                     hover:bg-dark-bubble hover:text-text-primary
-                    transition-all duration-200 hover:scale-105
+                    transition-all duration-100 hover:scale-105
                     animate-fade-up
                   "
                   title="Scroll to bottom"
@@ -1591,7 +1591,7 @@ function App() {
                         }}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-dark-elevated/50 hover:bg-dark-elevated 
                                  border border-accent-violet/30 hover:border-accent-violet/50 rounded-full
-                                 text-accent-violet transition-all duration-200 ml-4"
+                                 text-accent-violet transition-all duration-100 ml-4"
                       >
                         <ChevronLeft className="w-3 h-3" />
                         Back to source
@@ -1671,7 +1671,7 @@ function App() {
                               ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-accent-violet/50'
                               : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                           }
-                          transition-all duration-200 hover:scale-[1.02]
+                          transition-all duration-100 hover:scale-[1.02]
                           ${!msg.isUser ? 'select-text' : ''}
                         `}
                         data-message-id={msg.id}
@@ -1738,11 +1738,11 @@ function App() {
                       >
                       {/* Message actions for AI messages */}
                       {!msg.isUser && (
-                        <div className={`absolute -right-9 top-2 flex flex-col gap-1 transition-all duration-200 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className={`absolute -right-9 top-2 flex flex-col gap-1 transition-all duration-100 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
                           <button
                             onClick={() => handleCopyMessage(msg.text, msg.id)}
                             className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 pointer-events-auto
-                                     hover:bg-dark-surface hover:border-accent-violet/30 transition-all duration-200
+                                     hover:bg-dark-surface hover:border-accent-violet/30 transition-all duration-100
                                      shadow-lg hover:scale-110"
                             title="Copy message"
                           >
@@ -1758,12 +1758,12 @@ function App() {
                                      ${savedMessageIds.has(msg.id) 
                                        ? 'border-cyan-500/50 bg-cyan-500/10' 
                                        : 'border-dark-border/50'}
-                                     hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200
+                                     hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-100
                                      shadow-lg hover:scale-110`}
                             title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
                           >
                             <Bookmark 
-                              className={`w-3.5 h-3.5 transition-colors
+                              className={`w-3.5 h-3.5 transition-colors duration-75
                                 ${savedMessageIds.has(msg.id) 
                                   ? 'text-cyan-400 fill-cyan-400' 
                                   : 'text-text-muted hover:text-cyan-400'}`}
@@ -1774,7 +1774,7 @@ function App() {
                             <button
                               onClick={() => handleSavePushedDriftAsChat(msg)}
                               className="p-1.5 rounded-lg bg-dark-elevated border border-accent-violet/50 pointer-events-auto
-                                       hover:bg-accent-violet/10 hover:border-accent-violet/70 transition-all duration-200
+                                       hover:bg-accent-violet/10 hover:border-accent-violet/70 transition-all duration-100
                                        shadow-lg hover:scale-110"
                               title="Save drift as new chat"
                             >
@@ -1786,7 +1786,7 @@ function App() {
                       {/* Add drift context for first AI drift message in multi-message groups or single messages */}
                       {isDriftMessage && !msg.isUser && (isFirstDriftMessage || !hasMultipleDriftMessages) && (
                         <div 
-                          className="absolute top-2 left-3 right-3 text-[10px] text-text-muted cursor-pointer hover:text-accent-violet transition-colors duration-200"
+                          className="absolute top-2 left-3 right-3 text-[10px] text-text-muted cursor-pointer hover:text-accent-violet transition-colors duration-75 duration-200"
                           onClick={() => {
                             // If this drift was saved as a chat, open it
                             if (msg.driftPushMetadata?.wasSavedAsChat && msg.driftPushMetadata?.driftChatId) {
@@ -1853,7 +1853,7 @@ function App() {
                                                  bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
                                                  border border-accent-violet/30 hover:border-accent-violet/50
                                                  text-accent-violet hover:text-accent-pink
-                                                 transition-all duration-200"
+                                                 transition-all duration-100"
                                         title={msg.driftInfo!.driftChatId.startsWith('drift-temp-') 
                                           ? "Open drift panel" 
                                           : "View drift conversation"}
@@ -1953,7 +1953,7 @@ function App() {
                     focus:outline-none focus:border-accent-pink/50
                     focus:shadow-[0_0_0_2px_rgba(255,0,122,0.2)]
                     placeholder:text-text-muted
-                    transition-all duration-300
+                    transition-all duration-150
                     disabled:opacity-70
                     resize-none
                     min-h-[56px] max-h-[200px]
@@ -1974,7 +1974,7 @@ function App() {
                       text-white shadow-lg shadow-accent-pink/30
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
-                      transition-all duration-200
+                      transition-all duration-100
                     "
                     title="Stop generating"
                   >
@@ -1992,7 +1992,7 @@ function App() {
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
                       disabled:opacity-50 disabled:cursor-not-allowed
-                      transition-all duration-200
+                      transition-all duration-100
                     "
                   >
                     <Send className="w-4 h-4" />
