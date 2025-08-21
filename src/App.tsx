@@ -310,7 +310,7 @@ function App() {
         clearTimeout(scrollTimeout)
         scrollTimeout = setTimeout(() => {
           userHasScrolled.current = false
-        }, 100)
+        }, 150)
       }
     }
     
@@ -698,7 +698,7 @@ function App() {
       if (chatContainer) {
         chatContainer.scrollTop = mainScrollPosition.current
       }
-    }, 100)
+    }, 150)
   }
 
   const handleCopyMessage = async (text: string, messageId: string) => {
@@ -1093,7 +1093,7 @@ function App() {
           element.classList.remove('highlight-message')
         }, 3000)
       }
-    }, 100)
+    }, 150)
   }
 
   const handleGoToSource = (chatId: string) => {
@@ -1586,7 +1586,7 @@ function App() {
                               } else {
                                 console.log('Source element not found by ID or text!')
                               }
-                            }, 500)
+                            }, 150)
                           }
                         }}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-dark-elevated/50 hover:bg-dark-elevated 
@@ -1699,7 +1699,7 @@ function App() {
                                     msg.text // Pass the message text to find and highlight
                                   )
                                 }
-                              }, 100)
+                              }, 150)
                             } else if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
                               // Navigate to the saved drift chat
                               const driftChat = chatHistory.find(c => c.id === msg.driftPushMetadata?.driftChatId)
@@ -1717,7 +1717,7 @@ function App() {
                                       sourceElement.classList.remove('highlight-message')
                                     }, 2000)
                                   }
-                                }, 100)
+                                }, 150)
                               }
                             } else {
                               // Drift wasn't saved, navigate to parent and highlight source
@@ -1731,7 +1731,7 @@ function App() {
                                     sourceElement.classList.remove('highlight-message')
                                   }, 2000)
                                 }
-                              }, 100)
+                              }, 150)
                             }
                           }
                         }}
@@ -2054,7 +2054,7 @@ function App() {
                 element.classList.remove('highlight-message')
               }, 2000)
             }
-          }, 100)
+          }, 150)
         }}
       />
       
