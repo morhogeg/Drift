@@ -1,115 +1,158 @@
-# Drift - Modern AI Chat with Side Threading
+# Drift - Intelligent Conversation Explorer
 
-A beautiful, modern AI chat interface with innovative side-threading capabilities. Built with React, TypeScript, and Tailwind CSS.
+A sophisticated AI chat application featuring a unique "drift" capability that allows users to branch conversations and explore concepts in isolated, focused discussions.
 
-![Drift Chat Interface](https://img.shields.io/badge/Status-In%20Development-yellow)
-![React](https://img.shields.io/badge/React-18-blue)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
-![Tailwind](https://img.shields.io/badge/Tailwind-3.4-06B6D4)
+## Overview
 
-## ✨ Features
+Drift transforms the traditional AI chat experience by introducing contextual branching. Select any text from an AI response to "drift" into a focused exploration of that specific concept, maintaining complete separation from the main conversation thread.
 
-- 🌌 **Modern Dark Theme** - Elegant dark interface with pink/violet accents
-- 💬 **Smart Chat Interface** - Beautiful message bubbles with animations
-- 📚 **Chat History Sidebar** - Collapsible sidebar with search functionality
-- 🎨 **Stunning UI/UX** - Gradients, shadows, and smooth transitions
-- ⚡ **Fast & Responsive** - Built with Vite for optimal performance
-- 🔀 **Side Threading** (Coming Soon) - Branch conversations from any message
+Built with React, TypeScript, and Tailwind CSS, Drift features a refined dark glassmorphic aesthetic with purple/pink gradient accents for an elegant, modern interface.
 
-## 🚀 Getting Started
+## Current Features
+
+### 🌀 Drift Mode - Signature Feature
+- **Text Selection Branching**: Select any text from AI responses to open a drift conversation
+- **Isolated Context**: Each drift maintains its own conversation context separate from the main chat
+- **Push to Main**: Merge drift discoveries back into the main conversation with undo capability
+- **Visual Indicators**: Purple gradient selection tooltip with drift emoji (🌀)
+- **Seamless Navigation**: "Go to Source" feature to return to the original conversation
+- **Persistent Drift Chats**: Drift conversations are saved and accessible from the sidebar
+
+### 💬 Chat System
+- **Dual AI Support**: Toggle between OpenRouter (cloud) and Ollama (local) models
+- **Auto-Titling**: Conversations automatically generate titles from the first user message
+- **Markdown Rendering**: Full markdown support with syntax highlighting for code blocks
+- **Streaming Responses**: Real-time streaming of AI responses
+- **Chat History**: Sidebar with all conversations, searchable and organized
+
+### 📚 Snippet Gallery
+- **Save Snippets**: Capture selected text, individual messages, or entire conversations
+- **Organization**: Add tags, notes, and star important snippets
+- **Dual Views**: Switch between grid and list layouts
+- **Search & Filter**: Find snippets by content or tags
+- **Export**: Download snippets as Markdown files
+
+### 🎨 User Interface
+- **Context Menus**: Right-click on chats for rename, duplicate, pin, star, and delete options
+- **Inline Editing**: Rename chats directly without modal dialogs
+- **Pinned Chats**: Pin important conversations to keep them at the top
+- **Dark Theme**: Elegant dark glassmorphic design with subtle transparency effects
+- **Smooth Animations**: Refined transitions and hover effects throughout
+
+## Technical Implementation
+
+### Tech Stack
+- **React 18** - Modern UI framework with hooks
+- **TypeScript** - Type-safe development
+- **Tailwind CSS** - Utility-first styling with custom design system
+- **Vite** - Fast build tool and development server
+- **LocalStorage** - Client-side persistence for chats and snippets
+
+### Architecture Highlights
+- Component-based architecture with reusable UI elements
+- Service layer for API integrations (OpenRouter and Ollama)
+- Custom hooks for state management
+- TypeScript interfaces for type safety
+- Error boundaries for graceful error handling
+
+## Getting Started
 
 ### Prerequisites
-
-- Node.js 18+ 
-- npm or yarn
-- OpenRouter API key (get one at [openrouter.ai/keys](https://openrouter.ai/keys))
+- Node.js 18+ and npm
+- OpenRouter API key (for cloud AI) or Ollama installation (for local AI)
 
 ### Installation
 
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone https://github.com/morhogeg/Drift.git
-cd Drift
-```
+cd drift
 
-2. Install dependencies:
-```bash
+# Install dependencies
 npm install
-```
 
-3. Set up your API key:
-   - Copy `.env.example` to `.env`
-   - Add your OpenRouter API key:
-```bash
+# Set up environment variables
 cp .env.example .env
-# Edit .env and add your key:
-# VITE_OPENROUTER_API_KEY=your_api_key_here
-```
+# Add your OpenRouter API key to .env file
 
-4. Start the development server:
-```bash
+# Start development server
 npm run dev
 ```
 
-5. Open your browser to `http://localhost:5173`
-
-### API Configuration
-
-Drift uses OpenRouter to access the OpenAI OSS-20B model for free. To get started:
-
-1. Sign up at [openrouter.ai](https://openrouter.ai)
-2. Get your API key from [openrouter.ai/keys](https://openrouter.ai/keys)
-3. Add the key to your `.env` file as shown above
-
-The app also supports Ollama for local AI models. You can switch between OpenRouter and Ollama using the toggle button in the header.
-
-## 🛠️ Tech Stack
-
-- **React** - UI framework
-- **TypeScript** - Type safety
-- **Tailwind CSS** - Styling
-- **Framer Motion** - Animations
-- **Vite** - Build tool
-- **Lucide React** - Icons
-
-## 🎨 Design Features
-
-- Custom color palette with vibrant pink (#ff007a) and violet (#a855f7) accents
-- Layered dark backgrounds for depth
-- Smooth animations and transitions
-- Responsive design that works on all devices
-- Beautiful typography with Inter font
-
-## 📝 Development
+### Building for Production
 
 ```bash
-# Run development server
-npm run dev
-
-# Build for production
+# Create production build
 npm run build
 
 # Preview production build
 npm run preview
 ```
 
-## 🔜 Upcoming Features
+## Configuration
 
-- [ ] Full side-threading functionality
-- [ ] Message highlighting and branching
-- [ ] LLM integration (OpenAI/Ollama)
-- [ ] Persistent chat storage
-- [ ] Export conversations
-- [ ] Multi-model support
+### API Setup
+- **OpenRouter**: Sign up at [openrouter.ai](https://openrouter.ai) and add your API key to `.env`
+- **Ollama**: Install Ollama locally and ensure it's running on port 11434
 
-## 📄 License
+## Project Structure
 
-MIT
+```
+/src
+  /components
+    DriftPanel.tsx       # Drift mode UI and logic
+    SelectionTooltip.tsx # Text selection handler
+    SnippetGallery.tsx   # Snippet management interface
+    ContextMenu.tsx      # Right-click context menu
+    ErrorBoundary.tsx    # Error handling wrapper
+  /services
+    openrouter.ts        # OpenRouter API integration
+    ollama.ts            # Ollama API integration
+    snippetStorage.ts    # LocalStorage management
+  /types
+    snippet.ts           # TypeScript type definitions
+  App.tsx               # Main application component
+```
 
-## 🤝 Contributing
+## Future Development
 
-Contributions are welcome! Feel free to open issues or submit pull requests.
+### Planned Features
+- [ ] **Keyboard Shortcuts**: Power-user keyboard navigation
+- [ ] **Mobile Responsive Design**: Optimized layouts for tablets and phones
+- [ ] **Performance Optimizations**: Lazy loading and memoization for large chat histories
+- [ ] **Advanced Search**: Full-text search across all conversations
+- [ ] **Export/Import**: Backup and restore chat histories
+- [ ] **Folder Organization**: Group related conversations
+- [ ] **Collaborative Features**: Share conversations and collaborate in real-time
+- [ ] **Additional AI Models**: Support for more AI providers and models
+- [ ] **Calendar View**: Heatmap visualization of chat activity
+- [ ] **Offline Support**: Work without internet connection using local models
+
+### Under Consideration
+- Theme customization options
+- Voice input/output capabilities
+- Plugin system for extensibility
+- Multi-language support
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+
+### Development Guidelines
+1. Follow existing TypeScript and React patterns
+2. Maintain the established design system
+3. Write clear commit messages
+4. Test across different browsers
+5. Ensure no console errors or warnings
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+Drift is built with modern web technologies and designed to provide a premium chat experience that enhances how users explore and develop ideas through AI conversation.
 
 ---
 
-Built with ❤️ using modern web technologies
+**Drift** - Where conversations branch naturally.
