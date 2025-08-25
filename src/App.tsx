@@ -1050,12 +1050,45 @@ function App() {
     }
     
     // Update ONLY the original source message to mark it as having a drift
-    // Be very specific - only update the actual source message, not any drift pushes
+    // We need to find the actual original message that contains the selected text
+    console.log(`[PUSH ${pushCallId}] Looking for message containing "${selectedText}"`)
+    console.log(`[PUSH ${pushCallId}] Total messages to search: ${messages.length}`)
+    console.log(`[PUSH ${pushCallId}] Original source ID: ${originalSourceId}`)
+    
+    // First, let's find if we already have drift info anywhere
+    const existingDriftMessage = messages.find(msg => 
+      msg.driftInfos?.some(d => d.selectedText === selectedText)
+    )
+    
+    if (existingDriftMessage) {
+      console.log(`[PUSH ${pushCallId}] Found existing drift info in message: ${existingDriftMessage.id}`)
+    }
+    
     const messagesWithDriftMarked = messages.map(msg => {
-      // Only update the original message that was drifted from, not any pushed drift messages
+      // First priority: Check if this message already has drift info for this text
+      if (msg.driftInfos?.some(d => d.selectedText === selectedText)) {
+        console.log(`[PUSH ${pushCallId}] Found message with existing drift info: ${msg.id}`)
+        
+        const existingDriftIndex = msg.driftInfos.findIndex(d => d.selectedText === selectedText)
+        const updatedDriftInfos = [...msg.driftInfos]
+        updatedDriftInfos[existingDriftIndex] = {
+          selectedText: selectedText,
+          driftChatId: actualDriftChatId
+        }
+        
+        console.log(`[PUSH ${pushCallId}] Updating drift info with new ID: ${actualDriftChatId}`)
+        return {
+          ...msg,
+          hasDrift: true,
+          driftInfos: updatedDriftInfos
+        }
+      }
+      
+      // Second priority: Check if this is the original message by ID match
       if (msg.id === originalSourceId && !msg.isDriftPush) {
-        return { 
-          ...msg, 
+        console.log(`[PUSH ${pushCallId}] Found original message by ID: ${msg.id}`)
+        return {
+          ...msg,
           hasDrift: true,
           driftInfos: [
             ...(msg.driftInfos || []),
@@ -1066,8 +1099,49 @@ function App() {
           ]
         }
       }
+      
+      // Third priority: Check if message contains the text (only for AI messages)
+      if (!msg.isDriftPush && !msg.isUser && msg.text && msg.text.includes(selectedText)) {
+        console.log(`[PUSH ${pushCallId}] Found message containing text: ${msg.id}`)
+        
+        // Make sure we don't already have drift info
+        if (!msg.driftInfos?.some(d => d.selectedText === selectedText)) {
+          console.log(`[PUSH ${pushCallId}] Adding new drift info to message ${msg.id}`)
+          return { 
+            ...msg, 
+            hasDrift: true,
+            driftInfos: [
+              ...(msg.driftInfos || []),
+              {
+                selectedText: selectedText,
+                driftChatId: actualDriftChatId
+              }
+            ]
+          }
+        }
+      }
+      
       return msg
     })
+    
+    // Check if we successfully marked any message
+    const markedMessage = messagesWithDriftMarked.find(msg => 
+      msg.driftInfos?.some(d => d.selectedText === selectedText && d.driftChatId === actualDriftChatId)
+    )
+    
+    if (!markedMessage) {
+      console.log(`[PUSH ${pushCallId}] WARNING: Failed to mark any message with drift info!`)
+      console.log(`[PUSH ${pushCallId}] Selected text: "${selectedText}"`)
+      
+      // Log first few messages to debug
+      messages.slice(0, 5).forEach((msg, idx) => {
+        if (!msg.isUser) {
+          console.log(`[PUSH ${pushCallId}] Message ${idx}: ${msg.text?.substring(0, 100)}...`)
+        }
+      })
+    } else {
+      console.log(`[PUSH ${pushCallId}] Successfully marked message: ${markedMessage.id}`)
+    }
     
     // Add metadata to all drift messages (pushing the complete conversation)
     // IMPORTANT: Give each pushed message a unique ID to avoid React key conflicts
@@ -1094,24 +1168,37 @@ function App() {
     const updatedMessages = [...messagesWithDriftMarked, separatorMessage, ...driftMessagesWithMetadata]
     
     console.log(`[PUSH ${pushCallId}] Total messages after push: ${updatedMessages.length}`)
-    setMessages(updatedMessages)
+    
+    // Force a complete re-render by creating new message objects
+    const forceRefreshMessages = updatedMessages.map(msg => ({ ...msg }))
+    
+    setMessages(forceRefreshMessages)
     
     // Get the last message text safely
     const lastDriftMessage = driftMessagesWithMetadata[driftMessagesWithMetadata.length - 1]
     const lastMessageText = lastDriftMessage?.text || 'Drift pushed'
     
-    // Update chat history
+    // Update chat history with the same forced refresh
     setChatHistory(prevHistory => 
       prevHistory.map(chat => 
         chat.id === activeChatId 
           ? { 
               ...chat, 
-              messages: updatedMessages,
+              messages: forceRefreshMessages,
               lastMessage: stripMarkdown(lastMessageText)
             }
           : chat
       )
     )
+    
+    // Log the actual drift info in the updated messages for debugging
+    const messageWithDrift = forceRefreshMessages.find(m => 
+      m.driftInfos?.some(d => d.selectedText === selectedText)
+    )
+    if (messageWithDrift) {
+      console.log(`[PUSH ${pushCallId}] Final message with drift info:`, messageWithDrift.id)
+      console.log(`[PUSH ${pushCallId}] Drift infos:`, messageWithDrift.driftInfos)
+    }
     
     // Don't close drift panel - let user decide if they also want to save it as a chat
     // setDriftOpen(false)
@@ -1783,7 +1870,7 @@ function App() {
                     >
                       <div
                         className={`
-                          ${isDriftMessage && !msg.isUser ? 'max-w-[95%]' : 'max-w-[85%]'} rounded-2xl px-5 ${isFirstDriftMessage && !msg.isUser ? 'pt-10 pb-3' : 'py-3'} relative
+                          ${isDriftMessage && !msg.isUser ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${isDriftMessage && !msg.isUser ? 'pt-10 pb-3' : 'py-3'} relative
                           ${msg.isUser 
                             ? isDriftMessage
                               ? 'bg-gradient-to-br from-accent-violet/30 to-accent-pink/30 text-text-primary border border-accent-violet/30 shadow-lg'
@@ -1906,15 +1993,18 @@ function App() {
                       )}
                       {/* Add Drift tag for single pushed messages */}
                       {isDriftMessage && !msg.isUser && !hasMultipleDriftMessages && (
-                        <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md">
+                        <div 
+                          className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md"
+                        >
                           Drift
                         </div>
                       )}
                       
-                      {/* Add drift context for first AI drift message in multi-message groups or single messages */}
+                      {/* Add drift context for ALL drift messages (both single and multi) */}
                       {isDriftMessage && !msg.isUser && (isFirstDriftMessage || !hasMultipleDriftMessages) && (
                         <div 
-                          className="absolute top-2 left-3 right-3 flex flex-col gap-0.5 text-[10px] text-text-muted cursor-pointer hover:text-accent-violet transition-colors duration-200"
+                          className="absolute top-2 left-3 right-3 flex flex-col gap-0.5 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet transition-colors duration-200 z-10 pointer-events-auto"
+                          style={{ minWidth: '200px' }}
                           onClick={() => {
                             // If this drift was saved as a chat, open it
                             if (msg.driftPushMetadata?.wasSavedAsChat && msg.driftPushMetadata?.driftChatId) {
@@ -1927,11 +2017,11 @@ function App() {
                           }}
                           title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
                         >
-                          <div className="italic whitespace-nowrap overflow-hidden text-ellipsis">
+                          <div className="italic truncate">
                             From: "{msg.driftPushMetadata?.selectedText}"
                           </div>
                           {msg.driftPushMetadata?.userQuestion && (
-                            <div className="italic whitespace-nowrap overflow-hidden text-ellipsis">
+                            <div className="italic truncate">
                               Q: "{msg.driftPushMetadata.userQuestion}"
                             </div>
                           )}
@@ -1957,69 +2047,91 @@ function App() {
                               prose-a:text-accent-violet prose-a:no-underline hover:prose-a:underline"
                             remarkPlugins={[remarkGfm]}
                             components={{
-                              p: ({children}) => {
-                                let text = String(children)
-                                let result: React.ReactNode[] = []
-                                let lastIndex = 0
-                                
-                                // Sort drifts by their position in the text to handle them in order
-                                const sortedDrifts = [...msg.driftInfos!].sort((a, b) => {
-                                  const aIndex = text.indexOf(a.selectedText)
-                                  const bIndex = text.indexOf(b.selectedText)
-                                  return aIndex - bIndex
-                                })
-                                
-                                // Process each drift
-                                sortedDrifts.forEach((drift, idx) => {
-                                  const driftIndex = text.indexOf(drift.selectedText, lastIndex)
-                                  if (driftIndex !== -1) {
-                                    // Add text before the drift
-                                    if (driftIndex > lastIndex) {
-                                      result.push(text.substring(lastIndex, driftIndex))
+                              // Helper function to process text and add drift links
+                              ...((()=> {
+                                const processDriftText = (children: any) => {
+                                  const text = String(children)
+                                  let result: React.ReactNode[] = []
+                                  let lastIndex = 0
+                                  
+                                  // Sort drifts by their position in the text to handle them in order
+                                  const sortedDrifts = [...msg.driftInfos!].sort((a, b) => {
+                                    const aIndex = text.indexOf(a.selectedText)
+                                    const bIndex = text.indexOf(b.selectedText)
+                                    return aIndex - bIndex
+                                  })
+                                  
+                                  // Process each drift
+                                  sortedDrifts.forEach((drift, idx) => {
+                                    const driftIndex = text.indexOf(drift.selectedText, lastIndex)
+                                    if (driftIndex !== -1) {
+                                      // Add text before the drift
+                                      if (driftIndex > lastIndex) {
+                                        result.push(text.substring(lastIndex, driftIndex))
+                                      }
+                                      
+                                      // Add the drift button
+                                      result.push(
+                                        <button
+                                          key={`drift-${idx}-${drift.driftChatId}`}
+                                          onClick={() => {
+                                            // If it's a temporary drift, reopen the drift panel
+                                            if (drift.driftChatId.startsWith('drift-temp-')) {
+                                              handleStartDrift(drift.selectedText, msg.id, drift.driftChatId)
+                                            } else {
+                                              // Otherwise switch to the saved drift chat
+                                              switchChat(drift.driftChatId)
+                                            }
+                                          }}
+                                          className="inline px-1.5 py-0.5 rounded
+                                                   bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
+                                                   border border-accent-violet/30 hover:border-accent-violet/50
+                                                   text-accent-violet hover:text-accent-pink
+                                                   transition-all duration-100"
+                                          title={drift.driftChatId.startsWith('drift-temp-') 
+                                            ? "Open drift panel" 
+                                            : "View drift conversation"}
+                                        >
+                                          {drift.selectedText}
+                                        </button>
+                                      )
+                                      
+                                      lastIndex = driftIndex + drift.selectedText.length
                                     }
-                                    
-                                    // Add the drift button
-                                    result.push(
-                                      <button
-                                        key={`drift-${idx}-${drift.driftChatId}`}
-                                        onClick={() => {
-                                          // If it's a temporary drift, reopen the drift panel
-                                          if (drift.driftChatId.startsWith('drift-temp-')) {
-                                            handleStartDrift(drift.selectedText, msg.id, drift.driftChatId)
-                                          } else {
-                                            // Otherwise switch to the saved drift chat
-                                            switchChat(drift.driftChatId)
-                                          }
-                                        }}
-                                        className="inline px-1.5 py-0.5 rounded
-                                                 bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
-                                                 border border-accent-violet/30 hover:border-accent-violet/50
-                                                 text-accent-violet hover:text-accent-pink
-                                                 transition-all duration-100"
-                                        title={drift.driftChatId.startsWith('drift-temp-') 
-                                          ? "Open drift panel" 
-                                          : "View drift conversation"}
-                                      >
-                                        {drift.selectedText}
-                                      </button>
-                                    )
-                                    
-                                    lastIndex = driftIndex + drift.selectedText.length
+                                  })
+                                  
+                                  // Add any remaining text
+                                  if (lastIndex < text.length) {
+                                    result.push(text.substring(lastIndex))
                                   }
-                                })
-                                
-                                // Add any remaining text
-                                if (lastIndex < text.length) {
-                                  result.push(text.substring(lastIndex))
+                                  
+                                  // If no drifts were found, return original
+                                  if (result.length === 0) {
+                                    return children
+                                  }
+                                  
+                                  return result
                                 }
                                 
-                                // If no drifts were found in the text, just return the original
-                                if (result.length === 0) {
-                                  return <p className="mb-2">{children}</p>
+                                return {
+                                  p: ({children}) => {
+                                    const processed = processDriftText(children)
+                                    return <p className="mb-2">{processed}</p>
+                                  },
+                                  td: ({children}) => {
+                                    const processed = processDriftText(children)
+                                    return <td>{processed}</td>
+                                  },
+                                  th: ({children}) => {
+                                    const processed = processDriftText(children)
+                                    return <th>{processed}</th>
+                                  },
+                                  li: ({children}) => {
+                                    const processed = processDriftText(children)
+                                    return <li>{processed}</li>
+                                  }
                                 }
-                                
-                                return <p className="mb-2">{result}</p>
-                              }
+                              })())
                             }}
                           >
                             {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
