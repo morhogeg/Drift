@@ -1708,7 +1708,7 @@ function App() {
                     >
                       <div
                         className={`
-                          max-w-[85%] rounded-2xl px-5 ${isFirstDriftMessage && !msg.isUser ? 'pt-12 pb-3' : 'py-3'} relative
+                          ${isDriftMessage && !msg.isUser ? 'max-w-[95%]' : 'max-w-[85%]'} rounded-2xl px-5 ${isFirstDriftMessage && !msg.isUser ? 'pt-10 pb-3' : 'py-3'} relative
                           ${msg.isUser 
                             ? isDriftMessage
                               ? 'bg-gradient-to-br from-accent-violet/30 to-accent-pink/30 text-text-primary border border-accent-violet/30 shadow-lg'
@@ -1829,10 +1829,17 @@ function App() {
                           )}
                         </div>
                       )}
+                      {/* Add Drift tag for single pushed messages */}
+                      {isDriftMessage && !msg.isUser && !hasMultipleDriftMessages && (
+                        <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md">
+                          Drift
+                        </div>
+                      )}
+                      
                       {/* Add drift context for first AI drift message in multi-message groups or single messages */}
                       {isDriftMessage && !msg.isUser && (isFirstDriftMessage || !hasMultipleDriftMessages) && (
                         <div 
-                          className="absolute top-2 left-3 right-3 text-[10px] text-text-muted cursor-pointer hover:text-accent-violet transition-colors duration-75 duration-200"
+                          className="absolute top-2 left-3 right-3 flex flex-col gap-0.5 text-[10px] text-text-muted cursor-pointer hover:text-accent-violet transition-colors duration-200"
                           onClick={() => {
                             // If this drift was saved as a chat, open it
                             if (msg.driftPushMetadata?.wasSavedAsChat && msg.driftPushMetadata?.driftChatId) {
@@ -1845,11 +1852,11 @@ function App() {
                           }}
                           title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
                         >
-                          <div className="italic mb-1">
+                          <div className="italic whitespace-nowrap overflow-hidden text-ellipsis">
                             From: "{msg.driftPushMetadata?.selectedText}"
                           </div>
                           {msg.driftPushMetadata?.userQuestion && (
-                            <div className="italic">
+                            <div className="italic whitespace-nowrap overflow-hidden text-ellipsis">
                               Q: "{msg.driftPushMetadata.userQuestion}"
                             </div>
                           )}

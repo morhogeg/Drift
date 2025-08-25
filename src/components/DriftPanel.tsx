@@ -77,7 +77,7 @@ export default function DriftPanel({
         // Add system context message for new drift
         const systemMessage: Message = {
           id: 'drift-system-' + Date.now(),
-          text: `🌀 Drift started from: "${selectedText}"\n\nLet's explore this specific term or concept. What would you like to know about "${selectedText}"?`,
+          text: `What would you like to know about "${selectedText}"?`,
           isUser: false,
           timestamp: new Date()
         }
@@ -144,7 +144,7 @@ export default function DriftPanel({
     if (pushedToMain && pushedMessageCount > 0) {
       // Filter out the system message
       const currentMessageCount = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('🌀 Drift started from:')
+        msg => !msg.text.startsWith('What would you like to know about')
       ).length
       
       // If there are more messages now than when we pushed, reset the button
@@ -247,7 +247,7 @@ export default function DriftPanel({
       // Only use drift-specific messages, not the context messages
       // Filter out the system message and any context messages
       const driftConversation = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('🌀 Drift started from:') && msg.id !== newMessage.id
+        msg => !msg.text.startsWith('What would you like to know about') && msg.id !== newMessage.id
       )
       
       // Convert messages to API format with special Drift context
@@ -425,7 +425,7 @@ export default function DriftPanel({
     if (onPushToMain && driftOnlyMessages.length > 0) {
       // Filter out the system message when pushing to main
       const messagesToPush = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('🌀 Drift started from:')
+        msg => !msg.text.startsWith('What would you like to know about')
       )
       
       if (messagesToPush.length > 0) {
@@ -465,10 +465,6 @@ export default function DriftPanel({
           <div className="px-6 py-4 flex items-center justify-between">
             <div className="flex-1 flex items-center justify-center">
               <div className="flex items-center gap-2">
-                <div className="relative">
-                  <span className="text-2xl">🌀</span>
-                  <div className="absolute inset-0 blur-lg bg-accent-violet/50 animate-pulse" />
-                </div>
                 <h2 className="text-2xl font-bold bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">Drift Mode</h2>
               </div>
             </div>
@@ -491,7 +487,7 @@ export default function DriftPanel({
             <div className="flex gap-2">
               <button
                 onClick={handlePushToMain}
-                disabled={!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                disabled={!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
                 className={`flex-1 flex items-center justify-center gap-2
                   ${pushedToMain 
                     ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
@@ -517,7 +513,7 @@ export default function DriftPanel({
               
               <button
                 onClick={handleSaveAsChat}
-                disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('🌀')).length === 0}
+                disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
                 className={`flex-1 flex items-center justify-center gap-2
                   ${savedAsChat 
                     ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
