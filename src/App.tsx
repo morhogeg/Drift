@@ -950,21 +950,84 @@ function App() {
   }
 
   const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => {
-    // Check if these exact messages are already pushed (prevent duplicates)
-    const duplicateExists = driftMessages.every(driftMsg => 
-      messages.some(mainMsg => 
-        mainMsg.isDriftPush && 
-        mainMsg.text === driftMsg.text &&
-        mainMsg.isUser === driftMsg.isUser
+    const pushCallId = Math.random().toString(36).substring(7)
+    console.log(`[PUSH ${pushCallId}] handlePushDriftToMain called`)
+    console.log(`[PUSH ${pushCallId}] sourceMessageId:`, sourceMessageId)
+    console.log(`[PUSH ${pushCallId}] Messages to push:`, driftMessages.length)
+    console.log(`[PUSH ${pushCallId}] First message preview:`, driftMessages[0]?.text?.substring(0, 50))
+    
+    // Extract the original source ID (remove any suffix like -push-timestamp or -single-id)
+    const originalSourceId = sourceMessageId.split('-push-')[0].split('-single-')[0]
+    
+    // Create a signature of the content being pushed to check for exact duplicates
+    const driftSignature = driftMessages.map(m => `${m.isUser}:${m.text}`).join('|||')
+    
+    // Check if we're trying to push the EXACT same content that already exists
+    // We need to check against the specific sourceMessageId to prevent duplicate pushes
+    // but allow multiple different pushes from the same drift
+    const duplicateExists = (() => {
+      // First check: exact sourceMessageId match (prevents double-clicking the same button)
+      const existingPushWithSameId = messages.filter(msg => 
+        msg.isDriftPush && 
+        msg.driftPushMetadata?.sourceMessageId === sourceMessageId &&
+        !msg.text.startsWith('📌 Drift exploration')
       )
-    )
+      
+      if (existingPushWithSameId.length > 0) {
+        // We found messages with the exact same sourceMessageId
+        // This means the exact same push button was clicked twice
+        console.log(`[PUSH ${pushCallId}] Found push with identical sourceMessageId, preventing duplicate`)
+        return true
+      }
+      
+      // Second check: Look for pushes from the same original drift that have identical content
+      // This prevents pushing the exact same messages multiple times
+      // BUT allows pushing expanded conversations (e.g., 1 message, then 3 messages)
+      const pushGroups = new Map<string, Message[]>()
+      messages.forEach(msg => {
+        if (msg.isDriftPush && msg.driftPushMetadata?.sourceMessageId) {
+          const groupId = msg.driftPushMetadata.sourceMessageId
+          const groupOriginalSource = groupId.split('-push-')[0].split('-single-')[0]
+          
+          // Only consider groups from the same original drift source
+          if (groupOriginalSource === originalSourceId) {
+            if (!pushGroups.has(groupId)) {
+              pushGroups.set(groupId, [])
+            }
+            if (!msg.text.startsWith('📌 Drift exploration')) {
+              pushGroups.get(groupId)!.push(msg)
+            }
+          }
+        }
+      })
+      
+      // Check each group from the same drift to see if it has the exact same content
+      for (const [groupId, groupMessages] of pushGroups) {
+        const groupSignature = groupMessages
+          .map(m => `${m.isUser}:${m.text}`)
+          .join('|||')
+        
+        if (groupSignature === driftSignature) {
+          console.log(`[PUSH ${pushCallId}] Found exact duplicate content from same drift`)
+          console.log(`[PUSH ${pushCallId}] Existing group:`, groupId)
+          console.log(`[PUSH ${pushCallId}] Current attempt:`, sourceMessageId)
+          // Block only if the content is exactly the same
+          return true
+        }
+      }
+      
+      // Allow the push - it's either new content or expanded content from the same drift
+      return false
+    })()
     
     if (duplicateExists) {
+      console.log(`[PUSH ${pushCallId}] BLOCKED - Duplicate detected, not pushing`)
       return
     }
     
-    // When pushing from a drift that has grown, we push the ENTIRE conversation
-    // as a new group, without removing previous pushes
+    console.log(`[PUSH ${pushCallId}] No duplicates found, proceeding with push`)
+    
+    // Each push is a separate instance - we keep all previous pushes
     
     // Generate a drift chat ID if not provided (for when it's saved later)
     const actualDriftChatId = driftChatId || 'drift-pushed-' + Date.now()
@@ -986,26 +1049,32 @@ function App() {
       }
     }
     
-    // Update the original message to mark it as having a drift
-    const messagesWithDriftMarked = messages.map(msg => 
-      msg.id === sourceMessageId 
-        ? { 
-            ...msg, 
-            hasDrift: true,
-            driftInfos: [
-              ...(msg.driftInfos || []),
-              {
-                selectedText: selectedText,
-                driftChatId: actualDriftChatId
-              }
-            ]
-          }
-        : msg
-    )
+    // Update ONLY the original source message to mark it as having a drift
+    // Be very specific - only update the actual source message, not any drift pushes
+    const messagesWithDriftMarked = messages.map(msg => {
+      // Only update the original message that was drifted from, not any pushed drift messages
+      if (msg.id === originalSourceId && !msg.isDriftPush) {
+        return { 
+          ...msg, 
+          hasDrift: true,
+          driftInfos: [
+            ...(msg.driftInfos || []),
+            {
+              selectedText: selectedText,
+              driftChatId: actualDriftChatId
+            }
+          ]
+        }
+      }
+      return msg
+    })
     
     // Add metadata to all drift messages (pushing the complete conversation)
-    const driftMessagesWithMetadata = driftMessages.map(msg => ({
+    // IMPORTANT: Give each pushed message a unique ID to avoid React key conflicts
+    const driftMessagesWithMetadata = driftMessages.map((msg, idx) => ({
       ...msg,
+      id: `${sourceMessageId}-msg-${idx}-${Date.now()}`, // Unique ID for each pushed message
+      originalDriftId: msg.id, // Keep reference to original drift message ID
       isDriftPush: true,
       driftPushMetadata: {
         selectedText: selectedText,
@@ -1017,8 +1086,14 @@ function App() {
       }
     }))
     
-    // Then add the pushed drift messages
+    // Debug: Log what we're about to add
+    console.log(`[PUSH ${pushCallId}] Adding separator and ${driftMessagesWithMetadata.length} drift messages`)
+    console.log(`[PUSH ${pushCallId}] Current total messages before push: ${messagesWithDriftMarked.length}`)
+    
+    // Then add the pushed drift messages (keeping all existing messages)
     const updatedMessages = [...messagesWithDriftMarked, separatorMessage, ...driftMessagesWithMetadata]
+    
+    console.log(`[PUSH ${pushCallId}] Total messages after push: ${updatedMessages.length}`)
     setMessages(updatedMessages)
     
     // Get the last message text safely

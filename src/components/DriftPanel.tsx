@@ -62,6 +62,8 @@ export default function DriftPanel({
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
   const [pushedMessageCount, setPushedMessageCount] = useState(0)
   const [lastPushSourceId, setLastPushSourceId] = useState<string | null>(null)
+  const [isPushing, setIsPushing] = useState(false)
+  const [pushedContentSignature, setPushedContentSignature] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -95,6 +97,7 @@ export default function DriftPanel({
       setSavedChatId(null)
       setPushedMessageCount(0)
       setLastPushSourceId(null)
+      setPushedContentSignature(null)
       
       // Load saved message IDs for this drift
       const allSnippets = snippetStorage.getAllSnippets()
@@ -149,8 +152,11 @@ export default function DriftPanel({
       
       // If there are more messages now than when we pushed, reset the button
       if (currentMessageCount > pushedMessageCount) {
+        console.log('DriftPanel: Resetting push button - new messages added')
         setPushedToMain(false)
         setPushedMessageCount(0)
+        setLastPushSourceId(null) // Also clear the last push source
+        setPushedContentSignature(null) // Clear the content signature
       }
     }
   }, [driftOnlyMessages, pushedToMain, pushedMessageCount])
@@ -165,8 +171,10 @@ export default function DriftPanel({
       const previousUserMessage = driftOnlyMessages.slice(0, messageIndex).reverse().find(m => m.isUser)
       const userQuestion = previousUserMessage?.text || selectedText
       
-      // Use a unique source ID for single messages to allow multiple individual pushes
-      const singleMessageSourceId = `${sourceMessageId}-single-${message.id}`
+      // Use a unique but consistent source ID for single messages
+      // Include message content hash to prevent exact duplicates
+      const messageHash = message.text.substring(0, 20).replace(/[^a-zA-Z0-9]/g, '')
+      const singleMessageSourceId = `${sourceMessageId}-single-${message.id}-${messageHash}`
       
       // Push just this message to main with context about it being a single message
       onPushToMain(
@@ -410,17 +418,26 @@ export default function DriftPanel({
     // onClose()
   }
   
-  const handlePushToMain = () => {
+  const handlePushToMain = async () => {
+    const clickId = Math.random().toString(36).substring(7)
+    console.log(`[BUTTON-CLICK ${clickId}] Push button clicked`)
+    console.log(`[BUTTON-CLICK ${clickId}] Current state - pushedToMain:`, pushedToMain, 'isPushing:', isPushing)
+    
     // If already pushed, handle undo
     if (pushedToMain && lastPushSourceId && onUndoPushToMain) {
+      console.log(`[BUTTON-CLICK ${clickId}] Undoing previous push`)
       onUndoPushToMain(lastPushSourceId)
       setPushedToMain(false)
       setLastPushSourceId(null)
+      setPushedContentSignature(null)
       return
     }
     
-    // Prevent multiple pushes of the same state
-    if (pushedToMain) return
+    // Prevent multiple pushes while one is in progress
+    if (pushedToMain || isPushing) {
+      console.log(`[BUTTON-CLICK ${clickId}] BLOCKED - Already pushed or pushing`)
+      return
+    }
     
     if (onPushToMain && driftOnlyMessages.length > 0) {
       // Filter out the system message when pushing to main
@@ -429,17 +446,44 @@ export default function DriftPanel({
       )
       
       if (messagesToPush.length > 0) {
-        // Find the last user question in the drift conversation
-        const lastUserMessage = messagesToPush.filter(m => m.isUser).pop()
-        const userQuestion = lastUserMessage?.text || selectedText
+        // Create a content signature to track what we're pushing
+        const contentSignature = messagesToPush.map(m => `${m.isUser}:${m.text}`).join('|||')
         
-        // Use a unique source ID for each push to avoid deduplication issues
-        const pushSourceId = `${sourceMessageId}-push-${Date.now()}`
+        // Check if we've already pushed this exact content
+        if (pushedContentSignature === contentSignature) {
+          console.log('DriftPanel: Preventing duplicate push - same content already pushed')
+          return
+        }
         
-        onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, savedChatId || undefined)
-        setPushedToMain(true)
-        setPushedMessageCount(messagesToPush.length)
-        setLastPushSourceId(pushSourceId)
+        // Set pushing state to prevent double-clicks
+        setIsPushing(true)
+        
+        try {
+          // Find the last user question in the drift conversation
+          const lastUserMessage = messagesToPush.filter(m => m.isUser).pop()
+          const userQuestion = lastUserMessage?.text || selectedText
+          
+          // Create a consistent push ID based on message content
+          // This helps prevent duplicate pushes of the same content
+          const messageHash = messagesToPush.map(m => m.text).join('').substring(0, 10)
+          const pushSourceId = `${sourceMessageId}-push-${messageHash}-${Date.now()}`
+          
+          const pushAttemptId = Math.random().toString(36).substring(7)
+          console.log(`[DRIFT-PANEL ${pushAttemptId}] Initiating push to main`)
+          console.log(`[DRIFT-PANEL ${pushAttemptId}] sourceId:`, pushSourceId)
+          console.log(`[DRIFT-PANEL ${pushAttemptId}] Messages:`, messagesToPush.length)
+          console.log(`[DRIFT-PANEL ${pushAttemptId}] Content signature:`, contentSignature.substring(0, 50))
+          
+          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, savedChatId || undefined)
+          
+          console.log(`[DRIFT-PANEL ${pushAttemptId}] Push call completed`)
+          setPushedToMain(true)
+          setPushedMessageCount(messagesToPush.length)
+          setLastPushSourceId(pushSourceId)
+          setPushedContentSignature(contentSignature)
+        } finally {
+          setIsPushing(false)
+        }
         // Don't close - let user decide if they also want to save as chat
         // onClose()
       }
@@ -487,7 +531,7 @@ export default function DriftPanel({
             <div className="flex gap-2">
               <button
                 onClick={handlePushToMain}
-                disabled={!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
+                disabled={isPushing || (!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0)}
                 className={`flex-1 flex items-center justify-center gap-2
                   ${pushedToMain 
                     ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
@@ -496,7 +540,7 @@ export default function DriftPanel({
                   border text-text-primary rounded-lg px-3 py-2
                   disabled:opacity-50 disabled:cursor-not-allowed
                   transition-all duration-200`}
-                title={pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
+                title={isPushing ? 'Pushing...' : pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
               >
                 {pushedToMain ? (
                   <>
