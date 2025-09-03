@@ -95,6 +95,34 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   animation: fade-up 0.3s ease-out;
 }
 
+@keyframes fade-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.animate-fade-down {
+  animation: fade-down 0.3s ease-out;
+}
+
+@keyframes gentle-pulse {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.animate-gentle-pulse {
+  animation: gentle-pulse 2s ease-in-out infinite;
+}
+
 /* Highlight animation for scrolled-to messages */
 @keyframes highlightPulse {
   0% {

@@ -1724,27 +1724,36 @@ function App() {
           <div className="absolute inset-0 bg-dark-surface rounded-t-2xl shadow-inner">
             <div className="h-full overflow-y-auto py-6 space-y-4 chat-messages-container">
               
-              {/* Scroll to bottom button */}
+              {/* Scroll to bottom button - centered and elegant */}
               {showScrollButton && (
-                <button
-                  onClick={() => {
-                    userHasScrolled.current = false
-                    scrollToBottom()
-                  }}
-                  className="
-                    fixed bottom-24 right-8 z-20
-                    w-10 h-10 rounded-full
-                    bg-dark-elevated border border-dark-border/50
-                    text-text-muted shadow-lg
-                    flex items-center justify-center
-                    hover:bg-dark-bubble hover:text-text-primary
-                    transition-all duration-100 hover:scale-105
-                    animate-fade-up
-                  "
-                  title="Scroll to bottom"
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
+                <div className={`fixed bottom-24 z-20 transition-all duration-150
+                  ${sidebarOpen ? 'left-[calc(50%+130px)]' : 'left-1/2'} 
+                  transform -translate-x-1/2
+                  ${driftOpen ? 'mr-[225px]' : ''}
+                `}>
+                  <button
+                    onClick={() => {
+                      userHasScrolled.current = false
+                      scrollToBottom()
+                    }}
+                    className="
+                      group relative
+                      w-10 h-10 rounded-full
+                      bg-dark-elevated/90 backdrop-blur-sm
+                      border border-dark-border/50
+                      shadow-[0_4px_12px_rgba(0,0,0,0.5)]
+                      flex items-center justify-center
+                      hover:bg-gradient-to-r hover:from-accent-violet/20 hover:to-accent-pink/20
+                      hover:border-accent-violet/40
+                      transition-all duration-200 hover:scale-110
+                      animate-fade-up
+                    "
+                    title="Scroll to bottom"
+                  >
+                    <ArrowDown className="w-4 h-4 text-text-muted group-hover:text-accent-violet transition-colors animate-gentle-pulse" />
+                  </button>
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-accent-violet/40 to-accent-pink/40 blur-xl opacity-0 group-hover:opacity-40 transition-opacity duration-300 pointer-events-none" />
+                </div>
               )}
               
               {/* Show parent chat link if this is a saved drift */}
