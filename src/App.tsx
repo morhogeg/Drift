@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
@@ -7,6 +7,7 @@ import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
+import { Login } from './components/Login'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
@@ -50,6 +51,8 @@ interface ChatSession {
 }
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
@@ -1454,6 +1457,36 @@ function App() {
     return b.createdAt.getTime() - a.createdAt.getTime()
   })
 
+  const handleLogin = (username: string) => {
+    setCurrentUser(username)
+    setIsAuthenticated(true)
+    // Store in localStorage for persistence (optional)
+    localStorage.setItem('driftUser', username)
+  }
+
+  const handleLogout = () => {
+    setIsAuthenticated(false)
+    setCurrentUser(null)
+    localStorage.removeItem('driftUser')
+    // Optionally clear chat history on logout
+    // setChatHistory([])
+    // setMessages([])
+  }
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('driftUser')
+    if (savedUser) {
+      setCurrentUser(savedUser)
+      setIsAuthenticated(true)
+    }
+  }, [])
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />
+  }
+
   return (
     <div className="h-screen flex bg-dark-bg relative overflow-hidden">
       {/* Gradient overlay for depth */}
@@ -1474,12 +1507,21 @@ function App() {
               <Sparkles className="w-4 h-4 text-accent-pink" />
               <h2 className="text-base font-semibold text-text-primary">Chat History</h2>
             </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleLogout}
+                className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                title="Logout"
+              >
+                <LogOut className="w-3.5 h-3.5 text-text-muted group-hover:text-accent-pink" />
+              </button>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
+              </button>
+            </div>
           </div>
           
           {/* Search Bar */}
@@ -1607,7 +1649,7 @@ function App() {
         {/* Header with Drift branding */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
           <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
               {!sidebarOpen ? (
                 <>
                   <button
@@ -1672,7 +1714,12 @@ function App() {
             </div>
             
             {/* Model Selector and Connection Status */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              {/* User Display */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-dark-elevated/50 rounded-full border border-dark-border/30">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-xs text-text-secondary">{currentUser}</span>
+              </div>
               {/* Unified Model Selector with custom styling */}
               <div className="relative">
                 <select
@@ -1732,7 +1779,7 @@ function App() {
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className="h-full overflow-y-auto py-6 space-y-4 chat-messages-container">
+            <div className="h-full overflow-y-auto pt-6 pb-24 space-y-4 chat-messages-container">
               
               {/* Scroll to bottom button - centered and elegant */}
               {showScrollButton && (

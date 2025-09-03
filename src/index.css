@@ -222,6 +222,16 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   background-color: rgba(51, 51, 51, 0.7);
 }
 
+/* Animation delays for login screen */
+@layer utilities {
+  .animation-delay-2000 {
+    animation-delay: 2s;
+  }
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+}
+
 /* RTL Support for Hebrew and other RTL languages */
 .dir-rtl {
   direction: rtl;
