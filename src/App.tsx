@@ -31,6 +31,7 @@ interface Message {
     userQuestion?: string
     driftChatId?: string
   }
+  isHiddenContext?: boolean  // For single message pushes, hides context messages
 }
 
 interface ChatSession {
@@ -614,8 +615,14 @@ function App() {
   }
 
   // Drift handlers
-  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string) => {
-    console.log('handleStartDrift called with:', { selectedText, messageId, existingDriftChatId })
+  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[]) => {
+    console.log('handleStartDrift called with:', { 
+      selectedText, 
+      messageId, 
+      existingDriftChatId, 
+      hasReconstructedMessages: !!reconstructedMessages,
+      reconstructedMessageCount: reconstructedMessages?.length || 0
+    })
     
     // Save scroll position
     const chatContainer = document.querySelector('.chat-messages-container')
@@ -709,16 +716,24 @@ function App() {
     const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
     const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
     
+    const existingMessagesToUse = reconstructedMessages || tempDriftConversations.get(finalDriftChatId) || []
+    
+    console.log('Setting drift context with:', {
+      driftChatId: finalDriftChatId,
+      existingMessagesCount: existingMessagesToUse.length,
+      contextMessagesCount: contextMessages.length
+    })
+    
     setDriftContext({
       selectedText,
       sourceMessageId: finalSourceMessageId,
       contextMessages,
       highlightMessageId: actualMessage?.id,
       driftChatId: finalDriftChatId,
-      existingMessages: tempDriftConversations.get(finalDriftChatId) || []
+      existingMessages: existingMessagesToUse
     })
     setDriftOpen(true)
-    console.log('Drift panel opened with', contextMessages.length, 'context messages')
+    console.log('Drift panel opened with', contextMessages.length, 'context messages and', existingMessagesToUse.length, 'existing messages')
   }
 
   const handleCloseDrift = (driftMessages?: Message[]) => {
@@ -1821,14 +1836,20 @@ function App() {
                 const isLastDriftMessage = isDriftMessage && (!nextMsg?.isDriftPush || nextMsg?.text.startsWith('📌'));
                 const isMiddleDriftMessage = isDriftMessage && !isFirstDriftMessage && !isLastDriftMessage;
                 
+                // Check if this is a single message push (sourceMessageId contains '-single-')
+                const isSinglePushMessage = isDriftMessage && 
+                  msg.driftPushMetadata?.sourceMessageId?.includes('-single-') &&
+                  !msg.isHiddenContext;
+                
                 // Check if this is part of a multi-message drift (not a single message)
-                const hasMultipleDriftMessages = isDriftMessage && (
-                  (nextMsg?.isDriftPush && !nextMsg?.text.startsWith('📌')) || 
-                  (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌'))
+                // For single pushes, only the visible message counts
+                const hasMultipleDriftMessages = isDriftMessage && !isSinglePushMessage && (
+                  (nextMsg?.isDriftPush && !nextMsg?.text.startsWith('📌') && !nextMsg?.isHiddenContext) || 
+                  (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌') && !prevMsg?.isHiddenContext)
                 );
                 
-                // Skip rendering drift headers entirely
-                if (isDriftHeader) return null;
+                // Skip rendering drift headers and hidden context messages
+                if (isDriftHeader || msg.isHiddenContext) return null;
                 
                 return msg.text ? (
                   <div 
@@ -1870,46 +1891,27 @@ function App() {
                     >
                       <div
                         className={`
-                          ${isDriftMessage && !msg.isUser ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${isDriftMessage && !msg.isUser ? 'pt-10 pb-3' : 'py-3'} relative
+                          ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'pt-10 pb-3' : 'py-3'} relative
                           ${msg.isUser 
                             ? isDriftMessage
                               ? 'bg-gradient-to-br from-accent-violet/30 to-accent-pink/30 text-text-primary border border-accent-violet/30 shadow-lg'
                               : 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
-                            : isDriftMessage
-                              ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-accent-violet/50'
-                              : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                            : isSinglePushMessage
+                              ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer'
+                              : isDriftMessage
+                                ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-accent-violet/50'
+                                : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                           }
                           transition-all duration-100 hover:scale-[1.02]
-                          ${!msg.isUser ? 'select-text' : ''}
+                          ${!msg.isUser && !isDriftMessage ? 'select-text' : ''}
                         `}
                         data-message-id={msg.id}
                         onClick={() => {
                           if (isDriftMessage && msg.driftPushMetadata) {
-                            // For single pushed messages, open the drift panel directly
-                            const isSingleMessage = msg.driftPushMetadata.sourceMessageId.includes('-single-')
+                            // Unified handler for all drift message clicks
                             
-                            if (isSingleMessage) {
-                              // Navigate to parent chat and open drift panel
-                              if (activeChatId !== msg.driftPushMetadata.parentChatId) {
-                                switchChat(msg.driftPushMetadata.parentChatId)
-                              }
-                              
-                              // Find the original source message and open drift from it
-                              setTimeout(() => {
-                                const originalSourceId = msg.driftPushMetadata!.sourceMessageId.split('-single-')[0]
-                                const sourceMessage = messages.find(m => m.id === originalSourceId)
-                                
-                                if (sourceMessage) {
-                                  // Open drift panel with the original context
-                                  handleStartDrift(
-                                    msg.driftPushMetadata!.selectedText,
-                                    originalSourceId,
-                                    msg.driftPushMetadata!.driftChatId
-                                  )
-                                }
-                              }, 150)
-                            } else if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
-                              // Navigate to the saved drift chat
+                            // If this drift was saved as a chat, open it
+                            if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
                               const driftChat = chatHistory.find(c => c.id === msg.driftPushMetadata?.driftChatId)
                               if (driftChat) {
                                 switchChat(msg.driftPushMetadata.driftChatId)
@@ -1928,18 +1930,107 @@ function App() {
                                 }, 150)
                               }
                             } else {
-                              // Drift wasn't saved, navigate to parent and highlight source
-                              switchChat(msg.driftPushMetadata.parentChatId)
-                              setTimeout(() => {
-                                const sourceElement = document.querySelector(`[data-message-id="${msg.driftPushMetadata?.sourceMessageId}"]`)
-                                if (sourceElement) {
-                                  sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                  sourceElement.classList.add('highlight-message')
-                                  setTimeout(() => {
-                                    sourceElement.classList.remove('highlight-message')
-                                  }, 2000)
-                                }
-                              }, 150)
+                              // Drift wasn't saved - reconstruct and open drift panel
+                              const driftChatId = msg.driftPushMetadata.driftChatId
+                              const originalSourceId = msg.driftPushMetadata.sourceMessageId.split('-single-')[0].split('-push-')[0]
+                              
+                              // Check if we need to switch to parent chat first
+                              const needsSwitch = activeChatId !== msg.driftPushMetadata.parentChatId
+                              
+                              if (needsSwitch) {
+                                switchChat(msg.driftPushMetadata.parentChatId)
+                              }
+                              
+                              // Find all messages that were part of this drift conversation
+                              const currentMessages = needsSwitch ? 
+                                chatHistory.find(c => c.id === msg.driftPushMetadata?.parentChatId)?.messages || [] :
+                                messages
+                                
+                              const allDriftMessages = currentMessages.filter(m => 
+                                m.isDriftPush && 
+                                m.driftPushMetadata?.driftChatId === driftChatId &&
+                                !m.text.startsWith('📌')
+                              ).map(m => ({
+                                ...m,
+                                isHiddenContext: false  // Unhide all messages when reconstructing
+                              }))
+                              
+                              console.log('Found drift messages:', allDriftMessages.map(m => ({
+                                text: m.text.substring(0, 50),
+                                isUser: m.isUser,
+                                hasMeta: !!m.driftPushMetadata
+                              })))
+                              
+                              // Reconstruct the drift conversation from the pushed messages
+                              // Sort by the original order (using the index in the ID)
+                              const driftConversation = allDriftMessages
+                                .sort((a, b) => {
+                                  // Extract the index from IDs like "sourceMessageId-msg-0-timestamp"
+                                  const aMatch = a.id.match(/-msg-(\d+)-/)
+                                  const bMatch = b.id.match(/-msg-(\d+)-/)
+                                  if (aMatch && bMatch) {
+                                    return parseInt(aMatch[1]) - parseInt(bMatch[1])
+                                  }
+                                  // Fallback to timestamp comparison
+                                  return a.timestamp.getTime() - b.timestamp.getTime()
+                                })
+                                .map(m => ({
+                                  id: m.originalDriftId || m.id,
+                                  text: m.text,
+                                  isUser: m.isUser,
+                                  timestamp: m.timestamp
+                                }))
+                              
+                              console.log('Message bubble clicked - reconstructed drift:', {
+                                driftChatId,
+                                messageCount: driftConversation.length,
+                                userMessages: driftConversation.filter(m => m.isUser).length,
+                                aiMessages: driftConversation.filter(m => !m.isUser).length,
+                                originalSourceId,
+                                needsSwitch
+                              })
+                              
+                              // Add system message at the beginning if not present
+                              const finalDriftConversation = driftConversation.length > 0 && 
+                                !driftConversation[0].text.includes('What would you like to know about') ? 
+                                [{
+                                  id: 'drift-system-reconstructed',
+                                  text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                  isUser: false,
+                                  timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
+                                }, ...driftConversation] : 
+                                driftConversation
+                              
+                              // Store the reconstructed conversation in temp storage for future use
+                              if (driftChatId) {
+                                setTempDriftConversations(prev => {
+                                  const newMap = new Map(prev)
+                                  newMap.set(driftChatId, finalDriftConversation)
+                                  console.log('Stored drift conversation in temp storage (from message bubble)')
+                                  return newMap
+                                })
+                              }
+                              
+                              // Handle chat switching and opening drift panel
+                              if (needsSwitch) {
+                                // Need to wait for chat switch to complete
+                                setTimeout(() => {
+                                  handleStartDrift(
+                                    msg.driftPushMetadata!.selectedText,
+                                    originalSourceId,
+                                    driftChatId,
+                                    finalDriftConversation  // Pass the reconstructed messages directly
+                                  )
+                                }, 200)
+                              } else {
+                                // Can open immediately
+                                handleStartDrift(
+                                  msg.driftPushMetadata!.selectedText,
+                                  originalSourceId,
+                                  driftChatId,
+                                  finalDriftConversation  // Pass the reconstructed messages directly
+                                )
+                              }
                             }
                           }
                         }}
@@ -1992,7 +2083,7 @@ function App() {
                         </div>
                       )}
                       {/* Add Drift tag for single pushed messages */}
-                      {isDriftMessage && !msg.isUser && !hasMultipleDriftMessages && (
+                      {isSinglePushMessage && (
                         <div 
                           className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md"
                         >
@@ -2000,19 +2091,95 @@ function App() {
                         </div>
                       )}
                       
-                      {/* Add drift context for ALL drift messages (both single and multi) */}
-                      {isDriftMessage && !msg.isUser && (isFirstDriftMessage || !hasMultipleDriftMessages) && (
+                      {/* Add drift context for single messages and first of multi-messages */}
+                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage && hasMultipleDriftMessages)) && (
                         <div 
                           className="absolute top-2 left-3 right-3 flex flex-col gap-0.5 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet transition-colors duration-200 z-10 pointer-events-auto"
                           style={{ minWidth: '200px' }}
-                          onClick={() => {
+                          onClick={(e) => {
+                            // Prevent event bubbling to parent message click
+                            e.stopPropagation()
+                            
                             // If this drift was saved as a chat, open it
                             if (msg.driftPushMetadata?.wasSavedAsChat && msg.driftPushMetadata?.driftChatId) {
                               switchChat(msg.driftPushMetadata.driftChatId)
                             } else if (msg.driftPushMetadata) {
-                              // Otherwise, just start a new drift from the original source
-                              // This is simpler and more predictable
-                              handleStartDrift(msg.driftPushMetadata.selectedText, msg.driftPushMetadata.sourceMessageId || msg.id, msg.driftPushMetadata.driftChatId)
+                              // Reconstruct and open drift panel
+                              const driftChatId = msg.driftPushMetadata.driftChatId
+                              const originalSourceId = msg.driftPushMetadata.sourceMessageId.split('-single-')[0].split('-push-')[0]
+                              
+                              // Find all messages that were part of this drift conversation
+                              const allDriftMessages = messages.filter(m => 
+                                m.isDriftPush && 
+                                m.driftPushMetadata?.driftChatId === driftChatId &&
+                                !m.text.startsWith('📌')
+                              ).map(m => ({
+                                ...m,
+                                isHiddenContext: false  // Unhide all messages when reconstructing
+                              }))
+                              
+                              console.log('Drift context click - found messages:', allDriftMessages.map(m => ({
+                                text: m.text.substring(0, 50),
+                                isUser: m.isUser,
+                                driftChatId: m.driftPushMetadata?.driftChatId
+                              })))
+                              
+                              // Reconstruct the drift conversation from the pushed messages
+                              // Sort by the original order (using the index in the ID)
+                              const driftConversation = allDriftMessages
+                                .sort((a, b) => {
+                                  // Extract the index from IDs like "sourceMessageId-msg-0-timestamp"
+                                  const aMatch = a.id.match(/-msg-(\d+)-/)
+                                  const bMatch = b.id.match(/-msg-(\d+)-/)
+                                  if (aMatch && bMatch) {
+                                    return parseInt(aMatch[1]) - parseInt(bMatch[1])
+                                  }
+                                  // Fallback to timestamp comparison
+                                  return a.timestamp.getTime() - b.timestamp.getTime()
+                                })
+                                .map(m => ({
+                                  id: m.originalDriftId || m.id,
+                                  text: m.text,
+                                  isUser: m.isUser,
+                                  timestamp: m.timestamp
+                                }))
+                              
+                              console.log('Drift context click - reconstructed:', {
+                                driftChatId,
+                                messageCount: driftConversation.length,
+                                userMessages: driftConversation.filter(m => m.isUser).length,
+                                aiMessages: driftConversation.filter(m => !m.isUser).length,
+                                originalSourceId
+                              })
+                              
+                              // Add system message at the beginning if not present
+                              const finalDriftConversation = driftConversation.length > 0 && 
+                                !driftConversation[0].text.includes('What would you like to know about') ? 
+                                [{
+                                  id: 'drift-system-reconstructed',
+                                  text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                  isUser: false,
+                                  timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
+                                }, ...driftConversation] : 
+                                driftConversation
+                              
+                              // Store the reconstructed conversation in temp storage for future use
+                              if (driftChatId) {
+                                setTempDriftConversations(prev => {
+                                  const newMap = new Map(prev)
+                                  newMap.set(driftChatId, finalDriftConversation)
+                                  console.log('Stored drift conversation in temp storage')
+                                  return newMap
+                                })
+                              }
+                              
+                              // Open drift panel immediately with the reconstructed messages
+                              handleStartDrift(
+                                msg.driftPushMetadata!.selectedText, 
+                                originalSourceId, 
+                                driftChatId,
+                                finalDriftConversation  // Pass the reconstructed messages directly
+                              )
                             }
                           }}
                           title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
@@ -2077,7 +2244,9 @@ function App() {
                                           onClick={() => {
                                             // If it's a temporary drift, reopen the drift panel
                                             if (drift.driftChatId.startsWith('drift-temp-')) {
-                                              handleStartDrift(drift.selectedText, msg.id, drift.driftChatId)
+                                              // Pass existing messages from temp storage if available
+                                              const existingDriftMessages = tempDriftConversations.get(drift.driftChatId)
+                                              handleStartDrift(drift.selectedText, msg.id, drift.driftChatId, existingDriftMessages)
                                             } else {
                                               // Otherwise switch to the saved drift chat
                                               switchChat(drift.driftChatId)

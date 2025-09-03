@@ -163,11 +163,19 @@ export default function DriftPanel({
 
   const handlePushSingleMessage = (message: Message) => {
     if (onPushToMain) {
-      // Create a mini conversation with just this message
-      const singleMessageArray = [message]
-      
-      // Find the user message before this one
+      // Find all drift messages up to and including this one (excluding system message)
       const messageIndex = driftOnlyMessages.findIndex(m => m.id === message.id)
+      const allMessagesUpToThis = driftOnlyMessages
+        .slice(0, messageIndex + 1)
+        .filter(msg => !msg.text.startsWith('What would you like to know about'))
+      
+      // Mark only the selected message as visible, others as hidden context
+      const messagesToPush = allMessagesUpToThis.map((msg, idx) => ({
+        ...msg,
+        isHiddenContext: msg.id !== message.id  // Mark all except the selected message as hidden
+      }))
+      
+      // Find the user message before this one for metadata
       const previousUserMessage = driftOnlyMessages.slice(0, messageIndex).reverse().find(m => m.isUser)
       const userQuestion = previousUserMessage?.text || selectedText
       
@@ -176,14 +184,17 @@ export default function DriftPanel({
       const messageHash = message.text.substring(0, 20).replace(/[^a-zA-Z0-9]/g, '')
       const singleMessageSourceId = `${sourceMessageId}-single-${message.id}-${messageHash}`
       
-      // Push just this message to main with context about it being a single message
+      // Important: Use the same driftChatId so we can reconstruct the full conversation
+      const chatIdToUse = savedChatId || driftChatId || `drift-temp-single-${Date.now()}`
+      
+      // Push all messages but mark as single push (only one will be visible)
       onPushToMain(
-        singleMessageArray, 
+        messagesToPush, 
         selectedText,
         singleMessageSourceId,
         savedAsChat,
         userQuestion,
-        savedChatId || undefined
+        chatIdToUse
       )
     }
   }
@@ -474,13 +485,19 @@ export default function DriftPanel({
           console.log(`[DRIFT-PANEL ${pushAttemptId}] Messages:`, messagesToPush.length)
           console.log(`[DRIFT-PANEL ${pushAttemptId}] Content signature:`, contentSignature.substring(0, 50))
           
-          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, savedChatId || undefined)
+          const chatIdToUse = savedChatId || driftChatId || `drift-temp-full-${Date.now()}`
+          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, chatIdToUse)
           
           console.log(`[DRIFT-PANEL ${pushAttemptId}] Push call completed`)
           setPushedToMain(true)
           setPushedMessageCount(messagesToPush.length)
           setLastPushSourceId(pushSourceId)
           setPushedContentSignature(contentSignature)
+          
+          // Store the full conversation so it can be reconstructed when clicked
+          if (onClose && driftOnlyMessages.length > 0) {
+            onClose(driftOnlyMessages)
+          }
         } finally {
           setIsPushing(false)
         }
