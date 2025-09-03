@@ -166,3 +166,33 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
 .custom-scrollbar.scrollable:hover::-webkit-scrollbar-thumb {
   background-color: rgba(51, 51, 51, 0.7);
 }
+
+/* RTL Support for Hebrew and other RTL languages */
+.dir-rtl {
+  direction: rtl;
+  text-align: right;
+}
+
+/* Ensure proper alignment for RTL content in messages */
+.dir-rtl p,
+.dir-rtl .prose p {
+  text-align: right;
+}
+
+.dir-rtl ul,
+.dir-rtl ol {
+  padding-right: 1.5rem;
+  padding-left: 0;
+}
+
+.dir-rtl li {
+  text-align: right;
+}
+
+/* Fix markdown elements in RTL */
+.dir-rtl blockquote {
+  border-right: 4px solid;
+  border-left: none;
+  padding-right: 1rem;
+  padding-left: 0;
+}

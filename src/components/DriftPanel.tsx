@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
 import { snippetStorage } from '../services/snippetStorage'
+import { getTextDirection, getRTLClassName } from '../utils/rtl'
 
 interface Message {
   id: string
@@ -624,9 +625,18 @@ export default function DriftPanel({
                     `}
                   >
                   {msg.isUser ? (
-                    <p className="text-sm leading-relaxed">{msg.text}</p>
+                    <p 
+                      className={`text-sm leading-relaxed ${getRTLClassName(msg.text)}`}
+                      dir={getTextDirection(msg.text)}
+                    >
+                      {msg.text}
+                    </p>
                   ) : (
-                    <ReactMarkdown 
+                    <div 
+                      className={`${getRTLClassName(msg.text)}`}
+                      dir={getTextDirection(msg.text)}
+                    >
+                      <ReactMarkdown 
                       className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none
                         prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                         prose-p:text-text-secondary prose-p:mb-2
@@ -654,6 +664,7 @@ export default function DriftPanel({
                     >
                       {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                     </ReactMarkdown>
+                    </div>
                   )}
                   </div>
                   
@@ -758,7 +769,8 @@ export default function DriftPanel({
                   placeholder={isTyping ? "AI is responding..." : "Explore this drift..."}
                   disabled={isTyping}
                   rows={1}
-                  className="
+                  dir={getTextDirection(message)}
+                  className={`
                     w-full bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
                     rounded-2xl px-6 py-4 pr-14
                     border border-dark-border/50
@@ -771,7 +783,8 @@ export default function DriftPanel({
                     min-h-[56px] max-h-[200px]
                     overflow-y-auto
                     custom-scrollbar
-                  "
+                    ${getRTLClassName(message)}
+                  `}
                   style={{
                     height: '56px'
                   }}
