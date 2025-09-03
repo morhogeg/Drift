@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import DriftPanel from './components/DriftPanel'
@@ -135,6 +135,16 @@ function App() {
   
   // Input textarea ref for auto-resize
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = 'auto'
+      const scrollHeight = textarea.scrollHeight
+      textarea.style.height = Math.min(scrollHeight, 200) + 'px'
+    }
+  }, [message])
 
   // Chat history state
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([
@@ -1721,7 +1731,7 @@ function App() {
         
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0 bg-dark-surface rounded-t-2xl shadow-inner">
+          <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
             <div className="h-full overflow-y-auto py-6 space-y-4 chat-messages-container">
               
               {/* Scroll to bottom button - centered and elegant */}
@@ -2393,7 +2403,7 @@ function App() {
         </div>
 
         {/* Modern input area */}
-        <div className="relative z-10 p-4 bg-gradient-to-t from-dark-bg to-dark-surface/50 backdrop-blur-sm">
+        <div className="absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4">
           <div className="max-w-4xl mx-auto">
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
@@ -2412,56 +2422,56 @@ function App() {
                   rows={1}
                   dir={getTextDirection(message)}
                   className={`
-                    w-full bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
-                    rounded-2xl px-6 py-4 pr-14
-                    border border-dark-border/50
+                    w-full bg-dark-elevated/90 backdrop-blur-md text-text-primary 
+                    rounded-2xl px-5 py-3 pr-14
+                    border border-dark-border/60
+                    shadow-lg shadow-black/50
                     focus:outline-none focus:border-accent-pink/50
-                    focus:shadow-[0_0_0_2px_rgba(255,0,122,0.2)]
+                    focus:shadow-[0_0_20px_rgba(255,0,122,0.15)]
                     placeholder:text-text-muted
                     transition-all duration-150
                     disabled:opacity-70
                     resize-none
-                    min-h-[56px] max-h-[200px]
-                    overflow-y-auto
+                    min-h-[48px] max-h-[200px]
+                    ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
                     custom-scrollbar
                     ${getRTLClassName(message)}
                   `}
-                  style={{
-                    height: '56px'
-                  }}
                 />
                 {isTyping ? (
                   <button
                     onClick={stopGeneration}
-                    className="
-                      absolute right-3 bottom-3
-                      w-10 h-10 rounded-full
+                    className={`
+                      absolute right-2
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
+                      w-8 h-8 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
                       text-white shadow-lg shadow-accent-pink/30
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
                       transition-all duration-100
-                    "
+                    `}
                     title="Stop generating"
                   >
-                    <Square className="w-4 h-4" fill="currentColor" />
+                    <Square className="w-3.5 h-3.5" fill="currentColor" />
                   </button>
                 ) : (
                   <button
                     onClick={sendMessage}
                     disabled={!message.trim()}
-                    className="
-                      absolute right-3 bottom-3
-                      w-10 h-10 rounded-full
+                    className={`
+                      absolute right-2
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
+                      w-8 h-8 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
                       text-white shadow-lg shadow-accent-pink/30
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
                       disabled:opacity-50 disabled:cursor-not-allowed
                       transition-all duration-100
-                    "
+                    `}
                   >
-                    <Send className="w-4 h-4" />
+                    <ArrowUp className="w-4 h-4" />
                   </button>
                 )}
               </div>
