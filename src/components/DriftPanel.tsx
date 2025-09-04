@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, Send, Square, ArrowLeft, Check, Undo2, Bookmark } from 'lucide-react'
+import { X, Save, ArrowUp, Square, ArrowLeft, Check, Undo2, Bookmark } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import ReactMarkdown from 'react-markdown'
@@ -603,7 +603,7 @@ export default function DriftPanel({
         </header>
         
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 pb-16 space-y-4">
           {messages.map((msg) => (
             msg.text ? (
               <div
@@ -753,7 +753,7 @@ export default function DriftPanel({
         </div>
         
         {/* Input - matching main chat input */}
-        <div className="relative z-10 p-4 bg-gradient-to-t from-dark-bg to-dark-surface/50 backdrop-blur-sm">
+        <div className="absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4">
           <div className="max-w-4xl mx-auto">
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
@@ -771,56 +771,56 @@ export default function DriftPanel({
                   rows={1}
                   dir={getTextDirection(message)}
                   className={`
-                    w-full bg-dark-elevated/80 backdrop-blur-sm text-text-primary 
-                    rounded-2xl px-6 py-4 pr-14
-                    border border-dark-border/50
+                    w-full bg-dark-elevated/90 backdrop-blur-md text-text-primary 
+                    rounded-2xl px-5 py-3 pr-14
+                    border border-dark-border/60
+                    shadow-lg shadow-black/50
                     focus:outline-none focus:border-accent-violet/50
-                    focus:shadow-[0_0_0_2px_rgba(168,85,247,0.2)]
+                    focus:shadow-[0_0_20px_rgba(168,85,247,0.15)]
                     placeholder:text-text-muted
-                    transition-all duration-300
+                    transition-all duration-150
                     disabled:opacity-70
                     resize-none
-                    min-h-[56px] max-h-[200px]
-                    overflow-y-auto
+                    min-h-[48px] max-h-[200px]
+                    ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
                     custom-scrollbar
                     ${getRTLClassName(message)}
                   `}
-                  style={{
-                    height: '56px'
-                  }}
                 />
                 {isTyping ? (
                   <button
                     onClick={stopGeneration}
-                    className="
-                      absolute right-3 bottom-3
-                      w-10 h-10 rounded-full
+                    className={`
+                      absolute right-2
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
+                      w-8 h-8 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-violet/30
+                      text-white shadow-lg shadow-accent-pink/30
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
-                      transition-all duration-200
-                    "
+                      transition-all duration-100
+                    `}
                     title="Stop generating"
                   >
-                    <Square className="w-4 h-4" fill="currentColor" />
+                    <Square className="w-3.5 h-3.5" fill="currentColor" />
                   </button>
                 ) : (
                   <button
                     onClick={sendMessage}
                     disabled={!message.trim()}
-                    className="
-                      absolute right-3 bottom-3
-                      w-10 h-10 rounded-full
+                    className={`
+                      absolute right-2
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
+                      w-8 h-8 rounded-full
                       bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-violet/30
+                      text-white shadow-lg shadow-accent-pink/30
                       flex items-center justify-center
                       hover:scale-105 active:scale-95
                       disabled:opacity-50 disabled:cursor-not-allowed
-                      transition-all duration-200
-                    "
+                      transition-all duration-100
+                    `}
                   >
-                    <Send className="w-4 h-4" />
+                    <ArrowUp className="w-4 h-4" />
                   </button>
                 )}
               </div>
