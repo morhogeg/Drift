@@ -517,7 +517,7 @@ export default function DriftPanel({
     `}>
       {/* Panel */}
       <div className={`
-        w-full h-full bg-dark-surface/95 backdrop-blur-md
+        w-full h-full bg-dark-bg
         border-l border-accent-violet/30 shadow-2xl
         flex flex-col overflow-hidden
         ${isOpen ? 'shadow-[0_0_50px_rgba(168,85,247,0.2)]' : ''}
@@ -603,7 +603,7 @@ export default function DriftPanel({
         </header>
         
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 pb-16 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4 bg-dark-bg">
           {messages.map((msg) => (
             msg.text ? (
               <div
