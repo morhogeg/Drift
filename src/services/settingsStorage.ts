@@ -5,6 +5,7 @@ const SETTINGS_KEY = 'drift_ai_settings'
 
 const defaultSettings: AISettings = {
   useOpenRouter: true,
+  useDummyAI: false,
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY || '',
   openRouterModel: OPENROUTER_MODELS.OSS,
   ollamaUrl: 'http://localhost:11434',
@@ -51,7 +52,9 @@ export const settingsStorage = {
   // Check if settings have been configured
   isConfigured(): boolean {
     const settings = this.get()
-    if (settings.useOpenRouter) {
+    if (settings.useDummyAI) {
+      return true  // Dummy AI is always configured
+    } else if (settings.useOpenRouter) {
       return !!settings.openRouterApiKey
     } else {
       return !!settings.ollamaUrl && !!settings.ollamaModel

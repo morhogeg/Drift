@@ -13,6 +13,7 @@ interface SettingsProps {
 
 export interface AISettings {
   useOpenRouter: boolean
+  useDummyAI: boolean
   openRouterApiKey: string
   openRouterModel: OpenRouterModel
   ollamaUrl: string
@@ -48,12 +49,17 @@ export default function Settings({ isOpen, onClose, onSave, currentSettings }: S
   }, [settings.openRouterApiKey, settings.openRouterModel, settings.ollamaUrl, settings.ollamaModel, settings.useOpenRouter])
 
   const checkConnection = async () => {
+    if (settings.useDummyAI) {
+      setConnectionStatus('connected')
+      return
+    }
+    
     setConnectionStatus('checking')
     try {
       let connected = false
       if (settings.useOpenRouter && settings.openRouterApiKey) {
         connected = await checkOpenRouterConnection(settings.openRouterApiKey, settings.openRouterModel)
-      } else if (!settings.useOpenRouter && settings.ollamaUrl) {
+      } else if (!settings.useOpenRouter && !settings.useDummyAI && settings.ollamaUrl) {
         connected = await checkOllamaConnection(settings.ollamaUrl)
       }
       setConnectionStatus(connected ? 'connected' : 'disconnected')
@@ -104,24 +110,30 @@ export default function Settings({ isOpen, onClose, onSave, currentSettings }: S
               <label className="block text-sm font-medium text-[#9ca3af] mb-3">
                 AI Provider
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <button
-                  onClick={() => handleChange('useOpenRouter', true)}
+                  onClick={() => {
+                    handleChange('useOpenRouter', true)
+                    handleChange('useDummyAI', false)
+                  }}
                   className={`p-4 rounded-lg border transition-all ${
-                    settings.useOpenRouter
+                    settings.useOpenRouter && !settings.useDummyAI
                       ? 'bg-gradient-to-r from-violet-600/20 to-pink-600/20 border-violet-500'
                       : 'bg-[#1a1a1a] border-[#333333] hover:border-[#444444]'
                   }`}
                 >
                   <div className="flex flex-col items-center space-y-2">
                     <span className="text-white font-medium">OpenRouter</span>
-                    <span className="text-xs text-[#6b7280]">Cloud-based models</span>
+                    <span className="text-xs text-[#6b7280]">Cloud models</span>
                   </div>
                 </button>
                 <button
-                  onClick={() => handleChange('useOpenRouter', false)}
+                  onClick={() => {
+                    handleChange('useOpenRouter', false)
+                    handleChange('useDummyAI', false)
+                  }}
                   className={`p-4 rounded-lg border transition-all ${
-                    !settings.useOpenRouter
+                    !settings.useOpenRouter && !settings.useDummyAI
                       ? 'bg-gradient-to-r from-violet-600/20 to-pink-600/20 border-violet-500'
                       : 'bg-[#1a1a1a] border-[#333333] hover:border-[#444444]'
                   }`}
@@ -131,8 +143,26 @@ export default function Settings({ isOpen, onClose, onSave, currentSettings }: S
                     <span className="text-xs text-[#6b7280]">Local models</span>
                   </div>
                 </button>
+                <button
+                  onClick={() => {
+                    handleChange('useDummyAI', true)
+                    handleChange('useOpenRouter', false)
+                  }}
+                  className={`p-4 rounded-lg border transition-all ${
+                    settings.useDummyAI
+                      ? 'bg-gradient-to-r from-violet-600/20 to-pink-600/20 border-violet-500'
+                      : 'bg-[#1a1a1a] border-[#333333] hover:border-[#444444]'
+                  }`}
+                >
+                  <div className="flex flex-col items-center space-y-2">
+                    <span className="text-white font-medium">Dummy AI</span>
+                    <span className="text-xs text-[#6b7280]">For testing</span>
+                  </div>
+                </button>
               </div>
             </div>
+
+            {/* Broadcast mode removed: handled in main chat selector */}
 
             {/* OpenRouter Settings */}
             {settings.useOpenRouter && (
@@ -222,8 +252,31 @@ export default function Settings({ isOpen, onClose, onSave, currentSettings }: S
               </div>
             )}
 
+            {/* Dummy AI Settings */}
+            {settings.useDummyAI && (
+              <div className="space-y-4 p-4 bg-[#1a1a1a] rounded-lg border border-[#333333]">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-white font-medium">Dummy AI Configuration</h3>
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span className="text-xs text-green-500">Ready for testing</span>
+                </div>
+                <div className="p-3 bg-[#0a0a0a] rounded-lg">
+                  <p className="text-sm text-[#9ca3af]">
+                    Dummy AI provides simulated responses for testing the UI and chat flow without using API credits.
+                  </p>
+                  <p className="text-xs text-[#6b7280] mt-2">
+                    • Instant responses with realistic streaming
+                    <br />
+                    • Supports code blocks, lists, and markdown
+                    <br />
+                    • No API key or connection required
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Ollama Settings */}
-            {!settings.useOpenRouter && (
+            {!settings.useOpenRouter && !settings.useDummyAI && (
               <div className="space-y-4 p-4 bg-[#1a1a1a] rounded-lg border border-[#333333]">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">

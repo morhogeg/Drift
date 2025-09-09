@@ -92,7 +92,13 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
         } else if (response.status === 404) {
           console.warn(`Model ${model} not available. This might be due to regional restrictions or account limitations.`)
         } else if (response.status === 429) {
-          console.warn('Rate limit exceeded. Please wait a moment and try again.')
+          const resetTime = errorJson.error?.metadata?.headers?.['X-RateLimit-Reset'];
+          if (resetTime) {
+            const resetDate = new Date(parseInt(resetTime)).toLocaleString();
+            console.warn(`Rate limit exceeded for free models. Resets at: ${resetDate}. Consider adding credits to your OpenRouter account.`)
+          } else {
+            console.warn('Rate limit exceeded. Please wait a moment and try again.')
+          }
         }
         
         return false

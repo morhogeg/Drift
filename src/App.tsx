@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
+import { sendMessageToDummy, sendMessageToDummyPro, checkDummyConnection, type ChatMessage as DummyMessage } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
@@ -13,12 +14,15 @@ import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
+import DummyModelSelector from './components/DummyModelSelector'
+import HeaderControls from './components/HeaderControls'
 
 interface Message {
   id: string
   text: string
   isUser: boolean
   timestamp: Date
+  modelTag?: string
   hasDrift?: boolean
   driftInfos?: Array<{
     selectedText: string
@@ -65,6 +69,9 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(OPENROUTER_MODELS.OSS)
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
+  // Model selection for main chat (Dummy-focused)
+  const [chatModelMode, setChatModelMode] = useState<'dummy-basic' | 'dummy-pro' | 'broadcast'>('dummy-basic')
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mainScrollPosition = useRef<number>(0)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -237,7 +244,13 @@ function App() {
         setIsConnecting(true)
       }
       try {
-        if (aiSettings.useOpenRouter) {
+        if (aiSettings.useDummyAI) {
+          // Dummy AI always connects instantly
+          const connected = await checkDummyConnection()
+          setApiConnected(connected)
+          setIsConnecting(false)
+          return
+        } else if (aiSettings.useOpenRouter) {
           // ALWAYS use env variable if available
           const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
           console.log('Attempting to connect with OpenRouter:', {
@@ -401,86 +414,69 @@ function App() {
         const abortController = new AbortController()
         abortControllerRef.current = abortController
         
-        // Create AI response message placeholder
-        const aiResponseId = (Date.now() + 1).toString()
-        let accumulatedResponse = ''
-        
-        // Add empty AI message immediately
-        const aiMessage: Message = {
-          id: aiResponseId,
-          text: '',
-          isUser: false,
-          timestamp: new Date()
+        // Helper: stream one response into a new message bubble
+        const streamIntoNewMessage = async (
+          streamer: (msgs: any[], onChunk: (c: string) => void, signal?: AbortSignal) => Promise<void>,
+          modelTag?: string
+        ) => {
+          const aiResponseId = (Date.now() + Math.random()).toString()
+          let acc = ''
+          const aiMessage: Message = {
+            id: aiResponseId,
+            text: '',
+            isUser: false,
+            timestamp: new Date(),
+            modelTag
+          }
+          setMessages(prev => [...prev, aiMessage])
+          await streamer(
+            apiMessages as any,
+            (chunk) => {
+              acc += chunk
+              setStreamingResponse(acc)
+              setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+            },
+            abortControllerRef.current?.signal
+          )
+          // Finalize lastMessage preview for the chat after this stream
+          setChatHistory(prevHistory =>
+            prevHistory.map(chat =>
+              chat.id === activeChatId
+                ? {
+                    ...chat,
+                    lastMessage: stripMarkdown(acc).slice(0, 100)
+                  }
+                : chat
+            )
+          )
         }
-        setMessages(prev => [...prev, aiMessage])
-        
+
         // Stream the response using the selected API
-        if (aiSettings.useOpenRouter) {
+        if (aiSettings.useDummyAI) {
+          if (chatModelMode === 'broadcast') {
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A')
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro')
+          } else if (chatModelMode === 'dummy-pro') {
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro')
+          } else {
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A')
+          }
+        } else if (aiSettings.useOpenRouter) {
           // ALWAYS use env variable if available, fallback to settings
           const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-          
           if (!apiKey) {
             throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
           }
-          
-          await sendMessageToOpenRouter(
-            apiMessages as any,
-            (chunk) => {
-              accumulatedResponse += chunk
-              setStreamingResponse(accumulatedResponse)
-              
-              // Update the AI message with streamed content
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
-            },
-            apiKey,
-            abortController.signal,
-            aiSettings.openRouterModel
+          await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+            sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
           )
         } else {
-          await sendMessageToOllama(
-            apiMessages as any,
-            (chunk) => {
-              accumulatedResponse += chunk
-              setStreamingResponse(accumulatedResponse)
-              
-              // Update the AI message with streamed content
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
-            },
-            abortController.signal,
-            aiSettings.ollamaUrl,
-            aiSettings.ollamaModel
+          await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+            sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
           )
         }
-        
-        // Final update to chat history
-        setChatHistory(prevHistory => 
-          prevHistory.map(chat => 
-            chat.id === activeChatId 
-              ? { 
-                  ...chat, 
-                  messages: messages.map(msg => 
-                    msg.id === aiResponseId 
-                      ? { ...msg, text: accumulatedResponse }
-                      : msg
-                  ),
-                  lastMessage: stripMarkdown(accumulatedResponse).slice(0, 100) 
-                }
-              : chat
-          )
-        )
-        
+
+        // Clear stream buffer indicator
         setStreamingResponse('')
       } catch (error) {
         // Fallback message based on which API is being used
@@ -528,6 +524,16 @@ function App() {
       setIsTyping(false)
       setStreamingResponse('')
     }
+  }
+
+  // Update AI settings from header model selector without opening modal
+  const handleAISettingsChange = (newSettings: AISettings) => {
+    // Preserve env API key fallback if user clears it
+    if (!newSettings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
+      newSettings.openRouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY
+    }
+    setAiSettings(newSettings)
+    settingsStorage.save(newSettings)
   }
 
   const handleSaveSettings = (newSettings: AISettings) => {
@@ -1473,6 +1479,8 @@ function App() {
     // setMessages([])
   }
 
+  // removed inline DummyModelSelector; now imported as a component
+
   // Check for existing session on mount
   useEffect(() => {
     const savedUser = localStorage.getItem('driftUser')
@@ -1713,66 +1721,19 @@ function App() {
               </div>
             </div>
             
-            {/* Model Selector and Connection Status */}
-            <div className="flex items-center gap-3">
-              {/* User Display */}
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-dark-elevated/50 rounded-full border border-dark-border/30">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-xs text-text-secondary">{currentUser}</span>
-              </div>
-              {/* Unified Model Selector with custom styling */}
-              <div className="relative">
-                <select
-                  value={useOpenRouter ? selectedModel : 'ollama'}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    setIsConnecting(true)  // Show connecting state immediately
-                    if (value === 'ollama') {
-                      setUseOpenRouter(false)
-                    } else {
-                      setUseOpenRouter(true)
-                      setSelectedModel(value as OpenRouterModel)
-                    }
-                  }}
-                  className="appearance-none pl-4 pr-8 py-1.5 rounded-full bg-dark-elevated/70 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-violet/40 focus:border-transparent backdrop-blur-sm"
-                  title="Select AI model"
-                >
-                  <optgroup label="OpenRouter (Free)">
-                    <option value={OPENROUTER_MODELS.OSS}>OSS-20B</option>
-                  </optgroup>
-                  <optgroup label="Local">
-                    <option value="ollama">Ollama</option>
-                  </optgroup>
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
-              </div>
-              
-              {/* Connection Status Badge */}
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-sm transition-all duration-150 ${
-                isConnecting
-                  ? 'bg-amber-500/10 border border-amber-500/30'
-                  : apiConnected 
-                    ? 'bg-emerald-500/10 border border-emerald-500/30' 
-                    : 'bg-red-500/10 border border-red-500/30'
-              }`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${
-                  isConnecting
-                    ? 'bg-amber-500 animate-pulse'
-                    : apiConnected 
-                      ? 'bg-emerald-500' 
-                      : 'bg-red-500'
-                }`} />
-                <span className={`text-xs font-medium ${
-                  isConnecting
-                    ? 'text-amber-400'
-                    : apiConnected 
-                      ? 'text-emerald-400' 
-                      : 'text-red-400'
-                }`}>
-                  {isConnecting ? 'Connecting...' : apiConnected ? 'Connected' : 'Offline'}
-                </span>
-              </div>
-            </div>
+            <HeaderControls
+              currentUser={currentUser}
+              aiSettings={aiSettings}
+              handleAISettingsChange={handleAISettingsChange}
+              setApiConnected={setApiConnected}
+              setIsConnecting={setIsConnecting}
+              chatModelMode={chatModelMode}
+              setChatModelMode={setChatModelMode}
+              modelMenuOpen={modelMenuOpen}
+              setModelMenuOpen={setModelMenuOpen}
+              isConnecting={isConnecting}
+              apiConnected={apiConnected}
+            />
           </div>
         </header>
         
@@ -2153,6 +2114,12 @@ function App() {
                               <Save className="w-3.5 h-3.5 text-accent-violet" />
                             </button>
                           )}
+                        </div>
+                      )}
+                      {/* Model label for AI messages */}
+                      {!msg.isUser && msg.modelTag && (
+                        <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
+                          {msg.modelTag}
                         </div>
                       )}
                       {/* Add Drift tag for single pushed messages */}
