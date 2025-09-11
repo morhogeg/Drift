@@ -23,6 +23,9 @@ interface Message {
   isUser: boolean
   timestamp: Date
   modelTag?: string
+  broadcastGroupId?: string
+  strandId?: string
+  canvasId?: string
   hasDrift?: boolean
   driftInfos?: Array<{
     selectedText: string
@@ -71,7 +74,38 @@ function App() {
   const [showScrollButton, setShowScrollButton] = useState(false)
   // Model selection for main chat (Dummy-focused)
   const [chatModelMode, setChatModelMode] = useState<'dummy-basic' | 'dummy-pro' | 'broadcast'>('dummy-basic')
+  // Broadcast grouping state
+  const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
+  const [continuedModelByGroup, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
+  const CHAT_MODEL_PREFS_KEY = 'drift_chat_model_prefs'
+  const [chatModelPrefs, setChatModelPrefs] = useState<Record<string, 'dummy-basic' | 'dummy-pro' | 'broadcast'>>(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_MODEL_PREFS_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
+  })
+  const persistChatModelMode = (chatId: string, mode: 'dummy-basic' | 'dummy-pro' | 'broadcast') => {
+    setChatModelPrefs(prev => {
+      const next = { ...prev, [chatId]: mode }
+      try { localStorage.setItem(CHAT_MODEL_PREFS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+  // Ensure selected mode follows per-chat preference
+  useEffect(() => {
+    const saved = chatModelPrefs[activeChatId]
+    if (saved) setChatModelMode(saved)
+  }, [activeChatId])
+  const setChatModelModePersist = (mode: 'dummy-basic' | 'dummy-pro' | 'broadcast') => {
+    setChatModelMode(mode)
+    persistChatModelMode(activeChatId, mode)
+  }
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  // expand/regenerate removed per UX
+  const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
+  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mainScrollPosition = useRef<number>(0)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -370,11 +404,18 @@ function App() {
 
   const sendMessage = async () => {
     if (message.trim()) {
+      // Clear inline continue context on send
+      if (continueFromMessageId) {
+        setContinueFromMessageId(null)
+        prevContinueModeRef.current = null
+      }
       const newMessage: Message = {
         id: Date.now().toString(),
         text: message,
         isUser: true,
-        timestamp: new Date()
+        timestamp: new Date(),
+        strandId: activeStrandId || undefined,
+        canvasId: activeCanvasId || undefined
       }
       
       const updatedMessages = [...messages, newMessage]
@@ -417,7 +458,10 @@ function App() {
         // Helper: stream one response into a new message bubble
         const streamIntoNewMessage = async (
           streamer: (msgs: any[], onChunk: (c: string) => void, signal?: AbortSignal) => Promise<void>,
-          modelTag?: string
+          modelTag?: string,
+          broadcastGroupId?: string,
+          strandId?: string,
+          canvasId?: string
         ) => {
           const aiResponseId = (Date.now() + Math.random()).toString()
           let acc = ''
@@ -426,7 +470,10 @@ function App() {
             text: '',
             isUser: false,
             timestamp: new Date(),
-            modelTag
+            modelTag,
+            broadcastGroupId,
+            strandId,
+            canvasId
           }
           setMessages(prev => [...prev, aiMessage])
           await streamer(
@@ -454,12 +501,15 @@ function App() {
         // Stream the response using the selected API
         if (aiSettings.useDummyAI) {
           if (chatModelMode === 'broadcast') {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A')
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro')
+            const broadcastGroupId = 'bg-' + Date.now()
+            setActiveBroadcastGroupId(broadcastGroupId)
+            setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A', broadcastGroupId)
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro', broadcastGroupId)
           } else if (chatModelMode === 'dummy-pro') {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro')
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro', undefined, activeStrandId || undefined, activeCanvasId || undefined)
           } else {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A')
+            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A', undefined, activeStrandId || undefined, activeCanvasId || undefined)
           }
         } else if (aiSettings.useOpenRouter) {
           // ALWAYS use env variable if available, fallback to settings
@@ -469,11 +519,11 @@ function App() {
           }
           await streamIntoNewMessage(async (msgs, onChunk, signal) =>
             sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-          )
+          , undefined, undefined, activeStrandId || undefined, activeCanvasId || undefined)
         } else {
           await streamIntoNewMessage(async (msgs, onChunk, signal) =>
             sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-          )
+          , undefined, undefined, activeStrandId || undefined, activeCanvasId || undefined)
         }
 
         // Clear stream buffer indicator
@@ -523,6 +573,54 @@ function App() {
       abortControllerRef.current = null
       setIsTyping(false)
       setStreamingResponse('')
+    }
+  }
+
+  // toggleExpand / regenerate removed
+
+  // Choose a specific model from a broadcast response and switch mode
+  const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
+  const prevContinueModeRef = useRef<'dummy-basic' | 'dummy-pro' | 'broadcast' | null>(null)
+  const continueWithModel = (modelTag?: string, messageId?: string) => {
+    if (!modelTag) return
+    if (aiSettings.useDummyAI) {
+      prevContinueModeRef.current = chatModelMode
+      // Resolve the exact bubble to glow (last assistant in the selected lane)
+      let targetId = messageId || ''
+      if (messageId) {
+        const msg = messages.find(m => m.id === messageId)
+        const gid = msg?.broadcastGroupId
+        if (gid) {
+          setContinuedModelByGroup(prev => ({ ...prev, [gid]: modelTag }))
+          setActiveBroadcastGroupId(gid)
+        }
+        if (gid && msg?.modelTag) {
+          const canvasId = `${gid}:${msg.modelTag}`
+          setActiveCanvasId(canvasId)
+          const lastAssistant = [...messages].reverse().find(m => m.canvasId === canvasId && !m.isUser)
+          if (lastAssistant) targetId = lastAssistant.id
+        }
+        // Set active strand root to the chosen header bubble
+        setActiveStrandId(messageId)
+      }
+      // Update state for ring; do NOT rely on it for immediate DOM highlighting
+      if (targetId) setContinueFromMessageId(targetId)
+      if (modelTag === 'Dummy A') {
+        setChatModelModePersist('dummy-basic')
+      } else if (modelTag === 'Dummy Pro') {
+        setChatModelModePersist('dummy-pro')
+      }
+      setModelMenuOpen(false)
+      // Briefly highlight and focus input for seamless continuation (use local targetId)
+      setTimeout(() => {
+        if (!targetId) return
+        const el = document.querySelector(`[data-message-id="${targetId}"]`)
+        if (el) {
+          el.classList.add('highlight-message')
+          setTimeout(() => el.classList.remove('highlight-message'), 1500)
+        }
+        textareaRef.current?.focus()
+      }, 30)
     }
   }
 
@@ -1728,7 +1826,7 @@ function App() {
               setApiConnected={setApiConnected}
               setIsConnecting={setIsConnecting}
               chatModelMode={chatModelMode}
-              setChatModelMode={setChatModelMode}
+              setChatModelMode={setChatModelModePersist}
               modelMenuOpen={modelMenuOpen}
               setModelMenuOpen={setModelMenuOpen}
               isConnecting={isConnecting}
@@ -1859,6 +1957,8 @@ function App() {
               })()}
               
               {messages.map((msg, index) => {
+                // Skip canvas messages; they render inside their canvas
+                if (msg.canvasId) return null
                 // Check if this is a drift message
                 const isDriftHeader = msg.isDriftPush && msg.text.startsWith('📌');
                 const isDriftMessage = msg.isDriftPush && !msg.text.startsWith('📌');
@@ -1885,9 +1985,115 @@ function App() {
                 // Skip rendering drift headers and hidden context messages
                 if (isDriftHeader || msg.isHiddenContext) return null;
                 
+                // Handle broadcast group rendering (horizontal row of model answers)
+                if (msg.broadcastGroupId) {
+                  // Skip if not the first in a contiguous group
+                  if (index > 0 && messages[index - 1]?.broadcastGroupId === msg.broadcastGroupId) {
+                    return null
+                  }
+                  const groupId = msg.broadcastGroupId
+                  const groupMessages = [] as Message[]
+                  for (let j = index; j < messages.length; j++) {
+                    const m = messages[j]
+                    if (m.broadcastGroupId === groupId) groupMessages.push(m)
+                    else break
+                  }
+                  return (
+                    <div
+                      key={`bg-${groupId}-${index}`}
+                      className="max-w-5xl mx-auto px-6"
+                      data-broadcast-group={groupId}
+                    >
+                      <div className="flex gap-4 items-start flex-wrap md:flex-nowrap">
+                        {groupMessages.map((gm) => (
+                          <div key={gm.id} className="w-full md:w-1/2">
+                            <div className={`flex justify-start animate-fade-up relative group`}>
+                              <div
+                                className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 py-3 relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
+                                data-message-id={gm.id}
+                              >
+                                {/* Model tag and Continue */}
+                                {gm.modelTag && (
+                                  <>
+                                    <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
+                                      {gm.modelTag}
+                                    </div>
+                                    {aiSettings.useDummyAI && gm.broadcastGroupId === activeBroadcastGroupId && (
+                                      <button
+                                        onClick={() => continueWithModel(gm.modelTag, gm.id)}
+                                        className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
+                                        title={`Continue with ${gm.modelTag}`}
+                                      >
+                                        Continue
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                                {gm.text && gm.text.length > 0 ? (
+                                  <div className="prose prose-invert prose-sm max-w-none relative text-[13px] leading-6">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {gm.text.replace(/```([\s\S]*?)```/g, (_m, p1) => `\n\n\`\`\`\n${p1}\n\`\`\`\n\n`)}
+                                    </ReactMarkdown>
+                                  </div>
+                                ) : (
+                                  <div className="flex gap-1 py-1">
+                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                  </div>
+                                )}
+                                {/* Actions removed (Expand, Regenerate) */}
+                                {/* Stronger visual connector when this bubble is the strand root */}
+                                {/* Subtle connector removed per feedback */}
+                              </div>
+                            </div>
+                            {/* Canvas body: vertical continuation for this model */}
+                            {(() => {
+                              const canvasId = `${groupId}:${gm.modelTag}`
+                              const canvasMsgs = messages.filter(m => m.canvasId === canvasId)
+                              if (canvasMsgs.length === 0) return null
+                              const lastAssistant = [...canvasMsgs].reverse().find(m => !m.isUser && m.modelTag)
+                              return (
+                                <div className={`mt-3 pl-3 border-l ${activeCanvasId === canvasId ? 'border-accent-violet/15' : 'border-dark-border/30'} transition-colors`}>
+                                  {canvasMsgs.map((cm, k) => (
+                                    <div key={cm.id} className="mb-3">
+                                      <div className={`flex ${cm.isUser ? 'justify-end' : 'justify-start'} relative`}>
+                                        <div data-message-id={cm.id} className={`${cm.isUser
+                                          ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white'
+                                          : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary'} rounded-2xl px-5 py-3 shadow-lg max-w-[85%] ${continueFromMessageId === cm.id ? 'ring-1 ring-accent-violet/25' : ''}`}
+                                        >
+                                          <div className={`${getRTLClassName(cm.text)}`} dir={getTextDirection(cm.text)}>
+                                            <ReactMarkdown className="prose prose-sm prose-invert max-w-none text-[13px] leading-6"
+                                              remarkPlugins={[remarkGfm]}>
+                                              {cm.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
+                                            </ReactMarkdown>
+                                          </div>
+                                        </div>
+                                        {/* Continue from last assistant message of this canvas */}
+                                        {lastAssistant && cm.id === lastAssistant.id && (
+                                          <button
+                                            onClick={() => continueWithModel(lastAssistant.modelTag, lastAssistant.id)}
+                                            className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
+                                          >
+                                            Continue
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+
                 return msg.text ? (
                   <div 
-                    className={`max-w-5xl mx-auto`}
+                    className={`max-w-5xl mx-auto ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''}`}
                     key={msg.id}
                   >
                     {/* Drift group header - only show for first message in multi-message groups */}
@@ -2085,6 +2291,7 @@ function App() {
                               <Copy className="w-3.5 h-3.5 text-text-muted hover:text-accent-violet" />
                             )}
                           </button>
+                          {/* Regenerate removed per UX */}
                           <button
                             onClick={() => handleToggleSaveMessage(msg)}
                             className={`p-1.5 rounded-lg bg-dark-elevated border pointer-events-auto
@@ -2116,10 +2323,64 @@ function App() {
                           )}
                         </div>
                       )}
-                      {/* Model label for AI messages */}
+                      {/* Strand bead and clearer line ownership */}
+                      {msg.strandId && msg.strandId === activeStrandId && (
+                        <>
+                          {/* Bead for first message in strand sequence */}
+                          {(!messages[index - 1] || messages[index - 1]?.strandId !== msg.strandId) && (
+                            <div className="absolute -left-2 top-2 w-2 h-2 rounded-full bg-accent-violet/60" />
+                          )}
+                        </>
+                      )}
+
+                      {/* Model label and Continue action for AI messages */}
                       {!msg.isUser && msg.modelTag && (
-                        <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
-                          {msg.modelTag}
+                        <>
+                          <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
+                            {msg.modelTag}
+                          </div>
+                          {aiSettings.useDummyAI && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
+                            <button
+                              onClick={() => continueWithModel(msg.modelTag, msg.id)}
+                              className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
+                              title={`Continue with ${msg.modelTag}`}
+                            >
+                              Continue
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {/* Inline Continue context banner under chosen message */}
+                      {!msg.isUser && continueFromMessageId === msg.id && (
+                        <div className="mt-2 text-[11px] px-3 py-2 rounded-lg bg-dark-elevated/60 border border-accent-violet/30 text-text-secondary flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-dark-bubble border border-dark-border/50 text-[10px] text-accent-violet">
+                              Continuing with {msg.modelTag}
+                            </span>
+                            <span className="text-text-muted">Your next message will use this model</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                textareaRef.current?.focus()
+                                scrollToBottom()
+                              }}
+                              className="px-2 py-0.5 rounded bg-accent-violet/20 text-accent-violet border border-accent-violet/40 hover:bg-accent-violet/30 transition-colors"
+                            >
+                              Write reply
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (prevContinueModeRef.current) {
+                                  setChatModelModePersist(prevContinueModeRef.current)
+                                }
+                                setContinueFromMessageId(null)
+                              }}
+                              className="px-2 py-0.5 rounded bg-dark-bubble border border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
                       )}
                       {/* Add Drift tag for single pushed messages */}
@@ -2238,7 +2499,7 @@ function App() {
                       
                       {msg.isUser ? (
                         <p 
-                          className={`text-sm leading-relaxed ${getRTLClassName(msg.text)}`}
+                          className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
                           dir={getTextDirection(msg.text)}
                         >
                           {msg.text}
@@ -2246,11 +2507,11 @@ function App() {
                       ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
                         // Render AI message with clickable drift links
                         <div 
-                          className={`text-sm leading-relaxed ${getRTLClassName(msg.text)}`}
+                          className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
                           dir={getTextDirection(msg.text)}
                         >
                           <ReactMarkdown
-                            className="prose prose-sm prose-invert max-w-none
+                            className="prose prose-sm prose-invert max-w-none text-[13px] leading-6
                               prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                               prose-p:text-text-secondary prose-p:mb-2
                               prose-strong:text-text-primary prose-strong:font-semibold
@@ -2360,7 +2621,7 @@ function App() {
                           dir={getTextDirection(msg.text)}
                         >
                           <ReactMarkdown 
-                            className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none
+                            className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none
                             prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                             prose-p:text-text-secondary prose-p:mb-2
                             prose-strong:text-text-primary prose-strong:font-semibold
@@ -2415,6 +2676,83 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* Composer context bar when continuing with a model */}
+        {false && (() => {
+          const refMsg = messages.find(m => m.id === continueFromMessageId)
+          const model = refMsg?.modelTag || 'Model'
+          const excerpt = refMsg?.text ? stripMarkdown(refMsg.text).slice(0, 80) : ''
+          const chipsGroupId = activeBroadcastGroupId || refMsg?.broadcastGroupId || null
+          const chipModels = chipsGroupId
+            ? Array.from(new Map(
+                messages
+                  .filter(m => m.broadcastGroupId === chipsGroupId && !!m.modelTag)
+                  .map(m => [m.modelTag as string, { id: m.id, modelTag: m.modelTag as string }])
+              ).values())
+            : []
+          return (
+            <div className="absolute bottom-16 left-0 right-0 z-10 px-4">
+              <div className="max-w-4xl mx-auto">
+                <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-dark-elevated/70 border border-accent-violet/30 text-[12px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-full bg-dark-bubble border border-dark-border/50 text-accent-violet text-[11px]">
+                      Continuing with {model}
+                    </span>
+                    {chipModels.length > 1 && (
+                      <div className="flex items-center gap-1">
+                        {chipModels.map((cm: any) => (
+                          <button
+                            key={`chip-${cm.id}`}
+                            onClick={() => continueWithModel(cm.modelTag, cm.id)}
+                            className={`px-2 py-0.5 rounded-full border text-[11px] transition-colors ${
+                              cm.id === continueFromMessageId
+                                ? 'bg-accent-violet/20 border-accent-violet/50 text-accent-violet'
+                                : 'bg-dark-bubble border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated'
+                            }`}
+                            title={`Switch to ${cm.modelTag}`}
+                          >
+                            {cm.modelTag}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {excerpt && (
+                      <span className="text-text-muted hidden sm:inline">{excerpt}{refMsg!.text!.length > 80 ? '…' : ''}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {chipsGroupId && (
+                      <button
+                        onClick={() => {
+                          const el = document.querySelector(`[data-broadcast-group="${chipsGroupId}"]`)
+                          if (el) {
+                            ;(el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' })
+                            el.classList.add('highlight-message')
+                            setTimeout(() => el.classList.remove('highlight-message'), 1200)
+                          }
+                        }}
+                        className="px-2 py-0.5 rounded bg-dark-bubble border border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated transition-colors"
+                      >
+                        Compare again
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                      if (prevContinueModeRef.current) setChatModelModePersist(prevContinueModeRef.current)
+                      setContinueFromMessageId(null)
+                      setActiveStrandId(null)
+                    }}
+                      className="px-2 py-0.5 rounded bg-dark-bubble border border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated transition-colors"
+                      title="Cancel continuing"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Modern input area */}
         <div className="absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4">
@@ -2494,6 +2832,34 @@ function App() {
         </div>
       </div>
       
+      {/* Sticky model chips (no redundant label) */}
+      {activeCanvasId && (() => {
+        const [gid] = activeCanvasId.split(':')
+        const headers = messages.filter(m => m.broadcastGroupId === gid && !m.canvasId && !!m.modelTag)
+        const chipModels = Array.from(new Map(headers.map(h => [h.modelTag as string, h])).values()) as Message[]
+        if (chipModels.length === 0) return null
+        return (
+          <div className="fixed top-[70px] right-6 z-20">
+            <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-dark-elevated/80 backdrop-blur border border-accent-violet/30 shadow-lg">
+              {chipModels.map(cm => (
+                <button
+                  key={`sticky-${cm.id}`}
+                  onClick={() => continueWithModel(cm.modelTag, cm.id)}
+                  className={`px-2 py-0.5 rounded-full border text-[11px] transition-colors ${
+                    `${gid}:${cm.modelTag}` === activeCanvasId
+                      ? 'bg-accent-violet/20 border-accent-violet/50 text-accent-violet'
+                      : 'bg-dark-bubble border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated'
+                  }`}
+                  title={`Switch to ${cm.modelTag}`}
+                >
+                  {cm.modelTag}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Selection Tooltip */}
       <SelectionTooltip 
         onStartDrift={handleStartDrift}

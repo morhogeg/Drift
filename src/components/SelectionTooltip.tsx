@@ -192,7 +192,7 @@ export default function SelectionTooltip({
         e.stopPropagation()
       }}
     >
-      <div className="flex gap-2 bg-dark-elevated/95 backdrop-blur rounded-full p-1 border border-dark-border shadow-2xl">
+      <div className="flex gap-2 bg-dark-elevated/95 backdrop-blur rounded-full p-1.5 border border-dark-border/70 shadow-lg">
         <button
           type="button"
           onMouseDown={(e) => {
@@ -204,19 +204,13 @@ export default function SelectionTooltip({
             e.stopPropagation()
             handleDrift()
           }}
-          className="
-            flex items-center gap-1.5 px-3 py-1.5
-            bg-gradient-to-r from-accent-pink to-accent-violet
-            text-white text-sm font-medium
-            rounded-full shadow-lg shadow-accent-pink/30
-            hover:scale-105 active:scale-95
-            transition-all duration-200
-            border border-white/20
-            cursor-pointer
-          "
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
+                     bg-dark-bubble border border-dark-border/60 text-text-secondary
+                     hover:border-accent-violet/40 hover:text-text-primary
+                     transition-colors duration-150 cursor-pointer"
         >
-          <span className="text-base">🌀</span>
-          <span>Drift</span>
+          <span className="w-2 h-2 rounded-full bg-accent-violet/60" />
+          <span className="text-[12px]">Drift</span>
         </button>
         
         <button
@@ -230,30 +224,18 @@ export default function SelectionTooltip({
             e.stopPropagation()
             handleSave()
           }}
-          className="
-            flex items-center gap-1.5 px-3 py-1.5
-            bg-gradient-to-r from-cyan-500 to-teal-500
-            text-white text-sm font-medium
-            rounded-full shadow-lg shadow-cyan-500/30
-            hover:scale-105 active:scale-95
-            transition-all duration-200
-            border border-white/20
-            cursor-pointer
-          "
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
+                     bg-dark-bubble border border-dark-border/60 text-text-secondary
+                     hover:border-accent-violet/40 hover:text-text-primary
+                     transition-colors duration-150 cursor-pointer"
         >
-          <Bookmark className="w-3.5 h-3.5" />
-          <span>Save</span>
+          <Bookmark className="w-3.5 h-3.5 text-text-muted" />
+          <span className="text-[12px]">Save</span>
         </button>
       </div>
       
       {/* Arrow */}
-      <div className="
-        absolute left-1/2 -translate-x-1/2 top-full
-        w-0 h-0 
-        border-l-[6px] border-l-transparent
-        border-r-[6px] border-r-transparent
-        border-t-[6px] border-t-accent-violet
-      " />
+      <div className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 bg-dark-elevated/95 rotate-45 border-r border-b border-dark-border/70" />
     </div>
   )
 }

@@ -626,7 +626,7 @@ export default function DriftPanel({
                   >
                   {msg.isUser ? (
                     <p 
-                      className={`text-sm leading-relaxed ${getRTLClassName(msg.text)}`}
+                      className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
                       dir={getTextDirection(msg.text)}
                     >
                       {msg.text}
@@ -637,7 +637,7 @@ export default function DriftPanel({
                       dir={getTextDirection(msg.text)}
                     >
                       <ReactMarkdown 
-                      className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none
+                      className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none
                         prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                         prose-p:text-text-secondary prose-p:mb-2
                         prose-strong:text-text-primary prose-strong:font-semibold
