@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToDummy, sendMessageToDummyPro, checkDummyConnection, type ChatMessage as DummyMessage } from './services/dummyAI'
@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
-import DummyModelSelector from './components/DummyModelSelector'
+// DummyModelSelector removed in favor of inline chips
 import HeaderControls from './components/HeaderControls'
 
 interface Message {
@@ -60,6 +60,9 @@ interface ChatSession {
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<string | null>(null)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement | null>(null)
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
@@ -72,23 +75,27 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(OPENROUTER_MODELS.OSS)
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
-  // Model selection for main chat (Dummy-focused)
-  const [chatModelMode, setChatModelMode] = useState<'dummy-basic' | 'dummy-pro' | 'broadcast'>('dummy-basic')
+  // Model selection for main chat (multi-provider broadcast)
+  type Provider = 'dummy' | 'openrouter' | 'ollama'
+  type Target = { provider: Provider, key: string, label: string }
+  const DEFAULT_TARGET: Target = { provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' }
+  const [selectedTargets, setSelectedTargets] = useState<Target[]>([DEFAULT_TARGET])
   // Broadcast grouping state
   const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
   const [continuedModelByGroup, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
   const CHAT_MODEL_PREFS_KEY = 'drift_chat_model_prefs'
-  const [chatModelPrefs, setChatModelPrefs] = useState<Record<string, 'dummy-basic' | 'dummy-pro' | 'broadcast'>>(() => {
+  const [chatModelPrefs, setChatModelPrefs] = useState<Record<string, Target[]>>(() => {
     try {
       const raw = localStorage.getItem(CHAT_MODEL_PREFS_KEY)
-      return raw ? JSON.parse(raw) : {}
+      const parsed = raw ? JSON.parse(raw) : {}
+      return parsed
     } catch {
       return {}
     }
   })
-  const persistChatModelMode = (chatId: string, mode: 'dummy-basic' | 'dummy-pro' | 'broadcast') => {
+  const persistSelectedTargets = (chatId: string, targets: Target[]) => {
     setChatModelPrefs(prev => {
-      const next = { ...prev, [chatId]: mode }
+      const next = { ...prev, [chatId]: targets }
       try { localStorage.setItem(CHAT_MODEL_PREFS_KEY, JSON.stringify(next)) } catch {}
       return next
     })
@@ -96,13 +103,16 @@ function App() {
   // Ensure selected mode follows per-chat preference
   useEffect(() => {
     const saved = chatModelPrefs[activeChatId]
-    if (saved) setChatModelMode(saved)
+    if (saved && Array.isArray(saved) && saved.length) setSelectedTargets(saved as Target[])
   }, [activeChatId])
-  const setChatModelModePersist = (mode: 'dummy-basic' | 'dummy-pro' | 'broadcast') => {
-    setChatModelMode(mode)
-    persistChatModelMode(activeChatId, mode)
+  const setSelectedTargetsPersist = (targets: Target[]) => {
+    // Deduplicate by key
+    const map = new Map<string, Target>()
+    for (const t of targets) map.set(t.key, t)
+    const final = map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
+    setSelectedTargets(final)
+    persistSelectedTargets(activeChatId, final)
   }
-  const [modelMenuOpen, setModelMenuOpen] = useState(false)
   // expand/regenerate removed per UX
   const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
@@ -499,31 +509,53 @@ function App() {
         }
 
         // Stream the response using the selected API
-        if (aiSettings.useDummyAI) {
-          if (chatModelMode === 'broadcast') {
+        {
+          const targets = selectedTargets.length ? selectedTargets : [DEFAULT_TARGET]
+          const isBroadcast = targets.length > 1
+          if (isBroadcast) {
             const broadcastGroupId = 'bg-' + Date.now()
             setActiveBroadcastGroupId(broadcastGroupId)
             setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A', broadcastGroupId)
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro', broadcastGroupId)
-          } else if (chatModelMode === 'dummy-pro') {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), 'Dummy Pro', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+            for (const t of targets) {
+              if (t.provider === 'dummy') {
+                if (t.key === 'dummy-basic') {
+                  await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, broadcastGroupId)
+                } else if (t.key === 'dummy-pro') {
+                  await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, broadcastGroupId)
+                }
+              } else if (t.provider === 'openrouter') {
+                const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => 
+                  sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
+                , 'OpenRouter', broadcastGroupId)
+              } else if (t.provider === 'ollama') {
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => 
+                  sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
+                , 'Ollama', broadcastGroupId)
+              }
+            }
           } else {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), 'Dummy A', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+            const t = targets[0]
+            if (t.provider === 'dummy') {
+              if (t.key === 'dummy-pro') {
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, activeCanvasId || undefined)
+              } else {
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, activeCanvasId || undefined)
+              }
+            } else if (t.provider === 'openrouter') {
+              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+              if (!apiKey) {
+                throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
+              }
+              await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
+              , 'OpenRouter', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+            } else if (t.provider === 'ollama') {
+              await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
+              , 'Ollama', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+            }
           }
-        } else if (aiSettings.useOpenRouter) {
-          // ALWAYS use env variable if available, fallback to settings
-          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-          if (!apiKey) {
-            throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          }
-          await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-            sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-          , undefined, undefined, activeStrandId || undefined, activeCanvasId || undefined)
-        } else {
-          await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-            sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-          , undefined, undefined, activeStrandId || undefined, activeCanvasId || undefined)
         }
 
         // Clear stream buffer indicator
@@ -580,11 +612,11 @@ function App() {
 
   // Choose a specific model from a broadcast response and switch mode
   const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
-  const prevContinueModeRef = useRef<'dummy-basic' | 'dummy-pro' | 'broadcast' | null>(null)
+  const prevContinueTargetsRef = useRef<Target[] | null>(null)
   const continueWithModel = (modelTag?: string, messageId?: string) => {
     if (!modelTag) return
-    if (aiSettings.useDummyAI) {
-      prevContinueModeRef.current = chatModelMode
+    {
+      prevContinueTargetsRef.current = selectedTargets
       // Resolve the exact bubble to glow (last assistant in the selected lane)
       let targetId = messageId || ''
       if (messageId) {
@@ -606,11 +638,14 @@ function App() {
       // Update state for ring; do NOT rely on it for immediate DOM highlighting
       if (targetId) setContinueFromMessageId(targetId)
       if (modelTag === 'Dummy A') {
-        setChatModelModePersist('dummy-basic')
+        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' }])
       } else if (modelTag === 'Dummy Pro') {
-        setChatModelModePersist('dummy-pro')
+        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-pro', label: 'Dummy Pro' }])
+      } else if (modelTag === 'OpenRouter') {
+        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'openrouter', label: 'OpenRouter' }])
+      } else if (modelTag === 'Ollama') {
+        setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
       }
-      setModelMenuOpen(false)
       // Briefly highlight and focus input for seamless continuation (use local targetId)
       setTimeout(() => {
         if (!targetId) return
@@ -1588,6 +1623,19 @@ function App() {
     }
   }, [])
 
+  // Close user menu on outside click
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!userMenuOpen) return
+      const el = userMenuRef.current
+      if (el && !el.contains(e.target as Node)) {
+        setUserMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [userMenuOpen])
+
   // Show login screen if not authenticated
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />
@@ -1614,13 +1662,6 @@ function App() {
               <h2 className="text-base font-semibold text-text-primary">Chat History</h2>
             </div>
             <div className="flex items-center gap-1">
-              <button
-                onClick={handleLogout}
-                className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
-                title="Logout"
-              >
-                <LogOut className="w-3.5 h-3.5 text-text-muted group-hover:text-accent-pink" />
-              </button>
               <button
                 onClick={() => setSidebarOpen(false)}
                 className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
@@ -1743,6 +1784,50 @@ function App() {
           ))}
         </div>
 
+
+        {/* Sidebar Footer: current user with menu */}
+        <div className="relative border-t border-dark-border/30 p-2" ref={userMenuRef}>
+          <button
+            onClick={() => setUserMenuOpen(v => !v)}
+            className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-dark-elevated/60 transition-colors"
+            title="Account menu"
+          >
+            <div className="w-7 h-7 rounded-full bg-accent-violet/30 flex items-center justify-center text-[11px] text-accent-violet font-medium">
+              {(currentUser?.[0]?.toUpperCase() || 'U')}
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <span className="text-sm text-text-primary truncate block">{currentUser || 'User'}</span>
+              <span className="text-[10px] text-text-muted">Signed in</span>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {userMenuOpen && (
+            <div className="absolute bottom-12 left-2 right-2 bg-dark-surface border border-dark-border/60 rounded-lg shadow-xl overflow-hidden z-50">
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-dark-elevated/60"
+                onClick={() => { setUserMenuOpen(false); setProfileOpen(true); }}
+              >
+                <User className="w-4 h-4 text-text-muted" />
+                View profile
+              </button>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-dark-elevated/60"
+                onClick={() => { setSettingsOpen(true); setUserMenuOpen(false) }}
+              >
+                <SettingsIcon className="w-4 h-4 text-text-muted" />
+                AI settings
+              </button>
+              <div className="h-px bg-dark-border/60" />
+              <button
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10"
+                onClick={() => { setUserMenuOpen(false); handleLogout() }}
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Main Chat Area */}
@@ -1782,15 +1867,6 @@ function App() {
                   <Plus className="w-5 h-5 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
                 </button>
                 
-                {/* Settings Button */}
-                <button
-                  onClick={() => setSettingsOpen(true)}
-                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
-                  title="AI Settings"
-                >
-                  <SettingsIcon className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
-                </button>
-                
                 {/* Snippet Gallery Button */}
                 <button
                   onClick={() => setGalleryOpen(true)}
@@ -1825,10 +1901,8 @@ function App() {
               handleAISettingsChange={handleAISettingsChange}
               setApiConnected={setApiConnected}
               setIsConnecting={setIsConnecting}
-              chatModelMode={chatModelMode}
-              setChatModelMode={setChatModelModePersist}
-              modelMenuOpen={modelMenuOpen}
-              setModelMenuOpen={setModelMenuOpen}
+              selectedTargets={selectedTargets}
+              setSelectedTargets={setSelectedTargetsPersist}
               isConnecting={isConnecting}
               apiConnected={apiConnected}
             />
@@ -2018,7 +2092,7 @@ function App() {
                                     <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
                                       {gm.modelTag}
                                     </div>
-                                    {aiSettings.useDummyAI && gm.broadcastGroupId === activeBroadcastGroupId && (
+                                    {gm.broadcastGroupId === activeBroadcastGroupId && (
                                       <button
                                         onClick={() => continueWithModel(gm.modelTag, gm.id)}
                                         className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
@@ -2339,7 +2413,7 @@ function App() {
                           <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
                             {msg.modelTag}
                           </div>
-                          {aiSettings.useDummyAI && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
+                          {msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
                             <button
                               onClick={() => continueWithModel(msg.modelTag, msg.id)}
                               className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
@@ -2371,8 +2445,8 @@ function App() {
                             </button>
                             <button
                               onClick={() => {
-                                if (prevContinueModeRef.current) {
-                                  setChatModelModePersist(prevContinueModeRef.current)
+                                if (prevContinueTargetsRef.current) {
+                                  setSelectedTargetsPersist(prevContinueTargetsRef.current)
                                 }
                                 setContinueFromMessageId(null)
                               }}
@@ -2738,7 +2812,7 @@ function App() {
                     )}
                     <button
                       onClick={() => {
-                      if (prevContinueModeRef.current) setChatModelModePersist(prevContinueModeRef.current)
+                      if (prevContinueTargetsRef.current) setSelectedTargetsPersist(prevContinueTargetsRef.current)
                       setContinueFromMessageId(null)
                       setActiveStrandId(null)
                     }}
@@ -2915,6 +2989,48 @@ function App() {
           }, 150)
         }}
       />
+      
+      {/* Profile Modal */}
+      {profileOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111111] border border-[#333333] rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-[#333333]">
+              <h2 className="text-lg font-semibold text-white">Profile</h2>
+              <button
+                onClick={() => setProfileOpen(false)}
+                className="p-2 hover:bg-[#222222] rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-[#9ca3af]" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-accent-violet/30 flex items-center justify-center text-sm text-accent-violet font-medium">
+                  {(currentUser?.[0]?.toUpperCase() || 'U')}
+                </div>
+                <div>
+                  <div className="text-white font-medium">{currentUser || 'User'}</div>
+                  <div className="text-xs text-[#9ca3af]">Local account</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#333333] text-sm text-white hover:border-[#444444]"
+                  onClick={() => { navigator.clipboard?.writeText(currentUser || ''); }}
+                >
+                  Copy username
+                </button>
+                <button
+                  className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300 hover:bg-red-500/20"
+                  onClick={() => { setProfileOpen(false); handleLogout(); }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Context Menu */}
       {contextMenu && (
