@@ -39,6 +39,11 @@ interface Message {
     wasSavedAsChat?: boolean
     userQuestion?: string
     driftChatId?: string
+    // When a drift is pushed while in broadcast mode, remember
+    // which side (left/right) the originating model was rendered on
+    originSide?: 'left' | 'right'
+    // Preserve the originating model tag for labeling/alignment
+    originModelTag?: string
   }
   isHiddenContext?: boolean  // For single message pushes, hides context messages
 }
@@ -107,8 +112,11 @@ function App() {
   }, [activeChatId])
   const setSelectedTargetsPersist = (targets: Target[]) => {
     // Deduplicate by key
+    const allowed = new Set(['dummy-basic','dummy-pro','openrouter','ollama'])
     const map = new Map<string, Target>()
-    for (const t of targets) map.set(t.key, t)
+    for (const t of targets) {
+      if (allowed.has(t.key)) map.set(t.key, t)
+    }
     const final = map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
     setSelectedTargets(final)
     persistSelectedTargets(activeChatId, final)
@@ -1200,6 +1208,17 @@ function App() {
     // Generate a drift chat ID if not provided (for when it's saved later)
     const actualDriftChatId = driftChatId || 'drift-pushed-' + Date.now()
     
+    // Determine originating model and side (for broadcast alignment)
+    const originMsg = messages.find(m => m.id === originalSourceId)
+    const originModelTag = originMsg?.modelTag
+    let originSide: 'left' | 'right' | undefined = undefined
+    if (originMsg?.broadcastGroupId) {
+      // Find order of messages within this broadcast group to infer side
+      const groupMsgs = messages.filter(m => m.broadcastGroupId === originMsg.broadcastGroupId && !m.canvasId && !!m.modelTag)
+      const idx = groupMsgs.findIndex(m => m.id === originMsg.id)
+      if (idx >= 0) originSide = idx === 0 ? 'left' : 'right'
+    }
+
     // Add a separator message to indicate where drift was pushed
     const separatorMessage: Message = {
       id: 'drift-push-' + Date.now(),
@@ -1213,8 +1232,12 @@ function App() {
         parentChatId: activeChatId,
         wasSavedAsChat: wasSavedAsChat,
         userQuestion: userQuestion,
-        driftChatId: actualDriftChatId
-      }
+        driftChatId: actualDriftChatId,
+        originSide,
+        originModelTag
+      },
+      // Preserve model tag for visual context (not rendered for header but harmless)
+      modelTag: originModelTag
     }
     
     // Update ONLY the original source message to mark it as having a drift
@@ -1318,13 +1341,17 @@ function App() {
       id: `${sourceMessageId}-msg-${idx}-${Date.now()}`, // Unique ID for each pushed message
       originalDriftId: msg.id, // Keep reference to original drift message ID
       isDriftPush: true,
+      // Carry through the origin model tag so the label appears
+      modelTag: originModelTag,
       driftPushMetadata: {
         selectedText: selectedText,
         sourceMessageId: sourceMessageId,
         parentChatId: activeChatId,
         wasSavedAsChat: wasSavedAsChat,
         userQuestion: userQuestion,
-        driftChatId: actualDriftChatId
+        driftChatId: actualDriftChatId,
+        originSide,
+        originModelTag
       }
     }))
     
@@ -1658,8 +1685,7 @@ function App() {
         <div className="p-3 border-b border-dark-border/30">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-accent-pink" />
-              <h2 className="text-base font-semibold text-text-primary">Chat History</h2>
+              <h2 className="text-sm font-medium text-text-secondary">Chat History</h2>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -1681,7 +1707,7 @@ function App() {
               placeholder="Search chats..."
               className="
                 w-full bg-dark-elevated/50 text-text-primary
-                rounded-full pl-8 pr-8 py-1.5 text-sm
+                rounded-full pl-8 pr-8 py-1.5 text-[13px]
                 border border-dark-border/30
                 focus:outline-none focus:border-accent-violet/50
                 placeholder:text-text-muted
@@ -1715,7 +1741,7 @@ function App() {
                 group relative rounded-lg p-2.5 cursor-pointer
                 transition-all duration-100 ease-in-out
                 ${activeChatId === chat.id 
-                  ? 'bg-dark-elevated border-l-2 border-accent-pink shadow-lg' 
+                  ? 'bg-dark-elevated border-l-2 border-dark-border/60 shadow-lg' 
                   : 'bg-dark-elevated/30 hover:bg-dark-elevated/50'
                 }
               `}
@@ -1760,25 +1786,23 @@ function App() {
                     />
                   ) : (
                     <h3 
-                      className={`text-sm font-medium text-text-primary truncate ${getRTLClassName(chat.title)}`}
+                      className={`text-[13px] font-medium text-text-primary truncate ${getRTLClassName(chat.title)}`}
                       dir={getTextDirection(chat.title)}
                     >
                       {chat.title}
                     </h3>
                   )}
                   <p 
-                    className={`text-xs text-text-muted truncate mt-0.5 ${getRTLClassName(chat.lastMessage || '')}`}
+                    className={`text-[11px] text-text-muted truncate mt-0.5 ${getRTLClassName(chat.lastMessage || '')}`}
                     dir={getTextDirection(chat.lastMessage || '')}
                   >
                     {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
                   </p>
-                  <p className="text-[11px] text-accent-violet/60 mt-0.5">
-                    {formatDate(chat.createdAt)}
-                  </p>
+                  {/* removed time label for cleaner, neutral sidebar */}
                 </div>
               </div>
               {activeChatId === chat.id && (
-                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent-pink/10 to-accent-violet/10 pointer-events-none" />
+                <div className="absolute inset-0 rounded-xl bg-white/5 pointer-events-none" />
               )}
             </div>
           ))}
@@ -1884,15 +1908,9 @@ function App() {
             </div>
             
             <div className="flex-1 flex items-center justify-center">
-              <div className="flex items-center gap-2 animate-fade-up">
-                <div className="relative">
-                  <Sparkles className="w-6 h-6 text-accent-pink" />
-                  <div className="absolute inset-0 blur-lg bg-accent-pink/50 animate-pulse" />
-                </div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">
-                  Drift
-                </h1>
-              </div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold text-text-secondary tracking-tight">Drift</h1>
+            </div>
             </div>
             
             <HeaderControls
@@ -2086,22 +2104,21 @@ function App() {
                                 className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 py-3 relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
                                 data-message-id={gm.id}
                               >
-                                {/* Model tag and Continue */}
+                                {/* Minimal model tag */}
                                 {gm.modelTag && (
-                                  <>
-                                    <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
-                                      {gm.modelTag}
-                                    </div>
-                                    {gm.broadcastGroupId === activeBroadcastGroupId && (
-                                      <button
-                                        onClick={() => continueWithModel(gm.modelTag, gm.id)}
-                                        className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
-                                        title={`Continue with ${gm.modelTag}`}
-                                      >
-                                        Continue
-                                      </button>
-                                    )}
-                                  </>
+                                  <div className="absolute -top-2 left-3 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
+                                    {gm.modelTag}
+                                  </div>
+                                )}
+                                {/* Continue button (only when broadcast active) */}
+                                {gm.modelTag && gm.broadcastGroupId === activeBroadcastGroupId && (
+                                  <button
+                                    onClick={() => continueWithModel(gm.modelTag, gm.id)}
+                                    className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
+                                    title={`Continue with ${gm.modelTag}`}
+                                  >
+                                    Continue
+                                  </button>
                                 )}
                                 {gm.text && gm.text.length > 0 ? (
                                   <div className="prose prose-invert prose-sm max-w-none relative text-[13px] leading-6">
@@ -2197,7 +2214,13 @@ function App() {
                     `}>
                     
                     <div
-                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fade-up relative group
+                      className={`flex ${
+                        // For drift pushes in broadcast mode, align AI bubbles to the
+                        // originating model's side (left/right). Default to standard alignment otherwise.
+                        msg.isDriftPush && !msg.isUser && msg.driftPushMetadata?.originSide === 'right'
+                          ? 'justify-end'
+                          : msg.isUser ? 'justify-end' : 'justify-start'
+                      } animate-fade-up relative group
                                   ${isDriftMessage && hasMultipleDriftMessages && !isLastDriftMessage ? 'mb-2' : ''}`}
                       style={{ animationDelay: `${index * 50}ms` }}
                       onMouseEnter={() => !msg.isUser && setHoveredMessageId(msg.id)}
@@ -2407,22 +2430,21 @@ function App() {
                         </>
                       )}
 
-                      {/* Model label and Continue action for AI messages */}
+                      {/* Minimal model tag */}
                       {!msg.isUser && msg.modelTag && (
-                        <>
-                          <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-dark-border/50 text-[9px] font-medium text-text-muted">
-                            {msg.modelTag}
-                          </div>
-                          {msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
-                            <button
-                              onClick={() => continueWithModel(msg.modelTag, msg.id)}
-                              className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
-                              title={`Continue with ${msg.modelTag}`}
-                            >
-                              Continue
-                            </button>
-                          )}
-                        </>
+                        <div className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
+                          {msg.modelTag}
+                        </div>
+                      )}
+                      {/* Continue action when broadcast is active */}
+                      {!msg.isUser && msg.modelTag && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
+                        <button
+                          onClick={() => continueWithModel(msg.modelTag, msg.id)}
+                          className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
+                          title={`Continue with ${msg.modelTag}`}
+                        >
+                          Continue
+                        </button>
                       )}
                       {/* Inline Continue context banner under chosen message */}
                       {!msg.isUser && continueFromMessageId === msg.id && (

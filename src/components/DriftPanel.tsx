@@ -518,92 +518,63 @@ export default function DriftPanel({
       {/* Panel */}
       <div className={`
         w-full h-full bg-dark-bg
-        border-l border-accent-violet/30 shadow-2xl
+        border-l border-dark-border/30 shadow-2xl
         flex flex-col overflow-hidden
-        ${isOpen ? 'shadow-[0_0_50px_rgba(168,85,247,0.2)]' : ''}
       `}>
         {/* Header - matching main chat header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex-1 flex items-center justify-center">
-              <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">Drift Mode</h2>
-              </div>
-            </div>
+          <div className="px-2 py-1 flex items-center justify-end">
             <button
               onClick={() => onClose(driftOnlyMessages)}
-              className="absolute right-6 p-2 hover:bg-dark-elevated rounded-lg transition-colors"
+              className="p-1 hover:bg-dark-elevated rounded-lg transition-colors"
+              title="Close"
             >
-              <X className="w-5 h-5 text-text-muted" />
+              <X className="w-3.5 h-3.5 text-text-muted" />
             </button>
           </div>
           
-          {/* Selected Text Context and Action Buttons */}
-          <div className="px-6 pb-4">
-            <div className="p-3 bg-dark-bg/50 rounded-lg border border-accent-violet/20 mb-3">
-              <p className="text-sm text-accent-violet font-medium mb-1">Exploring:</p>
-              <p className="text-sm text-text-secondary italic">"{selectedText}"</p>
+        </header>
+
+        {/* Exploring + Actions toolbar (ultra-compact) */}
+        <div className="px-2 py-1 border-b border-dark-border/30 bg-dark-bg/70">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <span className="text-[11px] text-text-muted mr-2">Exploring</span>
+              <span className="text-[13px] text-text-secondary italic truncate align-middle">"{selectedText}"</span>
             </div>
-            
-            {/* Action Buttons */}
-            <div className="flex gap-2">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 onClick={handlePushToMain}
                 disabled={isPushing || (!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0)}
-                className={`flex-1 flex items-center justify-center gap-2
-                  ${pushedToMain 
-                    ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
-                    : 'bg-gradient-to-r from-accent-pink/20 to-accent-violet/20 border-accent-pink/30 hover:from-accent-pink/30 hover:to-accent-violet/30 hover:border-accent-pink/50'
-                  }
-                  border text-text-primary rounded-lg px-3 py-2
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  transition-all duration-200`}
+                className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                  ${pushedToMain
+                    ? 'bg-dark-elevated/70 border border-accent-violet/50 hover:bg-accent-violet/10'
+                    : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
+                  text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
                 title={isPushing ? 'Pushing...' : pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
               >
-                {pushedToMain ? (
-                  <>
-                    <Undo2 className="w-4 h-4" />
-                    <span className="text-sm">Undo Push</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowLeft className="w-4 h-4" />
-                    <span className="text-sm">Push to Main</span>
-                  </>
-                )}
+                {pushedToMain ? <Undo2 className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
+                <span>{pushedToMain ? 'Undo' : 'Push'}</span>
               </button>
-              
               <button
                 onClick={handleSaveAsChat}
                 disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
-                className={`flex-1 flex items-center justify-center gap-2
-                  ${savedAsChat 
-                    ? 'bg-dark-elevated/70 border-accent-violet/50 hover:bg-accent-violet/20 hover:border-accent-violet/70' 
-                    : 'bg-dark-elevated/50 border border-accent-violet/30 hover:bg-accent-violet/10 hover:border-accent-violet/50'
-                  }
-                  border text-text-primary rounded-lg px-3 py-2
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  transition-all duration-200`}
+                className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                  ${savedAsChat
+                    ? 'bg-dark-elevated/70 border border-accent-violet/50 hover:bg-accent-violet/10'
+                    : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
+                  text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
                 title={savedAsChat ? 'Undo save as chat' : 'Save drift as new chat'}
               >
-                {savedAsChat ? (
-                  <>
-                    <Undo2 className="w-4 h-4" />
-                    <span className="text-sm">Undo Save</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span className="text-sm">Save as Chat</span>
-                  </>
-                )}
+                <Save className="w-3.5 h-3.5" />
+                <span>{savedAsChat ? 'Saved' : 'Save'}</span>
               </button>
             </div>
           </div>
-        </header>
+        </div>
         
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4 bg-dark-bg">
+        <div className="flex-1 overflow-y-auto p-3 pb-16 space-y-3 bg-dark-bg">
           {messages.map((msg) => (
             msg.text ? (
               <div
@@ -618,9 +589,7 @@ export default function DriftPanel({
                       rounded-2xl px-4 py-2.5
                       ${msg.isUser 
                         ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' 
-                        : msg.id.includes('system') 
-                          ? 'bg-gradient-to-br from-accent-violet/10 to-accent-pink/10 border border-accent-violet/30 text-text-secondary'
-                          : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'
+                        : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'
                       }
                     `}
                   >
@@ -771,17 +740,17 @@ export default function DriftPanel({
                   rows={1}
                   dir={getTextDirection(message)}
                   className={`
-                    w-full bg-dark-elevated/90 backdrop-blur-md text-text-primary 
-                    rounded-2xl px-5 py-3 pr-14
+                    w-full bg-dark-elevated/80 backdrop-blur-md text-text-primary 
+                    rounded-2xl px-4 py-2.5 pr-12
                     border border-dark-border/60
-                    shadow-lg shadow-black/50
-                    focus:outline-none focus:border-accent-violet/50
+                    
+                    focus:outline-none focus:border-accent-violet/40
                     focus:shadow-[0_0_20px_rgba(168,85,247,0.15)]
                     placeholder:text-text-muted
                     transition-all duration-150
                     disabled:opacity-70
                     resize-none
-                    min-h-[48px] max-h-[200px]
+                    min-h-[44px] max-h-[200px]
                     ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
                     custom-scrollbar
                     ${getRTLClassName(message)}
@@ -794,10 +763,10 @@ export default function DriftPanel({
                       absolute right-2
                       ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
                       w-8 h-8 rounded-full
-                      bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-pink/30
+                      bg-dark-elevated/70 border border-dark-border/60
+                      text-text-primary
                       flex items-center justify-center
-                      hover:scale-105 active:scale-95
+                      hover:border-accent-violet/40 hover:bg-dark-elevated active:scale-95
                       transition-all duration-100
                     `}
                     title="Stop generating"
@@ -812,10 +781,10 @@ export default function DriftPanel({
                       absolute right-2
                       ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
                       w-8 h-8 rounded-full
-                      bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-pink/30
+                      bg-dark-elevated/70 border border-dark-border/60
+                      text-text-primary
                       flex items-center justify-center
-                      hover:scale-105 active:scale-95
+                      hover:border-accent-violet/40 hover:bg-dark-elevated active:scale-95
                       disabled:opacity-50 disabled:cursor-not-allowed
                       transition-all duration-100
                     `}
