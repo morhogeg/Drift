@@ -139,9 +139,15 @@ export async function sendMessageToOpenRouter(
   }
   
   try {
+    // Some OpenRouter models (notably free OSS variants) can reject 'system' role.
+    // Normalize any 'system' messages to 'user' to maximize compatibility.
+    const normalizedMessages = messages.map(m =>
+      m.role === 'system' ? ({ role: 'user' as const, content: m.content }) : m
+    )
+
     const requestBody = {
       model,
-      messages,
+      messages: normalizedMessages,
       stream: true,
       temperature: 0.7,
       max_tokens: 2000

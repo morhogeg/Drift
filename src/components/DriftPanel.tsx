@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, ArrowUp, Square, ArrowLeft, Check, Undo2, Bookmark } from 'lucide-react'
+import { X, Save, ArrowUp, Square, ArrowLeft, Check, Undo2, Bookmark, Maximize2, Minimize2 } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
+import { sendMessageToDummy, sendMessageToDummyPro, type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
@@ -32,6 +33,9 @@ interface DriftPanelProps {
   aiSettings: AISettings
   existingMessages?: Message[]
   driftChatId?: string
+  // If provided, Drift will follow the main chat model chips
+  selectedProvider?: 'dummy' | 'openrouter' | 'ollama'
+  onExpandedChange?: (expanded: boolean) => void
 }
 
 export default function DriftPanel({
@@ -50,7 +54,9 @@ export default function DriftPanel({
   onSnippetCountUpdate,
   aiSettings,
   existingMessages,
-  driftChatId
+  driftChatId,
+  selectedProvider,
+  onExpandedChange
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -67,6 +73,8 @@ export default function DriftPanel({
   const [pushedContentSignature, setPushedContentSignature] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [showExpandHint, setShowExpandHint] = useState(false)
 
   // Initialize Drift with existing messages or system message
   useEffect(() => {
@@ -119,6 +127,23 @@ export default function DriftPanel({
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // Notify parent when expanded state changes
+  useEffect(() => {
+    if (onExpandedChange && isOpen) onExpandedChange(isExpanded)
+  }, [isExpanded, isOpen])
+
+  // Hint to expand when last assistant likely returned a table
+  useEffect(() => {
+    const lastAssistant = [...driftOnlyMessages].reverse().find(m => !m.isUser)
+    const looksLikeTable = !!lastAssistant?.text && /\|.+\|/.test(lastAssistant.text) && /\n-+\|/.test(lastAssistant.text)
+    if (looksLikeTable) {
+      setShowExpandHint(true)
+      const t = setTimeout(() => setShowExpandHint(false), 4000)
+      return () => clearTimeout(t)
+    }
+    setShowExpandHint(false)
+  }, [driftOnlyMessages])
 
   // Highlight specific message when opened from clicked drift message
   useEffect(() => {
@@ -271,7 +296,7 @@ export default function DriftPanel({
       )
       
       // Convert messages to API format with special Drift context
-      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
+      const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
         {
           role: 'system',
           content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
@@ -283,7 +308,15 @@ export default function DriftPanel({
         { role: 'user' as const, content: message }
       ]
       
-      console.log('Drift panel - sending message with OpenRouter:', aiSettings.useOpenRouter)
+      const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
+      const settingsKey = aiSettings.openRouterApiKey
+      const effectiveApiKey = envKey || settingsKey
+      // If a provider was passed from main chat, honor it. Otherwise, infer.
+      const provider: 'openrouter' | 'ollama' | 'dummy' = selectedProvider
+        ? selectedProvider
+        : (aiSettings.useDummyAI ? 'dummy' : (effectiveApiKey ? 'openrouter' : 'ollama'))
+
+      console.log('Drift panel - provider chosen:', provider)
       console.log('Drift panel - API messages:', apiMessages)
       
       try {
@@ -304,61 +337,44 @@ export default function DriftPanel({
         setMessages(prev => [...prev, aiMessage])
         setDriftOnlyMessages(prev => [...prev, aiMessage])
         
-        // Stream the response using the selected API
-        if (aiSettings.useOpenRouter) {
-          // ALWAYS use env variable if available, fallback to settings
-          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-          
-          if (!apiKey) {
-            throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          }
-          
+        // Stream the response using the chosen provider
+        if (provider === 'openrouter') {
+          const apiKey = effectiveApiKey
+          if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
               accumulatedResponse += chunk
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
-              setDriftOnlyMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
+              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
             },
             apiKey,
             abortController.signal,
             aiSettings.openRouterModel
           )
-        } else {
+        } else if (provider === 'ollama') {
           await sendMessageToOllama(
             apiMessages as any,
             (chunk) => {
               accumulatedResponse += chunk
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
-              setDriftOnlyMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiResponseId 
-                    ? { ...msg, text: accumulatedResponse }
-                    : msg
-                )
-              )
+              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
             },
             abortController.signal,
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel
+          )
+        } else {
+          // Dummy provider for testing
+          const dummySender = aiSettings.openRouterModel ? sendMessageToDummyPro : sendMessageToDummy
+          await dummySender(
+            apiMessages as any,
+            (chunk) => {
+              accumulatedResponse += chunk
+              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+            },
+            abortController.signal
           )
         }
       } catch (error) {
@@ -511,7 +527,7 @@ export default function DriftPanel({
   return (
     <div className={`
       fixed top-0 right-0 h-full z-20
-      w-[450px]
+      ${isExpanded ? 'w-[70vw] max-w-[920px]' : 'w-[450px] md:w-[520px]'}
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
     `}>
@@ -523,7 +539,18 @@ export default function DriftPanel({
       `}>
         {/* Header - matching main chat header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
-          <div className="px-2 py-1 flex items-center justify-end">
+          <div className="px-2 py-1 flex items-center justify-between gap-1">
+            <button
+              onClick={() => setIsExpanded(v => !v)}
+              className={`p-1 rounded-lg border ${isExpanded ? 'border-dark-border/60 bg-dark-elevated' : 'border-dark-border/40 bg-dark-elevated/60'} hover:border-accent-violet/40 transition-colors`}
+              title={isExpanded ? 'Collapse panel' : 'Expand panel'}
+            >
+              {isExpanded ? (
+                <Minimize2 className="w-3.5 h-3.5 text-text-muted" />
+              ) : (
+                <Maximize2 className={`w-3.5 h-3.5 ${showExpandHint ? 'text-accent-pink' : 'text-text-muted'}`} />
+              )}
+            </button>
             <button
               onClick={() => onClose(driftOnlyMessages)}
               className="p-1 hover:bg-dark-elevated rounded-lg transition-colors"
@@ -538,9 +565,9 @@ export default function DriftPanel({
         {/* Exploring + Actions toolbar (ultra-compact) */}
         <div className="px-2 py-1 border-b border-dark-border/30 bg-dark-bg/70">
           <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <span className="text-[11px] text-text-muted mr-2">Exploring</span>
-              <span className="text-[13px] text-text-secondary italic truncate align-middle">"{selectedText}"</span>
+              <span className="text-[13px] text-text-secondary italic align-middle block truncate" title={selectedText}>"{selectedText}"</span>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <button

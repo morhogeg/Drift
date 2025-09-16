@@ -164,6 +164,8 @@ function App() {
   // Gallery state
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [snippetCount, setSnippetCount] = useState(0)
+  // Track Drift panel expansion to adjust main layout padding
+  const [driftExpanded, setDriftExpanded] = useState(false)
   
   // Store temporary drift conversations - key is driftChatId
   const [tempDriftConversations, setTempDriftConversations] = useState<Map<string, Message[]>>(new Map())
@@ -546,9 +548,9 @@ function App() {
             const t = targets[0]
             if (t.provider === 'dummy') {
               if (t.key === 'dummy-pro') {
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, activeCanvasId || undefined)
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, undefined)
               } else {
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, activeCanvasId || undefined)
+                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, undefined)
               }
             } else if (t.provider === 'openrouter') {
               const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
@@ -557,11 +559,11 @@ function App() {
               }
               await streamIntoNewMessage(async (msgs, onChunk, signal) =>
                 sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-              , 'OpenRouter', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+              , 'OpenRouter', undefined, activeStrandId || undefined, undefined)
             } else if (t.provider === 'ollama') {
               await streamIntoNewMessage(async (msgs, onChunk, signal) =>
                 sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-              , 'Ollama', undefined, activeStrandId || undefined, activeCanvasId || undefined)
+              , 'Ollama', undefined, activeStrandId || undefined, undefined)
             }
           }
         }
@@ -1930,7 +1932,7 @@ function App() {
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className="h-full overflow-y-auto pt-6 pb-24 space-y-4 chat-messages-container">
+            <div className={`h-full overflow-y-auto pt-6 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`}>
               
               {/* Scroll to bottom button - centered and elegant */}
               {showScrollButton && (
@@ -2105,11 +2107,18 @@ function App() {
                                 data-message-id={gm.id}
                               >
                                 {/* Minimal model tag */}
-                                {gm.modelTag && (
-                                  <div className="absolute -top-2 left-3 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
-                                    {gm.modelTag}
-                                  </div>
-                                )}
+                                {gm.modelTag && (() => {
+                                  const canvasId = `${groupId}:${gm.modelTag}`
+                                  return (
+                                    <button
+                                      onClick={() => setActiveCanvasId(canvasId)}
+                                      className="absolute -top-2 left-3 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors"
+                                      title={`Show ${gm.modelTag} thread`}
+                                    >
+                                      {gm.modelTag}
+                                    </button>
+                                  )
+                                })()}
                                 {/* Continue button (only when broadcast active) */}
                                 {gm.modelTag && gm.broadcastGroupId === activeBroadcastGroupId && (
                                   <button
@@ -2191,27 +2200,20 @@ function App() {
                     {isFirstDriftMessage && hasMultipleDriftMessages && (
                       <div className="px-6 mb-2">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xs font-medium text-accent-violet">
-                            Drift conversation
+                          <span className="px-2 py-0.5 rounded-full bg-dark-elevated/60 border border-dark-border/50 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                            Drift
                           </span>
                           {msg.driftPushMetadata?.selectedText && (
                             <span className="text-xs text-text-muted italic">
-                              • "{msg.driftPushMetadata.selectedText}"
+                              "{msg.driftPushMetadata.selectedText}"
                             </span>
                           )}
                         </div>
                       </div>
                     )}
                     
-                    {/* Drift message container with connected background only for multi-message groups */}
-                    <div className={`
-                      px-6
-                      ${isDriftMessage && hasMultipleDriftMessages && isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-t-xl border-t border-x border-accent-violet/20 pt-3' : ''}
-                      ${isDriftMessage && hasMultipleDriftMessages && isMiddleDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 border-x border-accent-violet/20' : ''}
-                      ${isDriftMessage && hasMultipleDriftMessages && isLastDriftMessage && !isFirstDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-b-xl border-b border-x border-accent-violet/20 pb-3' : ''}
-                      ${isDriftMessage && hasMultipleDriftMessages && isFirstDriftMessage && isLastDriftMessage ? 'bg-gradient-to-r from-accent-violet/5 to-accent-pink/5 rounded-xl border border-accent-violet/20 py-3' : ''}
-                      ${isDriftMessage && hasMultipleDriftMessages ? 'border-l-4 border-l-accent-violet/50' : ''}
-                    `}>
+                    {/* Drift message container - minimal neutral styling */}
+                    <div className={`px-6 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
                     
                     <div
                       className={`flex ${
@@ -2230,13 +2232,11 @@ function App() {
                         className={`
                           ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'pt-10 pb-3' : 'py-3'} relative
                           ${msg.isUser 
-                            ? isDriftMessage
-                              ? 'bg-gradient-to-br from-accent-violet/30 to-accent-pink/30 text-text-primary border border-accent-violet/30 shadow-lg'
-                              : 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
+                            ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
                             : isSinglePushMessage
                               ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer'
                               : isDriftMessage
-                                ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-accent-violet/50'
+                                ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60'
                                 : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                           }
                           transition-all duration-100 hover:scale-[1.02]
@@ -2432,9 +2432,19 @@ function App() {
 
                       {/* Minimal model tag */}
                       {!msg.isUser && msg.modelTag && (
-                        <div className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
-                          {msg.modelTag}
-                        </div>
+                        msg.broadcastGroupId ? (
+                          <button
+                            onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
+                            className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors"
+                            title={`Show ${msg.modelTag} thread`}
+                          >
+                            {msg.modelTag}
+                          </button>
+                        ) : (
+                          <div className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
+                            {msg.modelTag}
+                          </div>
+                        )
                       )}
                       {/* Continue action when broadcast is active */}
                       {!msg.isUser && msg.modelTag && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
@@ -2754,7 +2764,7 @@ function App() {
                 ) : null
               })}
               
-              {isTyping && !streamingResponse && (
+              {isTyping && !streamingResponse && !messages.some(m => !m.isUser && (!m.text || m.text.length === 0)) && (
                 <div className="max-w-5xl mx-auto px-6">
                   <div className="flex justify-start animate-fade-up">
                     <div className="bg-dark-bubble border border-dark-border/50 rounded-2xl px-5 py-3 shadow-lg">
@@ -2851,7 +2861,7 @@ function App() {
         })()}
 
         {/* Modern input area */}
-        <div className="absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4">
+        <div className={`absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4 ${driftOpen && !driftExpanded ? 'mr-[450px] md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
@@ -2928,33 +2938,7 @@ function App() {
         </div>
       </div>
       
-      {/* Sticky model chips (no redundant label) */}
-      {activeCanvasId && (() => {
-        const [gid] = activeCanvasId.split(':')
-        const headers = messages.filter(m => m.broadcastGroupId === gid && !m.canvasId && !!m.modelTag)
-        const chipModels = Array.from(new Map(headers.map(h => [h.modelTag as string, h])).values()) as Message[]
-        if (chipModels.length === 0) return null
-        return (
-          <div className="fixed top-[70px] right-6 z-20">
-            <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-dark-elevated/80 backdrop-blur border border-accent-violet/30 shadow-lg">
-              {chipModels.map(cm => (
-                <button
-                  key={`sticky-${cm.id}`}
-                  onClick={() => continueWithModel(cm.modelTag, cm.id)}
-                  className={`px-2 py-0.5 rounded-full border text-[11px] transition-colors ${
-                    `${gid}:${cm.modelTag}` === activeCanvasId
-                      ? 'bg-accent-violet/20 border-accent-violet/50 text-accent-violet'
-                      : 'bg-dark-bubble border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated'
-                  }`}
-                  title={`Switch to ${cm.modelTag}`}
-                >
-                  {cm.modelTag}
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
+      {/* Sticky model chips removed: model tag on bubbles is clickable */}
 
       {/* Selection Tooltip */}
       <SelectionTooltip 
@@ -2982,6 +2966,14 @@ function App() {
         aiSettings={aiSettings}
         existingMessages={driftContext?.existingMessages}
         driftChatId={driftContext?.driftChatId}
+        selectedProvider={(() => {
+          const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
+          if (targets.length === 1) return targets[0].provider as 'dummy' | 'openrouter' | 'ollama'
+          if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
+          if (targets.some(t => t.provider === 'ollama')) return 'ollama'
+          return 'dummy'
+        })()}
+        onExpandedChange={(expanded) => setDriftExpanded(expanded)}
       />
       
       {/* Settings Modal */}
