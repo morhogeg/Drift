@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Bookmark } from 'lucide-react'
+import { Bookmark, GitBranch } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
 interface SelectionTooltipProps {
@@ -209,7 +209,7 @@ export default function SelectionTooltip({
                      hover:border-accent-violet/40 hover:text-text-primary
                      transition-colors duration-150 cursor-pointer"
         >
-          <span className="w-2 h-2 rounded-full bg-accent-violet/60" />
+          <GitBranch className="w-3.5 h-3.5" />
           <span className="text-[12px]">Drift</span>
         </button>
         

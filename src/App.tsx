@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User } from 'lucide-react'
+import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToDummy, sendMessageToDummyPro, checkDummyConnection, type ChatMessage as DummyMessage } from './services/dummyAI'
@@ -429,17 +429,23 @@ function App() {
         setContinueFromMessageId(null)
         prevContinueModeRef.current = null
       }
+      // Take a snapshot of the current canvas context (if user had clicked Continue)
+      const canvasIdSnapshot = activeCanvasId || undefined
+
       const newMessage: Message = {
         id: Date.now().toString(),
         text: message,
         isUser: true,
         timestamp: new Date(),
         strandId: activeStrandId || undefined,
-        canvasId: activeCanvasId || undefined
+        // Only this message should use the snapshot; clear canvas afterwards
+        canvasId: canvasIdSnapshot
       }
       
       const updatedMessages = [...messages, newMessage]
       setMessages(updatedMessages)
+      // Exit canvas mode so subsequent messages are not grouped unintentionally
+      if (activeCanvasId) setActiveCanvasId(null)
       setMessage('')
       setIsTyping(true)
       setStreamingResponse('')
@@ -1760,7 +1766,10 @@ function App() {
               
               <div className="flex items-start gap-3">
                 {chat.metadata?.isDrift ? (
-                  <span className="text-xs mt-0.5 flex-shrink-0">🌀</span>
+                  <GitBranch className={`
+                    w-3.5 h-3.5 mt-0.5 flex-shrink-0
+                    ${activeChatId === chat.id ? 'text-accent-violet' : 'text-text-muted'}
+                  `} />
                 ) : (
                   <MessageCircle className={`
                     w-3.5 h-3.5 mt-0.5 flex-shrink-0
@@ -1863,9 +1872,9 @@ function App() {
         ${sidebarOpen ? 'ml-[260px]' : 'ml-0'}
         ${driftOpen ? 'mr-[450px]' : 'mr-0'}
       `}>
-        {/* Header with Drift branding */}
+        {/* Header with Drift branding (classic), with settings on the right */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
-          <div className="px-6 py-4 flex items-center justify-between">
+          <div className="px-4 py-2.5 flex items-center justify-between">
             <div className="flex items-center gap-4">
               {!sidebarOpen ? (
                 <>
@@ -1881,7 +1890,7 @@ function App() {
               ) : (
                 <div className="w-[41px]" />
               )}
-              
+
               {/* Action buttons - always visible */}
               <div className="flex items-center gap-2">
                 {/* New Chat Button */}
@@ -1892,7 +1901,7 @@ function App() {
                 >
                   <Plus className="w-5 h-5 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
                 </button>
-                
+
                 {/* Snippet Gallery Button */}
                 <button
                   onClick={() => setGalleryOpen(true)}
@@ -1908,31 +1917,40 @@ function App() {
                 </button>
               </div>
             </div>
-            
+
             <div className="flex-1 flex items-center justify-center">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold text-text-secondary tracking-tight">Drift</h1>
+              </div>
+            </div>
+
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold text-text-secondary tracking-tight">Drift</h1>
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
+                title="AI settings"
+              >
+                <SettingsIcon className="w-4 h-4 text-text-muted" />
+              </button>
+              <HeaderControls
+                currentUser={currentUser}
+                aiSettings={aiSettings}
+                handleAISettingsChange={handleAISettingsChange}
+                setApiConnected={setApiConnected}
+                setIsConnecting={setIsConnecting}
+                selectedTargets={selectedTargets}
+                setSelectedTargets={setSelectedTargetsPersist}
+                isConnecting={isConnecting}
+                apiConnected={apiConnected}
+              />
             </div>
-            </div>
-            
-            <HeaderControls
-              currentUser={currentUser}
-              aiSettings={aiSettings}
-              handleAISettingsChange={handleAISettingsChange}
-              setApiConnected={setApiConnected}
-              setIsConnecting={setIsConnecting}
-              selectedTargets={selectedTargets}
-              setSelectedTargets={setSelectedTargetsPersist}
-              isConnecting={isConnecting}
-              apiConnected={apiConnected}
-            />
           </div>
         </header>
         
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className={`h-full overflow-y-auto pt-6 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`}>
+            <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
+            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`}>
               
               {/* Scroll to bottom button - centered and elegant */}
               {showScrollButton && (
@@ -1975,17 +1993,18 @@ function App() {
                 const parentTitle = parentChat?.title || 'Previous conversation'
                 
                 return (
-                  <div className="mb-4 p-3 bg-gradient-to-r from-accent-violet/10 to-accent-pink/10 rounded-lg border border-accent-violet/30 max-w-5xl mx-auto">
+                  <div className="relative mb-4 px-4 py-3 rounded-xl border border-dark-border/60 bg-dark-elevated/60 backdrop-blur-sm max-w-5xl mx-auto overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-accent-violet/50 via-accent-pink/40 to-transparent opacity-60" />
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm">🌀</span>
+                          <GitBranch className="w-3.5 h-3.5 text-text-secondary" />
                           <span className="text-sm text-text-primary font-medium">
                             Drift exploration of "{currentChat.metadata?.selectedText}"
                           </span>
                         </div>
                         <span className="text-xs text-text-muted ml-6">
-                          from conversation: <span className="text-accent-violet">{parentTitle}</span>
+                          from conversation: <span className="text-text-secondary">{parentTitle}</span>
                         </span>
                       </div>
                       <button
@@ -2038,9 +2057,9 @@ function App() {
                             }, 150)
                           }
                         }}
-                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-dark-elevated/50 hover:bg-dark-elevated 
-                                 border border-accent-violet/30 hover:border-accent-violet/50 rounded-full
-                                 text-accent-violet transition-all duration-100 ml-4"
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-transparent hover:bg-dark-elevated/70
+                                 border border-dark-border/60 hover:border-dark-border rounded-full
+                                 text-text-secondary hover:text-text-primary transition-colors duration-150 ml-4"
                       >
                         <ChevronLeft className="w-3 h-3" />
                         Back to source
@@ -2098,15 +2117,14 @@ function App() {
                       className="max-w-5xl mx-auto px-6"
                       data-broadcast-group={groupId}
                     >
-                      <div className="flex gap-4 items-start flex-wrap md:flex-nowrap">
+                      <div className="grid gap-4 items-start md:grid-cols-2">
                         {groupMessages.map((gm) => (
-                          <div key={gm.id} className="w-full md:w-1/2">
+                          <div key={`resp-${gm.id}`} className="w-full">
                             <div className={`flex justify-start animate-fade-up relative group`}>
                               <div
                                 className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 py-3 relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
                                 data-message-id={gm.id}
                               >
-                                {/* Minimal model tag */}
                                 {gm.modelTag && (() => {
                                   const canvasId = `${groupId}:${gm.modelTag}`
                                   return (
@@ -2119,7 +2137,6 @@ function App() {
                                     </button>
                                   )
                                 })()}
-                                {/* Continue button (only when broadcast active) */}
                                 {gm.modelTag && gm.broadcastGroupId === activeBroadcastGroupId && (
                                   <button
                                     onClick={() => continueWithModel(gm.modelTag, gm.id)}
@@ -2142,20 +2159,21 @@ function App() {
                                     <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                   </div>
                                 )}
-                                {/* Actions removed (Expand, Regenerate) */}
-                                {/* Stronger visual connector when this bubble is the strand root */}
-                                {/* Subtle connector removed per feedback */}
                               </div>
                             </div>
-                            {/* Canvas body: vertical continuation for this model */}
-                            {(() => {
-                              const canvasId = `${groupId}:${gm.modelTag}`
-                              const canvasMsgs = messages.filter(m => m.canvasId === canvasId)
-                              if (canvasMsgs.length === 0) return null
-                              const lastAssistant = [...canvasMsgs].reverse().find(m => !m.isUser && m.modelTag)
-                              return (
+                          </div>
+                        ))}
+
+                        {/* Row 2: per-model continuation canvases, start aligned under the tallest reply */}
+                        {groupMessages.map((gm) => {
+                          const canvasId = `${groupId}:${gm.modelTag}`
+                          const canvasMsgs = messages.filter(m => m.canvasId === canvasId)
+                          const lastAssistant = [...canvasMsgs].reverse().find(m => !m.isUser && m.modelTag)
+                          return (
+                            <div key={`canvas-${gm.id}`} className="w-full">
+                              {canvasMsgs.length > 0 && (
                                 <div className={`mt-3 pl-3 border-l ${activeCanvasId === canvasId ? 'border-accent-violet/15' : 'border-dark-border/30'} transition-colors`}>
-                                  {canvasMsgs.map((cm, k) => (
+                                  {canvasMsgs.map((cm) => (
                                     <div key={cm.id} className="mb-3">
                                       <div className={`flex ${cm.isUser ? 'justify-end' : 'justify-start'} relative`}>
                                         <div data-message-id={cm.id} className={`${cm.isUser
@@ -2169,7 +2187,6 @@ function App() {
                                             </ReactMarkdown>
                                           </div>
                                         </div>
-                                        {/* Continue from last assistant message of this canvas */}
                                         {lastAssistant && cm.id === lastAssistant.id && (
                                           <button
                                             onClick={() => continueWithModel(lastAssistant.modelTag, lastAssistant.id)}
@@ -2182,10 +2199,10 @@ function App() {
                                     </div>
                                   ))}
                                 </div>
-                              )
-                            })()}
-                          </div>
-                        ))}
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   )
@@ -3005,7 +3022,7 @@ function App() {
       />
       
       {/* Profile Modal */}
-      {profileOpen && (
+          {profileOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#111111] border border-[#333333] rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-[#333333]">
@@ -3043,11 +3060,11 @@ function App() {
               </div>
             </div>
           </div>
-        </div>
-      )}
-      
-      {/* Context Menu */}
-      {contextMenu && (
+            </div>
+          )}
+          
+          {/* Context Menu */}
+          {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
@@ -3101,6 +3118,8 @@ function App() {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      
     </div>
   )
 }

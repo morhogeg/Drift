@@ -59,13 +59,14 @@ export default function HeaderControls(props: Props) {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [menuOpen])
 
+  // Classic rendering
   return (
     <div className="flex items-center gap-3">
       {/* Models summary + picker */}
       <div className="relative" ref={menuRef}>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
-          className="px-3 py-1.5 rounded-full bg-dark-elevated/60 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer flex items-center gap-1"
+          className="px-3 py-1 rounded-full bg-dark-elevated/60 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer flex items-center gap-1"
           title="Choose models"
         >
           {isBroadcast && <Megaphone className="w-3.5 h-3.5 text-accent-pink" />}
@@ -106,7 +107,7 @@ export default function HeaderControls(props: Props) {
         )}
       </div>
       {/* Connection chip */}
-      <div className={`px-3 py-1.5 rounded-full text-[11px] border ${
+      <div className={`px-3 py-1 rounded-full text-[11px] border ${
         isConnecting ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : (apiConnected ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300')
       }`}>
         {isConnecting ? 'Connecting' : apiConnected ? 'Connected' : 'Offline'}
