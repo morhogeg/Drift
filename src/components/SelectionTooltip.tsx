@@ -21,13 +21,16 @@ export default function SelectionTooltip({
     y: number
     text: string
     messageId: string
+    anchorRect: DOMRect
   } | null>(null)
   
   const tooltipRef = useRef<HTMLDivElement>(null)
   const savedDataRef = useRef<{ text: string; messageId: string } | null>(null)
+  const hideTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     let isTooltipHovered = false
+    let lastAnchorRect: DOMRect | null = null
 
     const handleMouseUp = (e: MouseEvent) => {
       // Don't process if clicking on the tooltip
@@ -40,14 +43,13 @@ export default function SelectionTooltip({
         const selection = window.getSelection()
         
         if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-          // Only hide if not hovering tooltip
-          if (!isTooltipHovered && tooltip) {
-            setTimeout(() => {
-              if (!isTooltipHovered) {
-                setTooltip(null)
-                savedDataRef.current = null
-              }
-            }, 200)
+          // If user released outside selection and not hovering tooltip, schedule hide
+          if (!isTooltipHovered && tooltip && hideTimerRef.current == null) {
+            hideTimerRef.current = window.setTimeout(() => {
+              setTooltip(null)
+              savedDataRef.current = null
+              hideTimerRef.current = null
+            }, 180)
           }
           return
         }
@@ -55,6 +57,7 @@ export default function SelectionTooltip({
         const text = selection.toString().trim()
         const range = selection.getRangeAt(0)
         const rect = range.getBoundingClientRect()
+        lastAnchorRect = rect
         
         // Find element with data-message-id
         let element = selection.anchorNode?.parentElement
@@ -92,9 +95,10 @@ export default function SelectionTooltip({
         setTooltip({
           visible: true,
           x: rect.left + rect.width / 2,
-          y: rect.top - 10,
+          y: Math.max(rect.top - 10, 8),
           text: text,
-          messageId: msgId
+          messageId: msgId,
+          anchorRect: rect
         })
       }, 10)
     }
@@ -106,18 +110,41 @@ export default function SelectionTooltip({
     
     const handleTooltipLeave = () => {
       isTooltipHovered = false
-      // Hide after a delay if no selection
-      setTimeout(() => {
+      // Hide after a short delay to allow moving between selection and tooltip
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = window.setTimeout(() => {
         const selection = window.getSelection()
         if (!selection || selection.isCollapsed) {
           setTooltip(null)
           savedDataRef.current = null
         }
+        hideTimerRef.current = null
       }, 200)
+    }
+
+    const within = (rect: DOMRect, x: number, y: number, pad = 8) => (
+      x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad
+    )
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!tooltip) return
+      const tip = tooltipRef.current?.getBoundingClientRect()
+      const ax = (lastAnchorRect || tooltip.anchorRect)
+      const inside = (tip && within(tip, ev.clientX, ev.clientY, 6)) || (ax && within(ax, ev.clientX, ev.clientY, 10))
+      if (inside) {
+        if (hideTimerRef.current) { window.clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+      } else if (!hideTimerRef.current) {
+        hideTimerRef.current = window.setTimeout(() => {
+          setTooltip(null)
+          savedDataRef.current = null
+          hideTimerRef.current = null
+        }, 220)
+      }
     }
 
     // Add event listeners
     document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('mousemove', onMouseMove)
     
     // Add tooltip hover tracking if tooltip exists
     const tooltipEl = tooltipRef.current
@@ -128,6 +155,7 @@ export default function SelectionTooltip({
 
     return () => {
       document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mousemove', onMouseMove)
       if (tooltipEl) {
         tooltipEl.removeEventListener('mouseenter', handleTooltipEnter)
         tooltipEl.removeEventListener('mouseleave', handleTooltipLeave)
