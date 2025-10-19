@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Check, Megaphone } from 'lucide-react'
+import { features, setContextLinksMode } from '../config/features'
 type Provider = 'dummy' | 'openrouter' | 'ollama'
 type Target = { provider: Provider, key: string, label: string }
 
@@ -62,6 +63,29 @@ export default function HeaderControls(props: Props) {
   // Classic rendering
   return (
     <div className="flex items-center gap-3">
+      {/* Context Links toggle */}
+      <button
+        onClick={() => {
+          const next = features.contextLinks === 'off' ? 'inline+hover' : 'off'
+          setContextLinksMode(next)
+          // Force reload to apply across modules
+          location.reload()
+        }}
+        className={`px-3 py-1 rounded-full text-[11px] border ${features.contextLinks === 'off' ? 'bg-dark-elevated border-dark-border/60 text-text-secondary' : 'bg-accent-violet/10 border-accent-violet/40 text-accent-violet'}`}
+        title="Toggle contextual links"
+      >
+        {features.contextLinks === 'off' ? 'Links: off' : 'Links: on'}
+      </button>
+      {/* Rebuild CEI index */}
+      <button
+        onClick={() => {
+          window.dispatchEvent(new CustomEvent('drift:reindex-cei'))
+        }}
+        className="px-3 py-1 rounded-full text-[11px] border bg-dark-elevated border-dark-border/60 text-text-secondary hover:border-text-secondary/40"
+        title="Rebuild contextual links index for this chat"
+      >
+        Reindex
+      </button>
       {/* Models summary + picker */}
       <div className="relative" ref={menuRef}>
         <button
