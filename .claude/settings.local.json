@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(npx tailwindcss init:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npm uninstall:*)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_ekbA3s/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_tLX1P5/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_yt3iBS/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_rT5fXA/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_vOYFBg/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_5vGhF7/**)",
+      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_NWhzhn/**)"
+    ],
+    "deny": []
+  }
+}
