@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, Save, Eye, EyeOff, Info, ExternalLink, CheckCircle, AlertCircle } from 'lucide-react'
 import type { OpenRouterModel } from '../services/openrouter'
-import { OPENROUTER_MODELS, checkOpenRouterConnection } from '../services/openrouter'
+import { checkOpenRouterConnection } from '../services/openrouter'
 import { checkOllamaConnection } from '../services/ollama'
 
 interface SettingsProps {

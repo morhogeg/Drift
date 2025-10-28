@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Check, Megaphone } from 'lucide-react'
-import { features, setContextLinksMode } from '../config/features'
 type Provider = 'dummy' | 'openrouter' | 'ollama'
 type Target = { provider: Provider, key: string, label: string }
 
 interface Props {
-  currentUser: string | null
   aiSettings: any
-  handleAISettingsChange: (s: any) => void
-  setApiConnected: (v: boolean) => void
-  setIsConnecting: (v: boolean) => void
   selectedTargets: Target[]
   setSelectedTargets: (m: Target[]) => void
   isConnecting: boolean
@@ -17,35 +12,27 @@ interface Props {
 }
 
 export default function HeaderControls(props: Props) {
-  const {
-    currentUser,
-    aiSettings,
-    handleAISettingsChange,
-    setApiConnected,
-    setIsConnecting,
-    selectedTargets,
-    setSelectedTargets,
-    isConnecting,
-    apiConnected
-  } = props
+  const { aiSettings, selectedTargets, setSelectedTargets, isConnecting, apiConnected } = props
 
   const items: Target[] = [
-    { provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' },
-    { provider: 'dummy', key: 'dummy-pro', label: 'Dummy Pro' },
-    { provider: 'openrouter', key: 'openrouter', label: 'OpenRouter' },
+    { provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' },
+    { provider: 'openrouter', key: 'openrouter', label: 'OpenAI OSS' },
     { provider: 'ollama', key: 'ollama', label: 'Ollama' }
   ]
 
   const allowedKeys = new Set(items.map(i => i.key))
   const visibleTargets = (selectedTargets || []).filter(t => allowedKeys.has(t.key))
   const isBroadcast = (visibleTargets.length || 0) > 1
-  const summaryLabel = isBroadcast ? `Broadcast · ${visibleTargets.length}` : (visibleTargets[0]?.label || 'Model')
+  // Resolve label from current items to avoid stale persisted labels
+  const first = visibleTargets[0]
+  const resolvedFirstLabel = first ? (items.find(i => i.key === first.key)?.label || first.label) : undefined
+  const summaryLabel = isBroadcast ? `Broadcast · ${visibleTargets.length}` : (resolvedFirstLabel || 'Model')
 
   const toggleTarget = (t: Target) => {
     const has = visibleTargets.some(x => x.key === t.key)
     const next = has ? visibleTargets.filter(x => x.key !== t.key) : [...visibleTargets, t]
     // Ensure at least one
-    setSelectedTargets(next.length ? next : [{ provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' }])
+    setSelectedTargets(next.length ? next : [{ provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }])
   }
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -60,32 +47,21 @@ export default function HeaderControls(props: Props) {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [menuOpen])
 
+  // Normalize persisted targets to current labels to avoid showing stale names
+  useEffect(() => {
+    const map = new Map(items.map(i => [i.key, i]))
+    const needsUpdate = visibleTargets.some(t => (map.get(t.key)?.label ?? t.label) !== t.label)
+    if (needsUpdate) {
+      const normalized = visibleTargets.map(t => map.get(t.key) || t)
+      setSelectedTargets(normalized)
+    }
+    // Only run when selectedTargets or items change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargets])
+
   // Classic rendering
   return (
     <div className="flex items-center gap-3">
-      {/* Context Links toggle */}
-      <button
-        onClick={() => {
-          const next = features.contextLinks === 'off' ? 'inline+hover' : 'off'
-          setContextLinksMode(next)
-          // Force reload to apply across modules
-          location.reload()
-        }}
-        className={`px-3 py-1 rounded-full text-[11px] border ${features.contextLinks === 'off' ? 'bg-dark-elevated border-dark-border/60 text-text-secondary' : 'bg-accent-violet/10 border-accent-violet/40 text-accent-violet'}`}
-        title="Toggle contextual links"
-      >
-        {features.contextLinks === 'off' ? 'Links: off' : 'Links: on'}
-      </button>
-      {/* Rebuild CEI index */}
-      <button
-        onClick={() => {
-          window.dispatchEvent(new CustomEvent('drift:reindex-cei'))
-        }}
-        className="px-3 py-1 rounded-full text-[11px] border bg-dark-elevated border-dark-border/60 text-text-secondary hover:border-text-secondary/40"
-        title="Rebuild contextual links index for this chat"
-      >
-        Reindex
-      </button>
       {/* Models summary + picker */}
       <div className="relative" ref={menuRef}>
         <button

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, ArrowUp, Square, ArrowLeft, Check, Undo2, Bookmark, Maximize2, Minimize2 } from 'lucide-react'
-import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage } from '../services/openrouter'
+import { X, Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2 } from 'lucide-react'
+import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToDummy, sendMessageToDummyPro, type ChatMessage as DummyMessage } from '../services/dummyAI'
+import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
@@ -72,6 +72,7 @@ export default function DriftPanel({
   const [isPushing, setIsPushing] = useState(false)
   const [pushedContentSignature, setPushedContentSignature] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
@@ -119,6 +120,16 @@ export default function DriftPanel({
       setSavedMessageIds(savedIds)
     }
   }, [isOpen, selectedText, existingMessages])
+
+  // Autofocus input when the drift panel opens
+  useEffect(() => {
+    if (isOpen) {
+      const t = setTimeout(() => {
+        inputRef.current?.focus()
+      }, 50)
+      return () => clearTimeout(t)
+    }
+  }, [isOpen])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -196,7 +207,7 @@ export default function DriftPanel({
         .filter(msg => !msg.text.startsWith('What would you like to know about'))
       
       // Mark only the selected message as visible, others as hidden context
-      const messagesToPush = allMessagesUpToThis.map((msg, idx) => ({
+      const messagesToPush = allMessagesUpToThis.map((msg) => ({
         ...msg,
         isHiddenContext: msg.id !== message.id  // Mark all except the selected message as hidden
       }))
@@ -365,16 +376,19 @@ export default function DriftPanel({
             aiSettings.ollamaModel
           )
         } else {
-          // Dummy provider for testing
-          const dummySender = aiSettings.openRouterModel ? sendMessageToDummyPro : sendMessageToDummy
-          await dummySender(
+          // Replace Dummy with OpenRouter Qwen3 model
+          const apiKey = effectiveApiKey
+          if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
+          await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
               accumulatedResponse += chunk
               setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
               setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
             },
-            abortController.signal
+            apiKey,
+            abortController.signal,
+            OPENROUTER_MODELS.QWEN3
           )
         }
       } catch (error) {
@@ -754,6 +768,7 @@ export default function DriftPanel({
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
                 <textarea
+                  ref={inputRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -762,8 +777,7 @@ export default function DriftPanel({
                       sendMessage()
                     }
                   }}
-                  placeholder={isTyping ? "AI is responding..." : "Explore this drift..."}
-                  disabled={isTyping}
+                  placeholder={"Explore this drift..."}
                   rows={1}
                   dir={getTextDirection(message)}
                   className={`
@@ -775,7 +789,6 @@ export default function DriftPanel({
                     focus:shadow-[0_0_20px_rgba(168,85,247,0.15)]
                     placeholder:text-text-muted
                     transition-all duration-150
-                    disabled:opacity-70
                     resize-none
                     min-h-[44px] max-h-[200px]
                     ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
