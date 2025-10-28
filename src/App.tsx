@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, cloneElement, isValidElement } from 'react'
-import { Send, Sparkles, Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
-import { sendMessageToOpenRouter, checkOpenRouterConnection, OPENROUTER_MODELS, type ChatMessage as OpenRouterMessage, type OpenRouterModel } from './services/openrouter'
+import { Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
+import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToDummy, sendMessageToDummyPro, checkDummyConnection, type ChatMessage as DummyMessage } from './services/dummyAI'
+import { checkDummyConnection } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
@@ -16,20 +16,19 @@ import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
 // DummyModelSelector removed in favor of inline chips
 import HeaderControls from './components/HeaderControls'
-// Context linking services
-import { features } from './config/features'
-import { initializeCEI, indexMessage, getMentionsByMessage, clearCEI, matchKnownEntitiesInText } from './services/entities/indexer'
-import InlineEntityLink from './components/entities/InlineEntityLink'
-import AllMentionsPanel from './components/entities/AllMentionsPanel'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
-import { beginEntityJump, jumpForward, pushForward } from './services/entities/navigation'
+// navigation helpers used internally by popup; no app-level hooks required here
 
 interface Message {
   id: string
   text: string
   isUser: boolean
+  // When pushing drift messages back to main, we convert all
+  // pushed entries to assistant bubbles but remember the original
+  // role so that reconstructing the drift can restore roles.
+  originalIsUser?: boolean
   timestamp: Date
   modelTag?: string
   broadcastGroupId?: string
@@ -86,17 +85,16 @@ function App() {
   const [apiConnected, setApiConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [useOpenRouter, setUseOpenRouter] = useState(true) // Toggle between OpenRouter and Ollama
-  const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(OPENROUTER_MODELS.OSS)
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
   // Model selection for main chat (multi-provider broadcast)
   type Provider = 'dummy' | 'openrouter' | 'ollama'
   type Target = { provider: Provider, key: string, label: string }
-  const DEFAULT_TARGET: Target = { provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' }
+  const DEFAULT_TARGET: Target = { provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }
   const [selectedTargets, setSelectedTargets] = useState<Target[]>([DEFAULT_TARGET])
   // Broadcast grouping state
   const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
-  const [continuedModelByGroup, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
+  const [, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
   const CHAT_MODEL_PREFS_KEY = 'drift_chat_model_prefs'
   const [chatModelPrefs, setChatModelPrefs] = useState<Record<string, Target[]>>(() => {
     try {
@@ -121,7 +119,7 @@ function App() {
   }, [activeChatId])
   const setSelectedTargetsPersist = (targets: Target[]) => {
     // Deduplicate by key
-    const allowed = new Set(['dummy-basic','dummy-pro','openrouter','ollama'])
+    const allowed = new Set(['dummy-basic','openrouter','ollama'])
     const map = new Map<string, Target>()
     for (const t of targets) {
       if (allowed.has(t.key)) map.set(t.key, t)
@@ -138,10 +136,8 @@ function App() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
-  // Context linking state
-  const indexedMessageIdsRef = useRef<Set<string>>(new Set())
+  // List linking state (no entity mentions)
   const listIndexedMessageIdsRef = useRef<Set<string>>(new Set())
-  const [allMentionsEntityId, setAllMentionsEntityId] = useState<string | null>(null)
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
   
   // Helper function to strip markdown formatting for preview text
@@ -161,27 +157,10 @@ function App() {
       .trim()
   }
 
-  // Initialize CEI per chat; lightweight hydrate
+  // Index assistant lists for list-based navigation (no entity mentions)
   useEffect(() => {
-    initializeCEI(activeChatId)
-    indexedMessageIdsRef.current.clear()
-  }, [activeChatId])
-
-  // Index messages lazily when changed
-  useEffect(() => {
-    if (features.contextLinks === 'off') return
     (async () => {
       for (const m of messages) {
-        if (!indexedMessageIdsRef.current.has(m.id)) {
-          await indexMessage({
-            id: m.id,
-            authorType: m.isUser ? 'user' : 'assistant',
-            createdAt: (m.timestamp instanceof Date ? m.timestamp : new Date()).toISOString(),
-            text: m.text || '',
-          })
-          indexedMessageIdsRef.current.add(m.id)
-        }
-        // Index assistant lists for list-based navigation
         if (!listIndexedMessageIdsRef.current.has(m.id) && !m.isUser && m.text) {
           indexListMessage(m.id, m.text)
           listIndexedMessageIdsRef.current.add(m.id)
@@ -191,49 +170,10 @@ function App() {
     })()
   }, [messages])
 
-  // Global handlers for entity navigation + All-Mentions
+  // Global handlers for message navigation (list links)
   useEffect(() => {
     const unsubNav = registerGlobalNavigationHandlers()
-    const onOpenAll = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      // Ensure only one right-side panel: close Drift when opening All-Mentions
-      setDriftOpen(false)
-      if (detail?.entityId) setAllMentionsEntityId(detail.entityId)
-    }
-    const onForward = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      if (!detail?.entityId) return
-      const to = jumpForward(detail.entityId)
-      if (to) window.dispatchEvent(new CustomEvent('drift:navigate-to-message', { detail: { to } }))
-    }
-    const onMentionsNavigate = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      if (!detail?.entityId || !detail?.to) return
-      const origin = activeMessageIdRef.current || messages[messages.length - 1]?.id || ''
-      if (origin) beginEntityJump(detail.entityId, origin)
-      if (origin) pushForward(detail.entityId, origin)
-      window.dispatchEvent(new CustomEvent('drift:navigate-to-message', { detail: { to: detail.to } }))
-    }
-    window.addEventListener('drift:open-all-mentions', onOpenAll as EventListener)
-    window.addEventListener('drift:forward-to-origin', onForward as EventListener)
-    window.addEventListener('drift:mentions-navigate', onMentionsNavigate as EventListener)
-    const onReindex = async () => {
-      await clearCEI()
-      indexedMessageIdsRef.current.clear()
-      for (const m of messages) {
-        await indexMessage({ id: m.id, authorType: m.isUser ? 'user' : 'assistant', createdAt: (m.timestamp instanceof Date ? m.timestamp : new Date()).toISOString(), text: m.text || '' })
-        indexedMessageIdsRef.current.add(m.id)
-      }
-      setContextLinkVersion(v => v + 1)
-    }
-    window.addEventListener('drift:reindex-cei', onReindex)
-    return () => {
-      unsubNav()
-      window.removeEventListener('drift:open-all-mentions', onOpenAll as EventListener)
-      window.removeEventListener('drift:forward-to-origin', onForward as EventListener)
-      window.removeEventListener('drift:mentions-navigate', onMentionsNavigate as EventListener)
-      window.removeEventListener('drift:reindex-cei', onReindex)
-    }
+    return () => { unsubNav() }
   }, [])
 
   // Track active message id based on viewport center
@@ -264,48 +204,15 @@ function App() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [messages])
 
-  // Inline entity processing for ReactMarkdown children (recursive, preserves formatting)
+  // Inline list link processing for ReactMarkdown children (recursive, preserves formatting)
   const processEntityText = (children: React.ReactNode, messageId: string): React.ReactNode => {
-    if (features.contextLinks === 'off') return children
-    let mentions = getMentionsByMessage(messageId)
-    if (!mentions.length) {
-      const matches = matchKnownEntitiesInText(String(children))
-      if (!matches.length) return children
-      mentions = matches.map(m => ({
-        entityId: m.entityId,
-        messageId,
-        surface: m.surface,
-        start: m.start,
-        end: m.end,
-        createdAt: new Date().toISOString(),
-        snippet: ''
-      }))
-    }
-
     // per-call limit to avoid clutter
     let remaining = 5
-    const sorted = [...mentions].sort((a, b) => b.surface.length - a.surface.length)
 
     const renderString = (text: string): React.ReactNode => {
       if (!text) return text
-      const used: Array<{ s: number; e: number; m?: typeof sorted[number]; list?: { to: string; anchor: string; surface: string } }> = []
-      // 1) Wrap all non-overlapping occurrences of entity surfaces
-      for (const m of sorted) {
-        if (remaining <= 0) break
-        let from = 0
-        while (from < text.length && remaining > 0) {
-          const idx = text.indexOf(m.surface, from)
-          if (idx === -1) break
-          const s = idx, e = idx + m.surface.length
-          const overlaps = used.some(u => !(e <= u.s || s >= u.e))
-          if (!overlaps) {
-            used.push({ s, e, m })
-            remaining--
-          }
-          from = idx + m.surface.length
-        }
-      }
-      // 2) Also wrap list item references (explicit names + ordinals)
+      const used: Array<{ s: number; e: number; list?: { to: string; anchor: string; surface: string } }> = []
+      // Wrap list item references (explicit names + ordinals)
       if (remaining > 0) {
         const listMatches = matchListItemsInText(text)
         for (const lm of listMatches) {
@@ -323,9 +230,7 @@ function App() {
       let cursor = 0
       for (const u of used) {
         if (u.s > cursor) out.push(text.slice(cursor, u.s))
-        if (u.m) {
-          out.push(<InlineEntityLink key={`ent-${u.m.entityId}-${u.s}-${u.e}`} entityId={u.m.entityId} messageId={messageId} surface={text.slice(u.s, u.e)} />)
-        } else if (u.list) {
+        if (u.list) {
           out.push(<InlineListLink key={`list-${u.list.to}-${u.list.anchor}-${u.s}-${u.e}`} toMessageId={u.list.to} anchorId={u.list.anchor} surface={u.list.surface} />)
         }
         cursor = u.e
@@ -632,7 +537,6 @@ function App() {
       // Clear inline continue context on send
       if (continueFromMessageId) {
         setContinueFromMessageId(null)
-        prevContinueModeRef.current = null
       }
       // Take a snapshot of the current canvas context (if user had clicked Continue)
       const canvasIdSnapshot = activeCanvasId || undefined
@@ -737,32 +641,46 @@ function App() {
             const broadcastGroupId = 'bg-' + Date.now()
             setActiveBroadcastGroupId(broadcastGroupId)
             setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
+            const tasks: Promise<void>[] = []
             for (const t of targets) {
               if (t.provider === 'dummy') {
-                if (t.key === 'dummy-basic') {
-                  await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, broadcastGroupId)
-                } else if (t.key === 'dummy-pro') {
-                  await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, broadcastGroupId)
+                // Replace Dummy with OpenRouter Qwen3 model
+                const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+                if (!apiKey) {
+                  throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
                 }
+                tasks.push(
+                  streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                    sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, OPENROUTER_MODELS.QWEN3)
+                  , t.label, broadcastGroupId)
+                )
               } else if (t.provider === 'openrouter') {
                 const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => 
-                  sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-                , 'OpenRouter', broadcastGroupId)
+                tasks.push(
+                  streamIntoNewMessage(async (msgs, onChunk, signal) => 
+                    sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
+                  , 'OpenAI OSS', broadcastGroupId)
+                )
               } else if (t.provider === 'ollama') {
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => 
-                  sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-                , 'Ollama', broadcastGroupId)
+                tasks.push(
+                  streamIntoNewMessage(async (msgs, onChunk, signal) => {
+                    await sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
+                  }, 'Ollama', broadcastGroupId)
+                )
               }
             }
+            await Promise.allSettled(tasks)
           } else {
             const t = targets[0]
             if (t.provider === 'dummy') {
-              if (t.key === 'dummy-pro') {
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummyPro(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, undefined)
-              } else {
-                await streamIntoNewMessage(async (msgs, onChunk, signal) => sendMessageToDummy(msgs, onChunk, signal), t.label, undefined, activeStrandId || undefined, undefined)
+              // Replace Dummy with OpenRouter Qwen3 model
+              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+              if (!apiKey) {
+                throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
               }
+              await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, OPENROUTER_MODELS.QWEN3)
+              , t.label, undefined, activeStrandId || undefined, undefined)
             } else if (t.provider === 'openrouter') {
               const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
               if (!apiKey) {
@@ -770,11 +688,11 @@ function App() {
               }
               await streamIntoNewMessage(async (msgs, onChunk, signal) =>
                 sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-              , 'OpenRouter', undefined, activeStrandId || undefined, undefined)
+              , 'OpenAI OSS', undefined, activeStrandId || undefined, undefined)
             } else if (t.provider === 'ollama') {
-              await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-              , 'Ollama', undefined, activeStrandId || undefined, undefined)
+              await streamIntoNewMessage(async (msgs, onChunk, signal) => {
+                await sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
+              }, 'Ollama', undefined, activeStrandId || undefined, undefined)
             }
           }
         }
@@ -858,12 +776,11 @@ function App() {
       }
       // Update state for ring; do NOT rely on it for immediate DOM highlighting
       if (targetId) setContinueFromMessageId(targetId)
-      if (modelTag === 'Dummy A') {
-        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-basic', label: 'Dummy A' }])
-      } else if (modelTag === 'Dummy Pro') {
-        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-pro', label: 'Dummy Pro' }])
-      } else if (modelTag === 'OpenRouter') {
-        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'openrouter', label: 'OpenRouter' }])
+      // Normalize to current model labels
+      if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
+        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }])
+      } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
+        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'openrouter', label: 'OpenAI OSS' }])
       } else if (modelTag === 'Ollama') {
         setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
       }
@@ -880,15 +797,7 @@ function App() {
     }
   }
 
-  // Update AI settings from header model selector without opening modal
-  const handleAISettingsChange = (newSettings: AISettings) => {
-    // Preserve env API key fallback if user clears it
-    if (!newSettings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
-      newSettings.openRouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY
-    }
-    setAiSettings(newSettings)
-    settingsStorage.save(newSettings)
-  }
+  // Settings changes are handled via the Settings modal (handleSaveSettings)
 
   const handleSaveSettings = (newSettings: AISettings) => {
     // If API key is empty, use the one from environment
@@ -900,9 +809,6 @@ function App() {
     settingsStorage.save(newSettings)
     // Update the connection states - these are now redundant since we use aiSettings directly
     setUseOpenRouter(newSettings.useOpenRouter)
-    if (newSettings.useOpenRouter) {
-      setSelectedModel(newSettings.openRouterModel)
-    }
   }
 
   const formatDate = (date: Date) => {
@@ -990,8 +896,6 @@ function App() {
 
   // Drift handlers
   const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[]) => {
-    // Close All-Mentions panel if open to avoid overlapping right panels
-    if (allMentionsEntityId) setAllMentionsEntityId(null)
     console.log('handleStartDrift called with:', { 
       selectedText, 
       messageId, 
@@ -1283,9 +1187,7 @@ function App() {
   
   const handleUndoSaveAsChat = (chatId: string) => {
     // Remove the saved drift chat from history
-    setChatHistory(prevHistory => prevHistory.filter(chat => 
-      !(chat.metadata?.id === chatId || chat.id === chatId)
-    ))
+    setChatHistory(prevHistory => prevHistory.filter(chat => chat.id !== chatId))
     
     // Also remove the drift info from the source message
     const updatedMessages = messages.map(msg => {
@@ -1553,6 +1455,13 @@ function App() {
     // IMPORTANT: Give each pushed message a unique ID to avoid React key conflicts
     const driftMessagesWithMetadata = driftMessages.map((msg, idx) => ({
       ...msg,
+      // Convert all pushed messages to assistant bubbles in main chat
+      // to avoid rendering a pink user bubble for the drift question.
+      // Preserve the original role for reconstruction via originalIsUser.
+      isUser: false,
+      originalIsUser: msg.isUser,
+      // Hide user messages in the main feed but keep them for reconstruction
+      isHiddenContext: msg.isUser ? true : (msg as any).isHiddenContext,
       id: `${sourceMessageId}-msg-${idx}-${Date.now()}`, // Unique ID for each pushed message
       originalDriftId: msg.id, // Keep reference to original drift message ID
       isDriftPush: true,
@@ -2140,11 +2049,7 @@ function App() {
                 <SettingsIcon className="w-4 h-4 text-text-muted" />
               </button>
               <HeaderControls
-                currentUser={currentUser}
                 aiSettings={aiSettings}
-                handleAISettingsChange={handleAISettingsChange}
-                setApiConnected={setApiConnected}
-                setIsConnecting={setIsConnecting}
                 selectedTargets={selectedTargets}
                 setSelectedTargets={setSelectedTargetsPersist}
                 isConnecting={isConnecting}
@@ -2157,7 +2062,7 @@ function App() {
         {/* Messages area with depth */}
         <div className="flex-1 overflow-hidden relative">
             <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`}>
+            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
               
               {/* Scroll to bottom button - centered and elegant */}
               {showScrollButton && (
@@ -2288,7 +2193,6 @@ function App() {
                 const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
                 const isFirstDriftMessage = isDriftMessage && prevMsg?.isDriftPush && prevMsg?.text.startsWith('📌');
                 const isLastDriftMessage = isDriftMessage && (!nextMsg?.isDriftPush || nextMsg?.text.startsWith('📌'));
-                const isMiddleDriftMessage = isDriftMessage && !isFirstDriftMessage && !isLastDriftMessage;
                 
                 // Check if this is a single message push (sourceMessageId contains '-single-')
                 const isSinglePushMessage = isDriftMessage && 
@@ -2329,7 +2233,7 @@ function App() {
                           <div key={`resp-${gm.id}`} className="w-full">
                             <div className={`flex justify-start animate-fade-up relative group`}>
                               <div
-                                className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 py-3 relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
+                                className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 ${gm.modelTag ? 'pt-7 pb-3' : 'py-3'} relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
                                 data-message-id={gm.id}
                               >
                                 {gm.modelTag && (() => {
@@ -2337,7 +2241,7 @@ function App() {
                                   return (
                                     <button
                                       onClick={() => setActiveCanvasId(canvasId)}
-                                      className="absolute -top-2 left-3 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors"
+                                      className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
                                       title={`Show ${gm.modelTag} thread`}
                                     >
                                       {gm.modelTag}
@@ -2468,7 +2372,11 @@ function App() {
                     >
                       <div
                         className={`
-                          ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'pt-10 pb-3' : 'py-3'} relative
+                          ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${
+                            (isDriftMessage && !msg.isUser) || isSinglePushMessage
+                              ? 'pt-10 pb-3'
+                              : (!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3')
+                          } relative
                           ${msg.isUser 
                             ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
                             : isSinglePushMessage
@@ -2550,9 +2458,10 @@ function App() {
                                   return a.timestamp.getTime() - b.timestamp.getTime()
                                 })
                                 .map(m => ({
-                                  id: m.originalDriftId || m.id,
+                                  id: m.id,
                                   text: m.text,
-                                  isUser: m.isUser,
+                                  // Restore original role if present
+                                  isUser: (m as any).originalIsUser ?? m.isUser,
                                   timestamp: m.timestamp
                                 }))
                               
@@ -2668,18 +2577,18 @@ function App() {
                         </>
                       )}
 
-                      {/* Minimal model tag */}
-                      {!msg.isUser && msg.modelTag && (
+                      {/* Minimal model tag (skip when inline drift header is shown) */}
+                      {!msg.isUser && msg.modelTag && !(isDriftMessage && (isSinglePushMessage || isFirstDriftMessage)) && (
                         msg.broadcastGroupId ? (
                           <button
                             onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
-                            className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors"
+                            className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
                             title={`Show ${msg.modelTag} thread`}
                           >
                             {msg.modelTag}
                           </button>
                         ) : (
-                          <div className="absolute -top-2 left-4 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted">
+                          <div className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted whitespace-nowrap">
                             {msg.modelTag}
                           </div>
                         )
@@ -2727,20 +2636,20 @@ function App() {
                           </div>
                         </div>
                       )}
-                      {/* Add Drift tag for single pushed messages */}
-                      {isSinglePushMessage && (
+                      {/* Add Drift tag: show on first drift bubble (including single pushes) */}
+                      {(isDriftMessage && isFirstDriftMessage) && (
                         <div 
-                          className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md"
+                          className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md opacity-80 group-hover:opacity-100"
                         >
                           Drift
                         </div>
                       )}
                       
-                      {/* Add drift context for single messages and first of multi-messages */}
-                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage && hasMultipleDriftMessages)) && (
+                      {/* Inline, compact drift header: model tag + From/Q in one row */}
+                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
                         <div 
-                          className="absolute top-2 left-3 right-3 flex flex-col gap-0.5 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet transition-colors duration-200 z-10 pointer-events-auto"
-                          style={{ minWidth: '200px' }}
+                          className="absolute top-2 left-3 right-3 flex items-center gap-2 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet/90 transition-colors duration-150 z-20 pointer-events-auto"
+                          style={{ minWidth: '220px' }}
                           onClick={(e) => {
                             // Prevent event bubbling to parent message click
                             e.stopPropagation()
@@ -2783,9 +2692,10 @@ function App() {
                                   return a.timestamp.getTime() - b.timestamp.getTime()
                                 })
                                 .map(m => ({
-                                  id: m.originalDriftId || m.id,
+                                  id: m.id,
                                   text: m.text,
-                                  isUser: m.isUser,
+                                  // Restore original role if present
+                                  isUser: (m as any).originalIsUser ?? m.isUser,
                                   timestamp: m.timestamp
                                 }))
                               
@@ -2829,14 +2739,21 @@ function App() {
                           }}
                           title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
                         >
-                          <div className="italic truncate">
-                            From: "{msg.driftPushMetadata?.selectedText}"
-                          </div>
-                          {msg.driftPushMetadata?.userQuestion && (
-                            <div className="italic truncate">
-                              Q: "{msg.driftPushMetadata.userQuestion}"
-                            </div>
+                          {/* Inline model tag chip */}
+                          {msg.modelTag && (
+                            <span className="px-1.5 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[9px] text-text-muted whitespace-nowrap">
+                              {msg.modelTag}
+                            </span>
                           )}
+                          {/* Compact meta: About and Q on one line */}
+                          <span className="truncate">
+                            <span className="text-text-secondary/80">About:</span> "{msg.driftPushMetadata?.selectedText}"
+                            {msg.driftPushMetadata?.userQuestion && (
+                              <>
+                                {' '}• <span className="text-text-secondary/80">Q:</span> "{msg.driftPushMetadata.userQuestion}"
+                              </>
+                            )}
+                          </span>
                         </div>
                       )}
                       
@@ -3037,9 +2954,11 @@ function App() {
         {/* Composer context bar when continuing with a model */}
         {false && (() => {
           const refMsg = messages.find(m => m.id === continueFromMessageId)
-          const model = refMsg?.modelTag || 'Model'
-          const excerpt = refMsg?.text ? stripMarkdown(refMsg.text).slice(0, 80) : ''
-          const chipsGroupId = activeBroadcastGroupId || refMsg?.broadcastGroupId || null
+          if (!refMsg) return null
+          const rm = refMsg!
+          const model = rm.modelTag || 'Model'
+          const excerpt = rm.text ? stripMarkdown(rm.text).slice(0, 80) : ''
+          const chipsGroupId = activeBroadcastGroupId || rm.broadcastGroupId || null
           const chipModels = chipsGroupId
             ? Array.from(new Map(
                 messages
@@ -3074,7 +2993,7 @@ function App() {
                       </div>
                     )}
                     {excerpt && (
-                      <span className="text-text-muted hidden sm:inline">{excerpt}{refMsg!.text!.length > 80 ? '…' : ''}</span>
+                      <span className="text-text-muted hidden sm:inline">{excerpt}{((refMsg?.text?.length || 0) > 80 ? '…' : '')}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -3126,8 +3045,7 @@ function App() {
                       sendMessage()
                     }
                   }}
-                  placeholder={isTyping ? "AI is responding..." : "Type your message..."}
-                  disabled={isTyping}
+                  placeholder={"Type your message..."}
                   rows={1}
                   dir={getTextDirection(message)}
                   className={`
@@ -3139,7 +3057,6 @@ function App() {
                     focus:shadow-[0_0_20px_rgba(255,0,122,0.15)]
                     placeholder:text-text-muted
                     transition-all duration-150
-                    disabled:opacity-70
                     resize-none
                     min-h-[48px] max-h-[200px]
                     ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
@@ -3255,10 +3172,6 @@ function App() {
         }}
       />
 
-      {/* All-Mentions Drawer */}
-      {allMentionsEntityId && (
-        <AllMentionsPanel entityId={allMentionsEntityId} onClose={() => setAllMentionsEntityId(null)} />
-      )}
       
       {/* Profile Modal */}
           {profileOpen && (

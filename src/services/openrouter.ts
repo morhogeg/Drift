@@ -23,7 +23,8 @@ export interface OpenRouterResponse {
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 export const OPENROUTER_MODELS = {
-  OSS: 'openai/gpt-oss-20b:free'
+  OSS: 'openai/gpt-oss-20b:free',
+  QWEN3: 'qwen/qwen3-235b-a22b:free'
 } as const
 
 export type OpenRouterModel = typeof OPENROUTER_MODELS[keyof typeof OPENROUTER_MODELS]

@@ -93,6 +93,21 @@ npm run preview
 
 ### API Setup
 - **OpenRouter**: Sign up at [openrouter.ai](https://openrouter.ai) and add your API key to `.env`
+- **Qwen3 (via OpenRouter)**: You can use the Qwen3 model `qwen/qwen3-235b-a22b:free` through the same OpenRouter endpoint. Required headers:
+  - `Authorization: Bearer <OPENROUTER_API_KEY>`
+  - `Content-Type: application/json`
+  - `HTTP-Referer: <YOUR_SITE_URL>` (optional)
+  - `X-Title: <YOUR_SITE_NAME>` (optional)
+
+  Example request body:
+  ```json
+  {
+    "model": "qwen/qwen3-235b-a22b:free",
+    "messages": [
+      { "role": "user", "content": "What is the meaning of life?" }
+    ]
+  }
+  ```
 - **Ollama**: Install Ollama locally and ensure it's running on port 11434
 
 ## Project Structure
