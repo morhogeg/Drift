@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2 } from 'lucide-react'
+import { X, Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
@@ -14,6 +14,10 @@ interface Message {
   text: string
   isUser: boolean
   timestamp: Date
+  modelTag?: string
+  // For compare layout
+  compareGroupId?: string
+  laneKey?: string
 }
 
 interface DriftPanelProps {
@@ -34,7 +38,9 @@ interface DriftPanelProps {
   existingMessages?: Message[]
   driftChatId?: string
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'dummy' | 'openrouter' | 'ollama'
+  selectedProvider?: 'openrouter' | 'ollama'
+  // Optional: allow running compare against multiple targets from main
+  selectedTargets?: Array<{ provider: 'openrouter' | 'ollama'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
 }
 
@@ -56,6 +62,7 @@ export default function DriftPanel({
   existingMessages,
   driftChatId,
   selectedProvider,
+  selectedTargets,
   onExpandedChange
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
@@ -66,7 +73,7 @@ export default function DriftPanel({
   const [savedAsChat, setSavedAsChat] = useState(false)
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
   const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set())
-  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
+  const [, setHoveredMessageId] = useState<string | null>(null)
   const [pushedMessageCount, setPushedMessageCount] = useState(0)
   const [lastPushSourceId, setLastPushSourceId] = useState<string | null>(null)
   const [isPushing, setIsPushing] = useState(false)
@@ -74,8 +81,10 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
+  const [isComparing, setIsComparing] = useState(false)
 
   // Initialize Drift with existing messages or system message
   useEffect(() => {
@@ -323,9 +332,9 @@ export default function DriftPanel({
       const settingsKey = aiSettings.openRouterApiKey
       const effectiveApiKey = envKey || settingsKey
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'dummy' = selectedProvider
+      const provider: 'openrouter' | 'ollama' = selectedProvider
         ? selectedProvider
-        : (aiSettings.useDummyAI ? 'dummy' : (effectiveApiKey ? 'openrouter' : 'ollama'))
+        : (effectiveApiKey ? 'openrouter' : 'ollama')
 
       console.log('Drift panel - provider chosen:', provider)
       console.log('Drift panel - API messages:', apiMessages)
@@ -352,6 +361,10 @@ export default function DriftPanel({
         if (provider === 'openrouter') {
           const apiKey = effectiveApiKey
           if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
+          // Choose model based on selected target when single-target
+          const sTargets = selectedTargets || []
+          const useQwen3 = (sTargets.length === 1 && (sTargets[0].key === 'qwen3' || sTargets[0].label === 'Qwen3'))
+          const model = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
           await sendMessageToOpenRouter(
             apiMessages as any,
             (chunk) => {
@@ -361,7 +374,7 @@ export default function DriftPanel({
             },
             apiKey,
             abortController.signal,
-            aiSettings.openRouterModel
+            model
           )
         } else if (provider === 'ollama') {
           await sendMessageToOllama(
@@ -374,21 +387,6 @@ export default function DriftPanel({
             abortController.signal,
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel
-          )
-        } else {
-          // Replace Dummy with OpenRouter Qwen3 model
-          const apiKey = effectiveApiKey
-          if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          await sendMessageToOpenRouter(
-            apiMessages as any,
-            (chunk) => {
-              accumulatedResponse += chunk
-              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-            },
-            apiKey,
-            abortController.signal,
-            OPENROUTER_MODELS.QWEN3
           )
         }
       } catch (error) {
@@ -414,6 +412,115 @@ export default function DriftPanel({
       abortControllerRef.current.abort()
       abortControllerRef.current = null
       setIsTyping(false)
+      setIsComparing(false)
+    }
+    if (compareAbortControllersRef.current) {
+      for (const c of Object.values(compareAbortControllersRef.current)) {
+        try { c.abort() } catch {}
+      }
+      compareAbortControllersRef.current = null
+    }
+  }
+
+  // Run the current prompt across multiple selected targets and stream results
+  const handleCompareAcrossModels = async () => {
+    const targets = (selectedTargets || []).filter(Boolean)
+    if (!targets || targets.length < 2) return
+
+    // Determine question: use current input if present; otherwise last user message
+    const trimmed = message.trim()
+    const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
+    const questionText = trimmed || lastUser?.text || ''
+    if (!questionText) return
+
+    // If using new input, append it to the drift conversation for continuity
+    let workingDrift: Message[] = driftOnlyMessages
+    if (trimmed) {
+      const newMsg: Message = { id: 'drift-' + Date.now().toString(), text: questionText, isUser: true, timestamp: new Date() }
+      setMessages(prev => [...prev, newMsg])
+      setDriftOnlyMessages(prev => [...prev, newMsg])
+      workingDrift = [...driftOnlyMessages, newMsg]
+      setMessage('')
+    }
+
+    // Build API messages with system context
+    const baseConversation = workingDrift.filter(msg => !msg.text.startsWith('What would you like to know about'))
+    const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
+      {
+        role: 'system',
+        content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+      },
+      ...baseConversation.map(msg => ({ role: msg.isUser ? 'user' as const : 'assistant' as const, content: msg.text }))
+    ]
+
+    // If the last message in baseConversation isn't the question (when input was empty), ensure the API sees the question
+    if (!trimmed && (!lastUser || lastUser.text !== questionText)) {
+      apiMessages.push({ role: 'user', content: questionText })
+    } else if (trimmed) {
+      // When we just appended the user input locally, also reflect it in apiMessages
+      apiMessages.push({ role: 'user', content: questionText })
+    }
+
+    // Prepare per-target abort controllers for concurrent streaming
+    const controllers: Record<string, AbortController> = {}
+    compareAbortControllersRef.current = controllers
+    setIsTyping(true)
+    setIsComparing(true)
+
+    try {
+      // Compare group id for this run
+      const groupId = `cmp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
+
+      // Create placeholders and start all streams concurrently
+      const tasks = targets.map(t => {
+        const aiId = `drift-compare-${t.key}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+        const placeholder: Message = { 
+          id: aiId, text: '', isUser: false, timestamp: new Date(), 
+          modelTag: t.label, compareGroupId: groupId, laneKey: t.key 
+        }
+        setMessages(prev => [...prev, placeholder])
+        setDriftOnlyMessages(prev => [...prev, placeholder])
+
+        const onChunk = (chunk: string) => {
+          setMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
+          setDriftOnlyMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
+        }
+        const controller = new AbortController()
+        controllers[t.key] = controller
+
+        const run = async () => {
+          try {
+            if (t.provider === 'openrouter') {
+              const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
+              const settingsKey = aiSettings.openRouterApiKey
+              const apiKey = envKey || settingsKey
+              if (!apiKey) {
+                onChunk('[OpenRouter] Missing API key. Configure in Settings.')
+              } else {
+                const model = (t.key === 'qwen3' || t.label === 'Qwen3')
+                  ? OPENROUTER_MODELS.QWEN3
+                  : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
+                await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, controller.signal, model)
+              }
+            } else if (t.provider === 'ollama') {
+              await sendMessageToOllama(apiMessages as OllamaMessage[], onChunk, controller.signal, aiSettings.ollamaUrl, aiSettings.ollamaModel)
+            } else {
+              // no-op
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to get response.'
+            onChunk(`\n\n[${t.label}] ${msg}`)
+          }
+        }
+
+        return run()
+      })
+
+      await Promise.allSettled(tasks)
+    } finally {
+      setIsTyping(false)
+      setIsComparing(false)
+      compareAbortControllersRef.current = null
     }
   }
 
@@ -597,6 +704,25 @@ export default function DriftPanel({
                 {pushedToMain ? <Undo2 className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
                 <span>{pushedToMain ? 'Undo' : 'Push'}</span>
               </button>
+              {selectedTargets && selectedTargets.length > 1 && (
+                <button
+                  onClick={handleCompareAcrossModels}
+                  disabled={
+                    isTyping || isComparing || (
+                      (message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser)
+                    )
+                  }
+                  className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                    ${isComparing
+                      ? 'bg-dark-elevated/70 border border-accent-violet/50'
+                      : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
+                    text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+                  title="Compare answers from selected models"
+                >
+                  <Megaphone className="w-3.5 h-3.5" />
+                  <span>{isComparing ? 'Comparing' : 'Compare'}</span>
+                </button>
+              )}
               <button
                 onClick={handleSaveAsChat}
                 disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
@@ -616,136 +742,130 @@ export default function DriftPanel({
         
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-3 pb-16 space-y-3 bg-dark-bg">
-          {messages.map((msg) => (
-            msg.text ? (
-              <div
-                key={msg.id}
-                className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} group`}
-                onMouseEnter={() => setHoveredMessageId(msg.id)}
-                onMouseLeave={() => setHoveredMessageId(null)}
-              >
-                <div className="relative max-w-[85%]" data-drift-message-id={msg.id}>
-                  <div
-                    className={`
-                      rounded-2xl px-4 py-2.5
-                      ${msg.isUser 
-                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' 
-                        : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'
-                      }
-                    `}
-                  >
-                  {msg.isUser ? (
-                    <p 
-                      className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
-                      dir={getTextDirection(msg.text)}
-                    >
-                      {msg.text}
-                    </p>
-                  ) : (
-                    <div 
-                      className={`${getRTLClassName(msg.text)}`}
-                      dir={getTextDirection(msg.text)}
-                    >
-                      <ReactMarkdown 
-                      className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none
-                        prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
-                        prose-p:text-text-secondary prose-p:mb-2
-                        prose-strong:text-text-primary prose-strong:font-semibold
-                        prose-ul:my-2 prose-ul:space-y-1
-                        prose-li:text-text-secondary prose-li:ml-4
-                        prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                        prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3
-                        prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted
-                        prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg
-                        prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50
-                        prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs
-                        prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs
-                        prose-tr:hover:bg-dark-elevated/20"
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({children}) => <p className="mb-2">{children}</p>,
-                        br: () => <br />,
-                        table: ({children}) => (
-                          <div className="overflow-x-auto my-3">
-                            <table className="min-w-full text-xs">{children}</table>
+          {(() => {
+            const renderedGroups = new Set<string>()
+            return messages.map((msg) => {
+              if (!msg.text) return null
+              if (msg.compareGroupId) {
+                const gid = msg.compareGroupId
+                if (renderedGroups.has(gid)) return null
+                renderedGroups.add(gid)
+                const groupMsgs = messages.filter(m => m.compareGroupId === gid)
+                const orderKeys = (selectedTargets || []).map(t => t.key)
+                const lanes = [...groupMsgs].sort((a, b) => {
+                  const ia = orderKeys.indexOf(a.laneKey || '')
+                  const ib = orderKeys.indexOf(b.laneKey || '')
+                  if (ia !== -1 && ib !== -1) return ia - ib
+                  if (ia !== -1) return -1
+                  if (ib !== -1) return 1
+                  return (a.laneKey || '').localeCompare(b.laneKey || '')
+                })
+                const cols = Math.max(2, lanes.length)
+                return (
+                  <div key={`cmp-${gid}`} className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+                    {lanes.map(col => (
+                      <div
+                        key={col.id}
+                        className="group"
+                        onMouseEnter={() => setHoveredMessageId(col.id)}
+                        onMouseLeave={() => setHoveredMessageId(null)}
+                      >
+                        <div className="relative" data-drift-message-id={col.id}>
+                          <div className="rounded-2xl px-4 py-2.5 bg-dark-bubble border border-dark-border/50 text-text-secondary min-h-[48px]">
+                            {/* Bubble header: model tag and actions */}
+                            {!col.isUser && (
+                              <div className="flex items-center justify-between mb-1">
+                                <div>
+                                  {col.modelTag && (
+                                    <span className="px-1.5 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
+                                      {col.modelTag}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => handlePushSingleMessage(col)}
+                                    className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 hover:bg-dark-surface hover:border-accent-pink/50 transition-all duration-200 shadow-lg"
+                                    title="Push this message to main chat"
+                                  >
+                                    <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleSaveMessage(col)}
+                                    className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(col.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`}
+                                    title={savedMessageIds.has(col.id) ? 'Remove from snippets' : 'Save to snippets'}
+                                  >
+                                    <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(col.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {/* Bubble content */}
+                            <div className={`text-[13px] leading-6 ${getRTLClassName(col.text)}`} dir={getTextDirection(col.text)}>
+                              <ReactMarkdown className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none prose-p:mb-2 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3" remarkPlugins={[remarkGfm]}>
+                                {col.text}
+                              </ReactMarkdown>
+                            </div>
                           </div>
-                        )
-                      }}
-                    >
-                      {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
-                    </ReactMarkdown>
-                    </div>
-                  )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  
-                  {/* Action Buttons - positioned to the side */}
-                  {!msg.id.includes('system') && !msg.isUser && (
-                    <div className={`absolute -right-9 top-2 flex flex-col gap-1
-                                    ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}
-                                    transition-all duration-200 pointer-events-none`}>
-                      {/* Push to Main Button */}
-                      <button
-                        onClick={() => handlePushSingleMessage(msg)}
-                        className="p-1.5 rounded-lg pointer-events-auto
-                                 bg-dark-elevated border border-dark-border/50
-                                 hover:bg-dark-surface hover:border-accent-pink/50 
-                                 transition-all duration-200
-                                 shadow-lg hover:scale-110"
-                        title="Push this message to main chat"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
-                      </button>
-                      
-                      {/* Save to Snippet Button */}
-                      <button
-                        onClick={() => handleToggleSaveMessage(msg)}
-                        className={`p-1.5 rounded-lg pointer-events-auto
-                                   bg-dark-elevated border 
-                                   ${savedMessageIds.has(msg.id) 
-                                     ? 'border-cyan-500/50 bg-cyan-500/10' 
-                                     : 'border-dark-border/50'}
-                                   hover:bg-dark-surface hover:border-cyan-500/50 
-                                   transition-all duration-200
-                                   shadow-lg hover:scale-110`}
-                        title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
-                      >
-                        <Bookmark 
-                          className={`w-3.5 h-3.5 transition-colors
-                            ${savedMessageIds.has(msg.id) 
-                              ? 'text-cyan-400 fill-cyan-400' 
-                              : 'text-text-muted hover:text-cyan-400'}`} 
-                        />
-                      </button>
+                )
+              }
+
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} group`}
+                  onMouseEnter={() => setHoveredMessageId(msg.id)}
+                  onMouseLeave={() => setHoveredMessageId(null)}
+                >
+                  <div className="relative max-w-[85%]" data-drift-message-id={msg.id}>
+                    <div className={`rounded-2xl px-4 py-2.5 ${msg.isUser ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'}`}>
+                      {/* Bubble header for assistant: model tag and actions */}
+                      {!msg.isUser && (
+                        <div className="flex items-center justify-between mb-1">
+                          <div>
+                            {msg.modelTag && (
+                              <span className="px-1.5 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
+                                {msg.modelTag}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={() => handlePushSingleMessage(msg)} className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 hover:bg-dark-surface hover:border-accent-pink/50 transition-all duration-200 shadow-lg" title="Push this message to main chat">
+                              <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
+                            </button>
+                            <button onClick={() => handleToggleSaveMessage(msg)} className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`} title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}>
+                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {msg.isUser ? (
+                        <>
+                          <div className="flex items-center justify-end mb-1">
+                            <button onClick={() => handleToggleSaveMessage(msg)} className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`} title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}>
+                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                            </button>
+                          </div>
+                          <p className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>
+                        </>
+                      ) : (
+                        <div className={`${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
+                          <ReactMarkdown className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20" remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <p className="mb-2">{children}</p>, br: () => <br />, table: ({children}) => (<div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>) }}>
+                            {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  
-                  {/* Save to Snippet Button for User Messages */}
-                  {!msg.id.includes('system') && msg.isUser && (
-                    <button
-                      onClick={() => handleToggleSaveMessage(msg)}
-                      className={`absolute -left-9 top-2 p-1.5 rounded-lg pointer-events-auto
-                                 bg-dark-elevated border 
-                                 ${savedMessageIds.has(msg.id) 
-                                   ? 'border-cyan-500/50 bg-cyan-500/10' 
-                                   : 'border-dark-border/50'}
-                                 hover:bg-dark-surface hover:border-cyan-500/50 
-                                 transition-all duration-200
-                                 ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}
-                                 shadow-lg hover:scale-110`}
-                      title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
-                    >
-                      <Bookmark 
-                        className={`w-3.5 h-3.5 transition-colors
-                          ${savedMessageIds.has(msg.id) 
-                            ? 'text-cyan-400 fill-cyan-400' 
-                            : 'text-text-muted hover:text-cyan-400'}`} 
-                      />
-                    </button>
-                  )}
+                    
+                  </div>
                 </div>
-              </div>
-            ) : null
-          ))}
+              )
+            })
+          })()}
           
           {isTyping && (
             <div className="flex justify-start">

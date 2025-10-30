@@ -124,6 +124,50 @@ export async function sendMessageToDummy(
   
   const topic = extractTopic(lastUserMessage.content);
   const responseType = getResponseType(lastUserMessage.content);
+
+  // Try to extract the drift subject from the system prompt (e.g., The user selected "Apple Inc")
+  const systemMsg = messages.find(m => m.role === 'system')
+  let driftSubject: string | null = null
+  if (systemMsg?.content) {
+    const m1 = systemMsg.content.match(/selected\s+"([^"]+)"/i)
+    const m2 = systemMsg.content.match(/selected\s+“([^”]+)”/i)
+    driftSubject = (m1?.[1] || m2?.[1] || '').trim() || null
+  }
+
+  // Lightweight context extraction to better answer simple fact questions (e.g., "when was it founded?")
+  const historyBefore = messages.slice(0, messages.lastIndexOf(lastUserMessage))
+  const lastAssistant = [...historyBefore].reverse().find(m => m.role === 'assistant')
+  const q = lastUserMessage.content.toLowerCase()
+  const assistantText = lastAssistant?.content || ''
+
+  // If the question asks "when" and assistant mentions a date/founding phrase, mirror it
+  if (/\bwhen\b/.test(q) || /founded|established|founded\s*\?/.test(q)) {
+    // Try to capture phrases like "founded on April 1, 1976" or a year nearby
+    const m1 = assistantText.match(/\b(founded|established)\b[^\n.]*\b(on|in)\b[^\n.]*/i)
+    if (m1) {
+      const phrase = m1[0].trim().replace(/\s+/g, ' ')
+      const reply = phrase.endsWith('.') ? phrase : `${phrase}.`
+      const words = reply.split(/(\s+)/)
+      for (let i = 0; i < words.length; i++) {
+        if (signal?.aborted) return
+        onChunk(words[i])
+        await new Promise(r => setTimeout(r, 18))
+      }
+      return
+    }
+    // Fallback: plain year if present
+    const year = assistantText.match(/\b(19\d{2}|20\d{2})\b/)
+    if (year) {
+      const reply = `${topic || 'It'} was in ${year[0]}.`
+      const words = reply.split(/(\s+)/)
+      for (let i = 0; i < words.length; i++) {
+        if (signal?.aborted) return
+        onChunk(words[i])
+        await new Promise(r => setTimeout(r, 18))
+      }
+      return
+    }
+  }
   
   // Select appropriate response
   let response: string;
@@ -133,7 +177,8 @@ export async function sendMessageToDummy(
     response = listResponses[Math.floor(Math.random() * listResponses.length)];
   } else {
     const template = responseTemplates[Math.floor(Math.random() * responseTemplates.length)];
-    response = template.replace('{topic}', topic);
+    const subject = driftSubject || topic || 'this topic'
+    response = template.replace('{topic}', subject);
     
     // Add some variety with follow-up content
     const followUps = [

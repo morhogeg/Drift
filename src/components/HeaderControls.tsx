@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Check, Megaphone } from 'lucide-react'
-type Provider = 'dummy' | 'openrouter' | 'ollama'
+type Provider = 'openrouter' | 'ollama'
 type Target = { provider: Provider, key: string, label: string }
 
 interface Props {
@@ -14,11 +14,19 @@ interface Props {
 export default function HeaderControls(props: Props) {
   const { aiSettings, selectedTargets, setSelectedTargets, isConnecting, apiConnected } = props
 
-  const items: Target[] = [
-    { provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' },
-    { provider: 'openrouter', key: 'openrouter', label: 'OpenAI OSS' },
-    { provider: 'ollama', key: 'ollama', label: 'Ollama' }
-  ]
+  const items: Target[] = useMemo<Target[]>(() => {
+    const presets = (aiSettings?.modelPresets || [])
+      .filter((p: any) => p && p.enabled)
+      .map((p: any) => ({ provider: p.provider as Provider, key: p.id as string, label: p.label as string })) as Target[]
+    if (!presets.length) {
+      return [
+        { provider: 'openrouter', key: 'qwen3', label: 'Qwen3' },
+        { provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' },
+        { provider: 'ollama', key: 'ollama', label: 'Ollama' }
+      ] as Target[]
+    }
+    return presets as Target[]
+  }, [aiSettings])
 
   const allowedKeys = new Set(items.map(i => i.key))
   const visibleTargets = (selectedTargets || []).filter(t => allowedKeys.has(t.key))
@@ -32,7 +40,7 @@ export default function HeaderControls(props: Props) {
     const has = visibleTargets.some(x => x.key === t.key)
     const next = has ? visibleTargets.filter(x => x.key !== t.key) : [...visibleTargets, t]
     // Ensure at least one
-    setSelectedTargets(next.length ? next : [{ provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }])
+    setSelectedTargets(next.length ? next : [{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
   }
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -50,11 +58,14 @@ export default function HeaderControls(props: Props) {
   // Normalize persisted targets to current labels to avoid showing stale names
   useEffect(() => {
     const map = new Map(items.map(i => [i.key, i]))
-    const needsUpdate = visibleTargets.some(t => (map.get(t.key)?.label ?? t.label) !== t.label)
-    if (needsUpdate) {
-      const normalized = visibleTargets.map(t => map.get(t.key) || t)
-      setSelectedTargets(normalized)
-    }
+    // Migration: map old keys to new ones
+    const migrated = visibleTargets.map(t => {
+      if (t.key === 'dummy-basic') return (map.get('qwen3') || { provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }) as Target
+      if (t.key === 'openrouter') return (map.get('oss') || { provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }) as Target
+      return (map.get(t.key) || t) as Target
+    }) as Target[]
+    const needsUpdate = migrated.some((t, i) => t.key !== visibleTargets[i]?.key || t.label !== visibleTargets[i]?.label)
+    if (needsUpdate) setSelectedTargets(migrated)
     // Only run when selectedTargets or items change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargets])
@@ -79,8 +90,15 @@ export default function HeaderControls(props: Props) {
             <div className="py-1">
               {items.map(t => {
                 const active = visibleTargets.some(x => x.key === t.key)
-                const accent = t.provider === 'dummy' ? 'text-accent-violet' : t.provider === 'openrouter' ? 'text-blue-300' : 'text-emerald-300'
-                const dot = t.provider === 'dummy' ? 'bg-accent-violet' : t.provider === 'openrouter' ? 'bg-blue-400' : 'bg-emerald-400'
+                const accent = t.provider === 'openrouter' ? 'text-blue-300' : 'text-emerald-300'
+                const dot = t.provider === 'openrouter' ? 'bg-blue-400' : 'bg-emerald-400'
+                const modelSuffix = (() => {
+                  const p = (aiSettings?.modelPresets || []).find((x: any) => x.id === t.key)
+                  if (!p) return t.provider === 'openrouter' ? (aiSettings?.openRouterModel || '') : (aiSettings?.ollamaModel || '')
+                  if (t.provider === 'openrouter') return p.model || aiSettings?.openRouterModel || ''
+                  if (t.provider === 'ollama') return p.model || aiSettings?.ollamaModel || ''
+                  return ''
+                })()
                 return (
                   <button
                     key={t.key}
@@ -91,7 +109,7 @@ export default function HeaderControls(props: Props) {
                       <span className={`inline-block w-1.5 h-1.5 rounded-full ${dot}`} />
                       <span className="truncate">
                         {t.label}
-                        <span className="text-text-muted">{t.provider === 'openrouter' ? ` • ${aiSettings.openRouterModel || ''}` : t.provider === 'ollama' ? ` • ${aiSettings.ollamaModel || ''}` : ''}</span>
+                        <span className="text-text-muted">{modelSuffix ? ` • ${modelSuffix}` : ''}</span>
                       </span>
                     </span>
                     {active ? (

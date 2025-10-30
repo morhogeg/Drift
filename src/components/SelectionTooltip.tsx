@@ -21,6 +21,7 @@ export default function SelectionTooltip({
     y: number
     text: string
     messageId: string
+    isUserMessage: boolean
     anchorRect: DOMRect
   } | null>(null)
   
@@ -80,13 +81,9 @@ export default function SelectionTooltip({
           return
         }
 
-        // Check if user message
-        const isUserMessage = messageEl.className.includes('from-accent-pink') || 
+        // Check if selection is inside a user-authored bubble (we still allow Save, but not Drift)
+        const isUserMessage = messageEl.className.includes('from-accent-pink') ||
                               messageEl.className.includes('from-accent-violet')
-        
-        if (isUserMessage) {
-          return
-        }
 
         // Save the data
         savedDataRef.current = { text, messageId: msgId }
@@ -98,6 +95,7 @@ export default function SelectionTooltip({
           y: Math.max(rect.top - 10, 8),
           text: text,
           messageId: msgId,
+          isUserMessage,
           anchorRect: rect
         })
       }, 10)
@@ -166,6 +164,10 @@ export default function SelectionTooltip({
   const handleDrift = () => {
     // Use saved data instead of current selection
     const data = savedDataRef.current || (tooltip ? { text: tooltip.text, messageId: tooltip.messageId } : null)
+    // Disallow drift for user messages
+    if (tooltip?.isUserMessage) {
+      return
+    }
     
     if (data) {
       console.log('Drift clicked with saved data:', data)
@@ -221,25 +223,27 @@ export default function SelectionTooltip({
       }}
     >
       <div className="flex gap-2 bg-dark-elevated/95 backdrop-blur rounded-full p-1.5 border border-dark-border/70 shadow-lg">
-        <button
-          type="button"
-          onMouseDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleDrift()
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                     bg-dark-bubble border border-dark-border/60 text-text-secondary
-                     hover:border-accent-violet/40 hover:text-text-primary
-                     transition-colors duration-150 cursor-pointer"
-        >
-          <GitBranch className="w-3.5 h-3.5" />
-          <span className="text-[12px]">Drift</span>
-        </button>
+        {!tooltip.isUserMessage && (
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleDrift()
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
+                       bg-dark-bubble border border-dark-border/60 text-text-secondary
+                       hover:border-accent-violet/40 hover:text-text-primary
+                       transition-colors duration-150 cursor-pointer"
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span className="text-[12px]">Drift</span>
+          </button>
+        )}
         
         <button
           type="button"
