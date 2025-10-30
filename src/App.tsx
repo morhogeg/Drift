@@ -2745,8 +2745,8 @@ function App() {
                               {msg.modelTag}
                             </span>
                           )}
-                          {/* Compact meta: About and Q on one line */}
-                          <span className="truncate">
+                          {/* Compact meta: About and Q — always fully visible, allow wrapping */}
+                          <span className="whitespace-normal break-words">
                             <span className="text-text-secondary/80">About:</span> "{msg.driftPushMetadata?.selectedText}"
                             {msg.driftPushMetadata?.userQuestion && (
                               <>
