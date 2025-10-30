@@ -690,19 +690,21 @@ export default function DriftPanel({
               <span className="text-[11px] text-text-muted mr-2">Exploring</span>
               <span className="text-[13px] text-text-secondary italic align-middle block truncate" title={selectedText}>"{selectedText}"</span>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={handlePushToMain}
                 disabled={isPushing || (!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0)}
-                className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px]
+                  border transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
                   ${pushedToMain
-                    ? 'bg-dark-elevated/70 border border-accent-violet/50 hover:bg-accent-violet/10'
-                    : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
-                  text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+                    ? 'text-accent-pink border-accent-pink/50 bg-accent-pink/10 hover:bg-accent-pink/15 shadow-[0_0_20px_rgba(236,72,153,0.08)]'
+                    : 'text-text-primary border-dark-border/50 bg-dark-elevated/60 hover:border-accent-violet/50 hover:bg-accent-violet/10 hover:text-accent-violet'}
+                `}
                 title={isPushing ? 'Pushing...' : pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
+                aria-label={pushedToMain ? 'Undo push to main' : 'Push drift to main chat'}
               >
                 {pushedToMain ? <Undo2 className="w-3.5 h-3.5" /> : <ArrowLeft className="w-3.5 h-3.5" />}
-                <span>{pushedToMain ? 'Undo' : 'Push'}</span>
+                <span className="translate-y-[0.5px]">{pushedToMain ? 'Undo' : 'Push'}</span>
               </button>
               {selectedTargets && selectedTargets.length > 1 && (
                 <button
@@ -712,29 +714,33 @@ export default function DriftPanel({
                       (message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser)
                     )
                   }
-                  className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                  className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px]
+                    border transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
                     ${isComparing
-                      ? 'bg-dark-elevated/70 border border-accent-violet/50'
-                      : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
-                    text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+                      ? 'text-accent-violet border-accent-violet/60 bg-accent-violet/10'
+                      : 'text-text-primary border-dark-border/50 bg-dark-elevated/60 hover:border-accent-violet/50 hover:bg-accent-violet/10 hover:text-accent-violet'}
+                  `}
                   title="Compare answers from selected models"
+                  aria-label="Compare answers from selected models"
                 >
                   <Megaphone className="w-3.5 h-3.5" />
-                  <span>{isComparing ? 'Comparing' : 'Compare'}</span>
+                  <span className="translate-y-[0.5px]">{isComparing ? 'Comparing' : 'Compare'}</span>
                 </button>
               )}
               <button
                 onClick={handleSaveAsChat}
                 disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
-                className={`px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-1.5
+                className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px]
+                  border transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
                   ${savedAsChat
-                    ? 'bg-dark-elevated/70 border border-accent-violet/50 hover:bg-accent-violet/10'
-                    : 'bg-dark-elevated/60 border border-dark-border/50 hover:border-accent-violet/40 hover:bg-dark-elevated'}
-                  text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+                    ? 'text-cyan-300 border-cyan-500/60 bg-cyan-500/10 hover:bg-cyan-500/15'
+                    : 'text-text-primary border-dark-border/50 bg-dark-elevated/60 hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:text-cyan-300'}
+                `}
                 title={savedAsChat ? 'Undo save as chat' : 'Save drift as new chat'}
+                aria-label={savedAsChat ? 'Undo save as chat' : 'Save drift as new chat'}
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>{savedAsChat ? 'Saved' : 'Save'}</span>
+                {savedAsChat ? <Undo2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                <span className="translate-y-[0.5px]">{savedAsChat ? 'Saved' : 'Save'}</span>
               </button>
             </div>
           </div>
@@ -771,34 +777,32 @@ export default function DriftPanel({
                         onMouseLeave={() => setHoveredMessageId(null)}
                       >
                         <div className="relative" data-drift-message-id={col.id}>
-                          <div className="rounded-2xl px-4 py-2.5 bg-dark-bubble border border-dark-border/50 text-text-secondary min-h-[48px]">
-                            {/* Bubble header: model tag and actions */}
+                          <div className="relative rounded-2xl px-3.5 pt-6 pb-2 bg-dark-bubble border border-dark-border/50 text-text-secondary min-h-[40px]">
+                            {/* Overlay header chips: model tag (left) + actions (right) */}
                             {!col.isUser && (
-                              <div className="flex items-center justify-between mb-1">
-                                <div>
-                                  {col.modelTag && (
-                                    <span className="px-1.5 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
-                                      {col.modelTag}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1.5">
+                              <>
+                                {col.modelTag && (
+                                  <span className="absolute top-1 left-1 px-1 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
+                                    {col.modelTag}
+                                  </span>
+                                )}
+                                <div className="absolute top-1 right-1 flex items-center gap-1.5 opacity-80 hover:opacity-100">
                                   <button
                                     onClick={() => handlePushSingleMessage(col)}
-                                    className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 hover:bg-dark-surface hover:border-accent-pink/50 transition-all duration-200 shadow-lg"
+                                    className="w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border border-dark-border/50 hover:border-accent-pink/60 hover:bg-accent-pink/10 transition-all duration-150"
                                     title="Push this message to main chat"
                                   >
-                                    <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
+                                    <ArrowLeft className="w-3 h-3 text-text-muted" />
                                   </button>
                                   <button
                                     onClick={() => handleToggleSaveMessage(col)}
-                                    className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(col.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`}
+                                    className={`w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border ${savedMessageIds.has(col.id) ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-dark-border/50'} hover:border-cyan-500/60 hover:bg-cyan-500/10 transition-all duration-150`}
                                     title={savedMessageIds.has(col.id) ? 'Remove from snippets' : 'Save to snippets'}
                                   >
-                                    <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(col.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                                    <Bookmark className={`w-3 h-3 ${savedMessageIds.has(col.id) ? 'text-cyan-300 fill-cyan-300' : 'text-text-muted'}`} />
                                   </button>
                                 </div>
-                              </div>
+                              </>
                             )}
                             {/* Bubble content */}
                             <div className={`text-[13px] leading-6 ${getRTLClassName(col.text)}`} dir={getTextDirection(col.text)}>
@@ -822,32 +826,42 @@ export default function DriftPanel({
                   onMouseLeave={() => setHoveredMessageId(null)}
                 >
                   <div className="relative max-w-[85%]" data-drift-message-id={msg.id}>
-                    <div className={`rounded-2xl px-4 py-2.5 ${msg.isUser ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white' : 'bg-dark-bubble border border-dark-border/50 text-text-secondary'}`}>
-                      {/* Bubble header for assistant: model tag and actions */}
+                    <div className={`relative rounded-2xl ${msg.isUser ? 'px-3.5 py-2 bg-gradient-to-br from-accent-pink to-accent-violet text-white' : 'px-3.5 pt-6 pb-2 bg-dark-bubble border border-dark-border/50 text-text-secondary'}`}>
+                      {/* Overlay header for assistant: model tag and actions */}
                       {!msg.isUser && (
-                        <div className="flex items-center justify-between mb-1">
-                          <div>
-                            {msg.modelTag && (
-                              <span className="px-1.5 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
-                                {msg.modelTag}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={() => handlePushSingleMessage(msg)} className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 hover:bg-dark-surface hover:border-accent-pink/50 transition-all duration-200 shadow-lg" title="Push this message to main chat">
-                              <ArrowLeft className="w-3.5 h-3.5 text-text-muted hover:text-accent-pink transition-colors" />
+                        <>
+                          {msg.modelTag && (
+                            <span className="absolute top-1 left-1 px-1 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
+                              {msg.modelTag}
+                            </span>
+                          )}
+                          <div className="absolute top-1 right-1 flex items-center gap-1.5 opacity-80 hover:opacity-100">
+                            <button
+                              onClick={() => handlePushSingleMessage(msg)}
+                              className="w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border border-dark-border/50 hover:border-accent-pink/60 hover:bg-accent-pink/10 transition-all duration-150"
+                              title="Push this message to main chat"
+                            >
+                              <ArrowLeft className="w-3 h-3 text-text-muted" />
                             </button>
-                            <button onClick={() => handleToggleSaveMessage(msg)} className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`} title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}>
-                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                            <button
+                              onClick={() => handleToggleSaveMessage(msg)}
+                              className={`w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-dark-border/50'} hover:border-cyan-500/60 hover:bg-cyan-500/10 transition-all duration-150`}
+                              title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
+                            >
+                              <Bookmark className={`w-3 h-3 ${savedMessageIds.has(msg.id) ? 'text-cyan-300 fill-cyan-300' : 'text-text-muted'}`} />
                             </button>
                           </div>
-                        </div>
+                        </>
                       )}
                       {msg.isUser ? (
                         <>
                           <div className="flex items-center justify-end mb-1">
-                            <button onClick={() => handleToggleSaveMessage(msg)} className={`p-1.5 rounded-lg bg-dark-elevated border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-dark-border/50'} hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-200 shadow-lg`} title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}>
-                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-400 fill-cyan-400' : 'text-text-muted hover:text-cyan-400'}`} />
+                            <button
+                              onClick={() => handleToggleSaveMessage(msg)}
+                              className={`w-7 h-7 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-dark-border/50'} hover:border-cyan-500/60 hover:bg-cyan-500/10 transition-all duration-150`}
+                              title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
+                            >
+                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-300 fill-cyan-300' : 'text-text-muted'}`} />
                             </button>
                           </div>
                           <p className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>

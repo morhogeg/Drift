@@ -2372,7 +2372,7 @@ function App() {
                     >
                       <div
                         className={`
-                          ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[250px]' : 'max-w-[85%]'} rounded-2xl px-5 ${
+                          ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[320px] sm:min-w-[360px] md:min-w-[420px]' : 'max-w-[85%]'} rounded-2xl px-5 ${
                             (isDriftMessage && !msg.isUser) || isSinglePushMessage
                               ? 'pt-10 pb-3'
                               : (!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3')
@@ -2646,9 +2646,9 @@ function App() {
                       )}
                       
                       {/* Inline, compact drift header: model tag + From/Q in one row */}
-                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
+                          {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
                         <div 
-                          className="absolute top-2 left-3 right-3 flex items-center gap-2 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet/90 transition-colors duration-150 z-20 pointer-events-auto"
+                          className="absolute top-2 left-3 right-3 flex items-center gap-2 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet/90 transition-colors duration-150 z-20 pointer-events-auto overflow-hidden"
                           style={{ minWidth: '220px' }}
                           onClick={(e) => {
                             // Prevent event bubbling to parent message click
@@ -2745,8 +2745,8 @@ function App() {
                               {msg.modelTag}
                             </span>
                           )}
-                          {/* Compact meta: About and Q — always fully visible, allow wrapping */}
-                          <span className="whitespace-normal break-words">
+                          {/* Compact meta: About and Q — single line, no truncation */}
+                          <span className="whitespace-nowrap">
                             <span className="text-text-secondary/80">About:</span> "{msg.driftPushMetadata?.selectedText}"
                             {msg.driftPushMetadata?.userQuestion && (
                               <>
