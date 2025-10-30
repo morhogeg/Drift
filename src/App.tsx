@@ -88,9 +88,9 @@ function App() {
   const [streamingResponse, setStreamingResponse] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
   // Model selection for main chat (multi-provider broadcast)
-  type Provider = 'dummy' | 'openrouter' | 'ollama'
+  type Provider = 'openrouter' | 'ollama'
   type Target = { provider: Provider, key: string, label: string }
-  const DEFAULT_TARGET: Target = { provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }
+  const DEFAULT_TARGET: Target = { provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }
   const [selectedTargets, setSelectedTargets] = useState<Target[]>([DEFAULT_TARGET])
   // Broadcast grouping state
   const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
@@ -119,10 +119,15 @@ function App() {
   }, [activeChatId])
   const setSelectedTargetsPersist = (targets: Target[]) => {
     // Deduplicate by key
-    const allowed = new Set(['dummy-basic','openrouter','ollama'])
+    // Allow legacy keys for migration
+    const allowed = new Set(['qwen3','oss','ollama','dummy-basic','openrouter'])
     const map = new Map<string, Target>()
     for (const t of targets) {
-      if (allowed.has(t.key)) map.set(t.key, t)
+      // Migrate legacy keys to new ones
+      const key = t.key === 'dummy-basic' ? 'qwen3' : (t.key === 'openrouter' ? 'oss' : t.key)
+      const provider = t.provider === ('openrouter' as Provider) || t.provider === ('ollama' as Provider) ? t.provider : 'openrouter'
+      const label = key === 'qwen3' ? 'Qwen3' : key === 'oss' ? 'OpenAI OSS' : t.label
+      if (allowed.has(key)) map.set(key, { provider, key, label })
     }
     const final = map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
     setSelectedTargets(final)
@@ -205,7 +210,7 @@ function App() {
   }, [messages])
 
   // Inline list link processing for ReactMarkdown children (recursive, preserves formatting)
-  const processEntityText = (children: React.ReactNode, messageId: string): React.ReactNode => {
+  const processEntityText = (children: React.ReactNode, _messageId: string): React.ReactNode => {
     // per-call limit to avoid clutter
     let remaining = 5
 
@@ -643,56 +648,49 @@ function App() {
             setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
             const tasks: Promise<void>[] = []
             for (const t of targets) {
-              if (t.provider === 'dummy') {
-                // Replace Dummy with OpenRouter Qwen3 model
-                const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+              if (t.provider === 'openrouter') {
+                const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+                const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
                 if (!apiKey) {
                   throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
                 }
+                const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
                 tasks.push(
                   streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                    sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, OPENROUTER_MODELS.QWEN3)
+                    sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, model as any)
                   , t.label, broadcastGroupId)
                 )
-              } else if (t.provider === 'openrouter') {
-                const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-                tasks.push(
-                  streamIntoNewMessage(async (msgs, onChunk, signal) => 
-                    sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-                  , 'OpenAI OSS', broadcastGroupId)
-                )
               } else if (t.provider === 'ollama') {
+                const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+                const url = preset?.serverUrl || aiSettings.ollamaUrl
+                const model = preset?.model || aiSettings.ollamaModel
                 tasks.push(
                   streamIntoNewMessage(async (msgs, onChunk, signal) => {
-                    await sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-                  }, 'Ollama', broadcastGroupId)
+                    await sendMessageToOllama(msgs, onChunk, signal!, url, model)
+                  }, t.label, broadcastGroupId)
                 )
               }
             }
             await Promise.allSettled(tasks)
           } else {
             const t = targets[0]
-            if (t.provider === 'dummy') {
-              // Replace Dummy with OpenRouter Qwen3 model
-              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
+            if (t.provider === 'openrouter') {
+              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
               if (!apiKey) {
                 throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
               }
+              const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
               await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, OPENROUTER_MODELS.QWEN3)
+                sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, model as any)
               , t.label, undefined, activeStrandId || undefined, undefined)
-            } else if (t.provider === 'openrouter') {
-              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-              if (!apiKey) {
-                throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-              }
-              await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, aiSettings.openRouterModel)
-              , 'OpenAI OSS', undefined, activeStrandId || undefined, undefined)
             } else if (t.provider === 'ollama') {
+              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+              const url = preset?.serverUrl || aiSettings.ollamaUrl
+              const model = preset?.model || aiSettings.ollamaModel
               await streamIntoNewMessage(async (msgs, onChunk, signal) => {
-                await sendMessageToOllama(msgs, onChunk, signal!, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-              }, 'Ollama', undefined, activeStrandId || undefined, undefined)
+                await sendMessageToOllama(msgs, onChunk, signal!, url, model)
+              }, t.label, undefined, activeStrandId || undefined, undefined)
             }
           }
         }
@@ -778,9 +776,9 @@ function App() {
       if (targetId) setContinueFromMessageId(targetId)
       // Normalize to current model labels
       if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
-        setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-basic', label: 'Qwen3' }])
+        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
       } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
-        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'openrouter', label: 'OpenAI OSS' }])
+        setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
       } else if (modelTag === 'Ollama') {
         setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
       }
@@ -1327,7 +1325,9 @@ function App() {
     
     // Determine originating model and side (for broadcast alignment)
     const originMsg = messages.find(m => m.id === originalSourceId)
-    const originModelTag = originMsg?.modelTag
+    // Prefer the model tag from the drift messages being pushed (e.g., from a specific compare lane)
+    const driftModelTag = driftMessages.find(m => !m.isUser && !!m.modelTag)?.modelTag
+    const originModelTag = driftModelTag || originMsg?.modelTag
     let originSide: 'left' | 'right' | undefined = undefined
     if (originMsg?.broadcastGroupId) {
       // Find order of messages within this broadcast group to infer side
@@ -3134,12 +3134,13 @@ function App() {
         aiSettings={aiSettings}
         existingMessages={driftContext?.existingMessages}
         driftChatId={driftContext?.driftChatId}
+        selectedTargets={selectedTargets}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1) return targets[0].provider as 'dummy' | 'openrouter' | 'ollama'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama'
           if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
           if (targets.some(t => t.provider === 'ollama')) return 'ollama'
-          return 'dummy'
+          return 'openrouter'
         })()}
         onExpandedChange={(expanded) => setDriftExpanded(expanded)}
       />
