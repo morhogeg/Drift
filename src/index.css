@@ -199,6 +199,20 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   display: none; /* Chrome, Safari, Opera */
 }
 
+/* Subtle glow for pushed Drift messages */
+.drift-push-glow {
+  /* soft outer glow + thin pink outline */
+  box-shadow:
+    0 0 0 1px rgba(236, 72, 153, 0.18),
+    0 0 12px rgba(236, 72, 153, 0.08);
+}
+
+.drift-push-glow:hover {
+  box-shadow:
+    0 0 0 1px rgba(236, 72, 153, 0.22),
+    0 0 16px rgba(236, 72, 153, 0.12);
+}
+
 /* Show scrollbar only when scrollable class is added */
 .custom-scrollbar.scrollable {
   scrollbar-width: thin; /* Firefox */

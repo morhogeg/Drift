@@ -2380,9 +2380,9 @@ function App() {
                           ${msg.isUser 
                             ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
                             : isSinglePushMessage
-                              ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer'
+                              ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer drift-push-glow'
                               : isDriftMessage
-                                ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60'
+                                ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
                                 : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                           }
                           transition-all duration-100 hover:scale-[1.02]
@@ -2637,7 +2637,7 @@ function App() {
                         </div>
                       )}
                       {/* Add Drift tag: show on first drift bubble (including single pushes) */}
-                      {(isDriftMessage && isFirstDriftMessage) && (
+                      {(isDriftMessage && (isFirstDriftMessage || isSinglePushMessage)) && (
                         <div 
                           className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md opacity-80 group-hover:opacity-100"
                         >
