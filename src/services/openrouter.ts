@@ -21,15 +21,118 @@ export interface OpenRouterResponse {
 }
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models'
 
 export const OPENROUTER_MODELS = {
+  // Free models
+  QWEN3: 'qwen/qwen3-235b-a22b:free',
   OSS: 'openai/gpt-oss-20b:free',
-  QWEN3: 'qwen/qwen3-235b-a22b:free'
+  OSS_20B: 'openai/gpt-oss-20b:free',
+  GEMINI_FLASH: 'google/gemini-2.0-flash-exp:free',
+  LLAMA4_MAVERICK: 'meta-llama/llama-4-maverick:free',
+  DEEPSEEK_R1: 'deepseek/deepseek-r1:free',
+
+  // Paid (user needs credits)
+  CLAUDE_HAIKU: 'anthropic/claude-haiku-4-5',
+  GPT4O_MINI: 'openai/gpt-4o-mini',
+  GEMINI_FLASH_PAID: 'google/gemini-2.0-flash-001',
 } as const
 
 export type OpenRouterModel = typeof OPENROUTER_MODELS[keyof typeof OPENROUTER_MODELS]
 
-export async function checkOpenRouterConnection(apiKey: string, model: OpenRouterModel = OPENROUTER_MODELS.OSS): Promise<boolean> {
+// ---------------------------------------------------------------------------
+// Model discovery
+// ---------------------------------------------------------------------------
+
+export interface OpenRouterModelInfo {
+  id: string
+  name: string
+  pricing: {
+    prompt: string
+    completion: string
+  }
+  context_length: number
+  description?: string
+}
+
+interface OpenRouterModelsResponse {
+  data: OpenRouterModelInfo[]
+}
+
+/** Fetches the full model list from OpenRouter and returns free-tier models. */
+export async function listAvailableModels(apiKey: string): Promise<OpenRouterModelInfo[]> {
+  if (!apiKey || apiKey.trim() === '') {
+    return []
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(OPENROUTER_MODELS_URL, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'HTTP-Referer': window.location.origin || 'http://localhost:3000',
+        'X-Title': 'Drift AI Chat',
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      console.error('Failed to fetch OpenRouter model list:', response.status)
+      return []
+    }
+
+    const json: OpenRouterModelsResponse = await response.json()
+    const models = json.data ?? []
+
+    // Return only free models (those with ":free" suffix in id or zero pricing)
+    return models.filter(m =>
+      m.id.endsWith(':free') ||
+      (parseFloat(m.pricing?.prompt ?? '1') === 0 && parseFloat(m.pricing?.completion ?? '1') === 0)
+    )
+  } catch (error) {
+    if (error instanceof Error && error.name !== 'AbortError') {
+      console.error('listAvailableModels error:', error)
+    }
+    return []
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight key validation via /models endpoint
+// ---------------------------------------------------------------------------
+
+async function validateApiKeyViaModels(apiKey: string): Promise<boolean> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+    const response = await fetch(OPENROUTER_MODELS_URL, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'HTTP-Referer': window.location.origin || 'http://localhost:3000',
+        'X-Title': 'Drift AI Chat',
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+    console.log('API key validation via /models:', response.status)
+    return response.ok
+  } catch (error) {
+    if (error instanceof Error && error.name !== 'AbortError') {
+      console.error('validateApiKeyViaModels error:', error)
+    }
+    return false
+  }
+}
+
+export async function checkOpenRouterConnection(apiKey: string, model: OpenRouterModel = OPENROUTER_MODELS.QWEN3): Promise<boolean> {
   console.log('Checking OpenRouter connection...')
   console.log('Model:', model)
   console.log('API Key present:', !!apiKey)
@@ -102,20 +205,30 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
           }
         }
         
+        // If the test model failed due to model-specific issues (404/429/503),
+        // fall back to a lightweight /models endpoint check so we can confirm
+        // that the API key itself is valid even when a free model is unavailable.
+        if (response.status !== 401) {
+          console.log('Test model unavailable — falling back to /models endpoint check')
+          return validateApiKeyViaModels(apiKey)
+        }
+
         return false
       } catch (e) {
-        // Not JSON, already logged as text
+        // errorText was not JSON — already logged as text
       }
     }
-    
+
     return response.ok
   } catch (error) {
     console.error('OpenRouter connection check failed:', error)
     if (error instanceof Error) {
       if (error.name === 'AbortError') {
-        console.error('Connection check timed out after 5 seconds')
+        console.error('Connection check timed out — falling back to /models endpoint check')
+        // Timeout on chat endpoint — still try lightweight models endpoint
+        return validateApiKeyViaModels(apiKey)
       } else if (error.message.includes('Failed to fetch')) {
-        console.error('Network error. Check if you have internet connection and CORS is not blocking the request.')
+        console.error('Network error. Check internet connection and CORS.')
       }
     }
     return false
