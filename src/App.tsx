@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
@@ -77,6 +77,13 @@ function App() {
   const message = chatStore.inputText
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
+
+  const theme = uiStore.theme
+
+  // Apply theme class to <html> on mount and when theme changes
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+  }, [theme])
 
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
@@ -1159,7 +1166,7 @@ function App() {
 
   // ── JSX ─────────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[100dvh] flex bg-dark-bg relative overflow-hidden">
+    <div className="h-full flex bg-dark-bg relative">
       <ToastContainer />
       {/* Gradient overlay for depth */}
       <div className="absolute inset-0 bg-gradient-to-br from-dark-bg via-dark-surface/50 to-dark-bg pointer-events-none" />
@@ -1181,23 +1188,9 @@ function App() {
         shadow-[inset_-8px_0_10px_-8px_rgba(0,0,0,0.4)]
       `}>
         {/* Sidebar Header */}
-        <div className="p-3 border-b border-dark-border/30">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-medium text-text-secondary">Chat History</h2>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => uiStore.setSidebarOpen(false)}
-                className="p-1 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
-              </button>
-            </div>
-          </div>
-
+        <div className="px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
           {/* Search Bar */}
-          <div className="relative">
+          <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
             <input
               type="text"
@@ -1227,6 +1220,13 @@ function App() {
               </button>
             )}
           </div>
+          {/* Collapse button */}
+          <button
+            onClick={() => uiStore.setSidebarOpen(false)}
+            className="p-1.5 hover:bg-dark-elevated rounded-lg transition-colors duration-75 flex-shrink-0"
+          >
+            <ChevronLeft className="w-3.5 h-3.5 text-text-muted" />
+          </button>
         </div>
 
         {/* Chat List */}
@@ -1234,7 +1234,7 @@ function App() {
           {sortedChats.map((chat) => (
             <div
               key={chat.id}
-              onClick={() => switchChat(chat.id)}
+              onClick={() => { switchChat(chat.id); uiStore.setSidebarOpen(false) }}
               onContextMenu={(e) => handleContextMenu(e, chat.id)}
               className={`
                 group relative rounded-lg p-2.5 cursor-pointer
@@ -1255,18 +1255,7 @@ function App() {
                 <Star className="absolute top-2 right-7 w-3 h-3 text-yellow-400 fill-yellow-400" />
               )}
 
-              <div className="flex items-start gap-3">
-                {chat.metadata?.isDrift ? (
-                  <GitBranch className={`
-                    w-3.5 h-3.5 mt-0.5 flex-shrink-0
-                    ${activeChatId === chat.id ? 'text-accent-violet' : 'text-text-muted'}
-                  `} />
-                ) : (
-                  <MessageCircle className={`
-                    w-3.5 h-3.5 mt-0.5 flex-shrink-0
-                    ${activeChatId === chat.id ? 'text-accent-pink' : 'text-text-muted'}
-                  `} />
-                )}
+              <div className="flex items-start gap-0">
                 <div className="flex-1 min-w-0">
                   {editingChatId === chat.id ? (
                     <input
@@ -1307,6 +1296,17 @@ function App() {
               )}
             </div>
           ))}
+        </div>
+
+        {/* Settings */}
+        <div className="border-t border-dark-border/30 px-2 py-1">
+          <button
+            onClick={() => uiStore.setSettingsOpen(true)}
+            className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
+          >
+            <SettingsIcon className="w-4 h-4 text-text-muted" />
+            AI Settings
+          </button>
         </div>
 
         {/* Sidebar Footer: current user with menu */}
@@ -1363,7 +1363,7 @@ function App() {
       `}>
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
-          <div className="px-3 py-1.5 flex items-center justify-between">
+          <div className="px-2 py-0.5 flex items-center justify-between">
             <div className="flex items-center gap-4">
               {!sidebarOpen ? (
                 <>
@@ -1381,15 +1381,6 @@ function App() {
               )}
 
               <div className="flex items-center gap-2">
-                {/* New Chat Button */}
-                <button
-                  onClick={createNewChat}
-                  className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
-                  title="New chat (⌘⌥N)"
-                >
-                  <Plus className="w-4 h-4 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
-                </button>
-
                 {/* Snippet Gallery Button — hidden on mobile */}
                 <button
                   onClick={() => uiStore.setGalleryOpen(true)}
@@ -1406,19 +1397,14 @@ function App() {
               </div>
             </div>
 
-            <div className="flex-1 flex items-center justify-center">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-semibold text-text-secondary tracking-tight">Sidedrift</h1>
-              </div>
-            </div>
-
             <div className="flex items-center gap-2">
+              {/* New Chat Button */}
               <button
-                onClick={() => uiStore.setSettingsOpen(true)}
-                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75"
-                title="AI settings"
+                onClick={createNewChat}
+                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                title="New chat (⌘⌥N)"
               >
-                <SettingsIcon className="w-4 h-4 text-text-muted" />
+                <Plus className="w-4 h-4 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
               </button>
               {/* Model picker — hidden on mobile */}
               <div className="hidden lg:flex">
@@ -2048,7 +2034,9 @@ function App() {
                                         result.push(
                                           <button
                                             key={`drift-${idx}-${drift.driftChatId}`}
-                                            onClick={() => {
+                                            onClick={(e) => {
+                                              e.preventDefault()
+                                              e.stopPropagation()
                                               if (drift.driftChatId.startsWith('drift-temp-')) {
                                                 const existingDriftMessages = driftStore.getTempConversation(drift.driftChatId)
                                                 handleStartDrift(drift.selectedText, msg.id, drift.driftChatId, existingDriftMessages)
@@ -2056,7 +2044,17 @@ function App() {
                                                 switchChat(drift.driftChatId)
                                               }
                                             }}
-                                            className="inline px-1.5 py-0.5 rounded
+                                            onTouchEnd={(e) => {
+                                              e.preventDefault()
+                                              e.stopPropagation()
+                                              if (drift.driftChatId.startsWith('drift-temp-')) {
+                                                const existingDriftMessages = driftStore.getTempConversation(drift.driftChatId)
+                                                handleStartDrift(drift.selectedText, msg.id, drift.driftChatId, existingDriftMessages)
+                                              } else {
+                                                switchChat(drift.driftChatId)
+                                              }
+                                            }}
+                                            className="inline px-1.5 py-0.5 rounded cursor-pointer
                                                      bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
                                                      border border-accent-violet/30 hover:border-accent-violet/50
                                                      text-accent-violet hover:text-accent-pink
@@ -2300,14 +2298,14 @@ function App() {
       {/* Profile Modal */}
       {profileOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#111111] border border-[#333333] rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-[#333333]">
-              <h2 className="text-lg font-semibold text-white">Profile</h2>
+          <div className="bg-dark-surface border border-dark-border rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-dark-border">
+              <h2 className="text-lg font-semibold text-text-primary">Profile</h2>
               <button
                 onClick={() => uiStore.setProfileOpen(false)}
-                className="p-2 hover:bg-[#222222] rounded-lg transition-colors"
+                className="p-2 hover:bg-dark-elevated rounded-lg transition-colors"
               >
-                <X className="w-5 h-5 text-[#9ca3af]" />
+                <X className="w-5 h-5 text-text-secondary" />
               </button>
             </div>
             <div className="p-5 space-y-4">
@@ -2316,13 +2314,13 @@ function App() {
                   {(currentUser?.[0]?.toUpperCase() || 'U')}
                 </div>
                 <div>
-                  <div className="text-white font-medium">{currentUser || 'User'}</div>
-                  <div className="text-xs text-[#9ca3af]">Local account</div>
+                  <div className="text-text-primary font-medium">{currentUser || 'User'}</div>
+                  <div className="text-xs text-text-secondary">Local account</div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#333333] text-sm text-white hover:border-[#444444]"
+                  className="px-3 py-1.5 rounded-lg bg-dark-elevated border border-dark-border text-sm text-text-primary hover:border-dark-border/80"
                   onClick={() => { navigator.clipboard?.writeText(currentUser || '') }}
                 >
                   Copy username

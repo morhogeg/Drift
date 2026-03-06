@@ -1,43 +1,58 @@
 # Drift — Session Handoff
 
 **Date:** March 6, 2026
-**Branch:** `main`
-**Status:** Fully working on iOS simulator (Capacitor). Google Search grounding active. API key secured in `.env`.
+**Branch:** `feature/list-anchors-links`
+**Status:** Fully working on iOS (Capacitor/TestFlight). Light/dark theme system live.
 
 ---
 
 ## What Was Done This Session
 
-### 1. iOS / Capacitor Setup
-- Added `@capacitor/core`, `@capacitor/cli`, `@capacitor/ios` — Xcode project at `ios/`
-- Bundle ID: `com.morhogeg.drift` | Team: `8Y2M94RUHG`
-- App display name: **Sidedrift** (set in `Info.plist` + App Store Connect)
-- App Store Connect app record created manually (name "Drift", "Drift AI", "Drift - AI Chat" all taken)
-- Custom Y-fork app icon generated (thin pink→violet gradient arms, deep purple bg)
+### 1. iOS Keyboard Fix
+- `#root` changed from `height: 100dvh` to `height: 100%` (follows body height that Capacitor resizes)
+- Root div changed from `h-[100dvh] overflow-hidden` to `h-full` — allows layout to reflow when keyboard appears
+- Input field now stays above keyboard when tapped
 
-### 2. Mobile UI Optimization
-- **Login screen**: desktop container hidden on mobile (`hidden lg:flex`), mobile overlay `z-20`
-- **Sidebar**: starts closed on mobile (`window.innerWidth >= 1024` check in `uiStore.ts`)
-- **Backdrop**: dark blur overlay when sidebar opens on mobile
-- **Safe areas**: `pt-safe` / `pb-safe` utilities + `env(safe-area-inset-*)` on input/panel
-- **DriftPanel**: full-screen on mobile (`fixed inset-0`), desktop-only width via `lg:` prefix
-- **Layout**: `h-[100dvh]`, main content margins scoped to `lg:ml-[260px]`
-- **iOS polish** in `index.css`: `-webkit-tap-highlight-color: transparent`, `font-size: 16px` on inputs (prevents zoom), `overscroll-behavior: none`
+### 2. Header Cleanup
+- Removed "Sidedrift" title from header
+- Plus (new chat) button moved to right side of header (where Settings was)
+- Settings removed from header — now lives in sidebar footer
+- Header height shrunk: `py-1.5` → `py-0.5`, `px-3` → `px-2`
 
-### 3. API Key Security Fix
-- Old key `AIzaSyAAQ4C79flJfL1Ggn2zukbhpMizA6hQ2RU` was hardcoded and leaked to git
-- **New key** moved to `.env` (gitignored): `VITE_GEMINI_API_KEY=...`
-- `settingsStorage.ts` fallback changed to empty string — settings UI opens if key missing
+### 3. Sidebar Cleanup
+- Removed "Chat History" label
+- Search bar and collapse arrow combined into single row
+- Chat item icons (MessageCircle, GitBranch) removed
+- Tapping a chat now auto-closes sidebar (`switchChat` + `setSidebarOpen(false)`)
 
-### 4. Google Search Grounding
-- Already implemented (`tools: [{ google_search: {} }]`) and working
-- Improved 400 fallback: now logs actual error body, only strips grounding if the error is specifically about the tool (checks for `google_search`/`tool`/`INVALID_ARGUMENT` in error text)
+### 4. Light/Dark Theme System
+- Tailwind `darkMode: 'class'` strategy
+- CSS variables as RGB triplets in `:root` (light) and `.dark` (dark) — supports opacity modifiers
+- `uiStore.ts` — `theme: 'dark' | 'light'`, `setTheme()`, persisted to localStorage, applies `dark` class to `<html>`
+- Defaults to dark theme
 
-### 5. Header & UI Polish
-- Header tightened: `py-2.5` → `py-1.5`, icons `w-5` → `w-4`
-- App name changed: "Drift" → "Sidedrift", centered in header
-- Send button: visual circle reduced from 44px to `w-7 h-7` (28px), tap target stays 44px
-- Stop button: subtle white/border style instead of gradient
+### 5. Settings Screen Redesign
+- Full panel redesign: sections (MODELS, APPEARANCE, ADVANCED), clean rows, custom toggle switches
+- API keys moved inside each model's expanded section (no separate API KEYS section)
+- Theme toggle in APPEARANCE section — live dark/light switch
+
+### 6. DriftPanel Redesign
+- Slim header: chevron-down close + selected text (italic) + expand — no "DRIFT" label
+- Removed quote block (selected text now lives in header)
+- User bubbles: `max-w-[75%]` subtle violet-tinted, not gradient blobs
+- AI bubbles: transparent background, clean typography
+- Push/Save actions: slim bar below header, only shown when messages exist
+- Typing indicator: 3 bare dots, no container
+
+### 7. Drift Link Tap on iOS
+- Added `onTouchEnd` + `e.preventDefault()` + `e.stopPropagation()` to inline drift link buttons in main chat
+- Prevents iOS text-selection handler from swallowing the tap
+- Both temp drifts (in panel) and saved drift chats now open correctly on tap
+
+### 8. iOS Text Selection for Drift
+- `SelectionTooltip.tsx`: added `selectionchange` (debounced 300ms) and `touchend` (350ms delay) listeners
+- Uses `getBoundingClientRect()` for tooltip positioning on mobile
+- Tooltip buttons have `onTouchStart`/`onTouchEnd` to prevent selection loss
 
 ---
 
@@ -45,27 +60,26 @@
 
 ```
 src/
-  App.tsx                    ~2311 lines
+  App.tsx                    ~2350 lines
   store/
     chatStore.ts             chat sessions + IndexedDB persistence
     driftStore.ts            drift panel open/closed + temp conversations
     modelStore.ts            selected targets + per-chat model prefs
-    uiStore.ts               panels, hover/copy/scroll state
+    uiStore.ts               panels + theme (dark/light) state
   services/
     gemini.ts                PRIMARY — Gemini REST + SSE + grounding
     openrouter.ts            secondary
     ollama.ts                local models
     db.ts                    IndexedDB (idb)
-    settingsStorage.ts       localStorage settings (key from VITE_GEMINI_API_KEY)
+    settingsStorage.ts       localStorage settings
   components/
-    DriftPanel.tsx           full-screen on mobile, 450px on desktop
+    DriftPanel.tsx           redesigned side panel
+    SelectionTooltip.tsx     iOS-aware text selection tooltip
+    Settings.tsx             redesigned settings panel
     Login.tsx                mobile + desktop layouts
-    Settings.tsx             model config UI
     HeaderControls.tsx       model picker chip
 ios/
   App/                       Capacitor Xcode project
-    App/Info.plist           CFBundleDisplayName = Sidedrift
-    App.xcodeproj/           bundle ID + signing team
 ```
 
 ---
@@ -76,7 +90,6 @@ ios/
 cd /Users/morhogeg/Drift
 npm run dev                            # web dev server
 npm run build && npx cap sync ios      # build + sync to Xcode
-# then open Xcode → run on simulator or device
 ```
 
 **API key**: create `.env` in project root:
@@ -88,15 +101,11 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-### Good next features
+- [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
 - [ ] **TestFlight submission** — archive in Xcode → upload to App Store Connect
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
 - [ ] **Multi-level drift** — drift from inside a drift conversation
-
-### Polish
-- [ ] App.tsx still ~2311 lines — could extract more custom hooks
-- [ ] Main chat message bubbles could get same design treatment as DriftPanel
-- [ ] Snippet Gallery not accessible on mobile (hidden on mobile currently)
+- [ ] **App.tsx refactor** — still ~2350 lines, could extract more hooks

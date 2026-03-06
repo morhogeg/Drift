@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -8,20 +9,20 @@ export default {
     extend: {
       colors: {
         dark: {
-          bg: '#111111',
-          surface: '#1a1a1a',
-          elevated: '#242424',
-          bubble: '#333333',
-          border: '#444444',
+          bg: 'rgb(var(--color-bg) / <alpha-value>)',
+          surface: 'rgb(var(--color-surface) / <alpha-value>)',
+          elevated: 'rgb(var(--color-elevated) / <alpha-value>)',
+          bubble: 'rgb(var(--color-elevated) / <alpha-value>)',
+          border: 'rgb(var(--color-border) / <alpha-value>)',
         },
         accent: {
           pink: '#ff007a',
           violet: '#a855f7',
         },
         text: {
-          primary: '#ffffff',
-          secondary: '#cccccc',
-          muted: '#999999',
+          primary: 'rgb(var(--color-text-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--color-text-secondary) / <alpha-value>)',
+          muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
         }
       },
       fontFamily: {

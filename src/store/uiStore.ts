@@ -2,11 +2,29 @@
  * uiStore — pure UI state (panels open/closed, hover/copy transients, etc.)
  *
  * Nothing here is persisted because it represents ephemeral viewport state.
+ * Exception: `theme` is persisted to localStorage.
  */
 
 import { create } from 'zustand'
 
+type Theme = 'dark' | 'light'
+
+function getInitialTheme(): Theme {
+  if (typeof window === 'undefined') return 'dark'
+  const stored = localStorage.getItem('drift-theme')
+  if (stored === 'light' || stored === 'dark') return stored
+  return 'dark'
+}
+
+function applyTheme(theme: Theme) {
+  if (typeof document === 'undefined') return
+  document.documentElement.classList.toggle('dark', theme === 'dark')
+}
+
 interface UIStore {
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  theme: Theme
+
   // ── Panel visibility ───────────────────────────────────────────────────────
   sidebarOpen: boolean
   settingsOpen: boolean
@@ -39,6 +57,7 @@ interface UIStore {
   snippetCount: number
 
   // ── Actions ────────────────────────────────────────────────────────────────
+  setTheme: (theme: Theme) => void
   setSidebarOpen: (open: boolean) => void
   setSettingsOpen: (open: boolean) => void
   setGalleryOpen: (open: boolean) => void
@@ -72,6 +91,7 @@ interface UIStore {
 }
 
 export const useUIStore = create<UIStore>((set, get) => ({
+  theme: (() => { const t = getInitialTheme(); applyTheme(t); return t })(),
   sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 1024 : false,
   settingsOpen: false,
   galleryOpen: false,
@@ -87,6 +107,13 @@ export const useUIStore = create<UIStore>((set, get) => ({
   contextMenu: null,
   showScrollButton: false,
   snippetCount: 0,
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  setTheme: (theme) => {
+    localStorage.setItem('drift-theme', theme)
+    applyTheme(theme)
+    set({ theme })
+  },
 
   // ── Panel setters ──────────────────────────────────────────────────────────
   setSidebarOpen: (open) => set({ sidebarOpen: open }),

@@ -3,6 +3,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme variables ── */
+
+/* Light theme (default) — RGB triplets for Tailwind opacity modifier support */
+:root {
+  --color-bg: 245 245 247;
+  --color-surface: 255 255 255;
+  --color-elevated: 235 235 235;
+  --color-border: 209 209 214;
+  --color-text-primary: 28 28 30;
+  --color-text-secondary: 60 60 67;
+  --color-text-muted: 142 142 147;
+}
+
+/* Dark theme */
+.dark {
+  --color-bg: 10 10 10;
+  --color-surface: 17 17 17;
+  --color-elevated: 26 26 26;
+  --color-border: 51 51 51;
+  --color-text-primary: 255 255 255;
+  --color-text-secondary: 156 163 175;
+  --color-text-muted: 107 114 128;
+}
+
 /* ── Mobile-native global polish ── */
 
 /* FIX 1 — iOS momentum scrolling */
@@ -35,9 +59,12 @@ input, textarea, select {
 }
 
 /* iOS safe area and viewport height fixes */
-html, body, #root {
+html, body {
   height: 100%;
   height: 100dvh; /* dynamic viewport height — shrinks with keyboard on iOS */
+}
+#root {
+  height: 100%; /* follow body height (Capacitor resizes body when keyboard appears) */
 }
 
 /* Safe area padding utilities */
@@ -59,7 +86,7 @@ html, body, #root {
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     background-image:
-      linear-gradient(180deg, #111111 0%, #0a0a0a 100%),
+      linear-gradient(180deg, rgb(var(--color-surface)) 0%, rgb(var(--color-bg)) 100%),
       url('data:image/svg+xml,%3Csvg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)" opacity="0.02"/%3E%3C/svg%3E');
   }
 
@@ -88,7 +115,7 @@ html, body, #root {
 .custom-scrollbar {
   /* Firefox */
   scrollbar-width: thin;
-  scrollbar-color: #333333 transparent;
+  scrollbar-color: rgb(var(--color-border)) transparent;
 }
 
 /* Webkit browsers (Chrome, Safari, Edge) */
@@ -102,7 +129,7 @@ html, body, #root {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: rgb(var(--color-border));
   border-radius: 10px;
 }
 

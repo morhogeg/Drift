@@ -37,6 +37,7 @@ export default function SelectionTooltip({
   const showTimerRef = useRef<number | null>(null)
   const isTooltipHoveredRef = useRef(false)
   const lastAnchorRectRef = useRef<DOMRect | null>(null)
+  const selectionChangeTimerRef = useRef<number | null>(null)
 
   // --------------------------------------------------------------------------
   // Helpers
@@ -53,6 +54,13 @@ export default function SelectionTooltip({
     if (showTimerRef.current !== null) {
       window.clearTimeout(showTimerRef.current)
       showTimerRef.current = null
+    }
+  }, [])
+
+  const clearSelectionChangeTimer = useCallback(() => {
+    if (selectionChangeTimerRef.current !== null) {
+      window.clearTimeout(selectionChangeTimerRef.current)
+      selectionChangeTimerRef.current = null
     }
   }, [])
 
@@ -86,6 +94,90 @@ export default function SelectionTooltip({
     x <= rect.right + pad &&
     y >= rect.top - pad &&
     y <= rect.bottom + pad
+
+  // --------------------------------------------------------------------------
+  // Shared selection → tooltip logic (used by both mouse and touch paths)
+  // --------------------------------------------------------------------------
+
+  const tryShowTooltipFromSelection = useCallback(() => {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) return
+
+    const text = selection.toString().trim()
+    if (text.length <= MIN_SELECTION_LENGTH) return
+
+    const range = selection.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    if (!rect || (rect.width === 0 && rect.height === 0)) return
+    lastAnchorRectRef.current = rect
+
+    // Find the nearest .ai-message ancestor
+    const anchorEl = selection.anchorNode?.parentElement
+    const messageEl = anchorEl?.closest('[data-message-id]') ?? null
+    if (!messageEl) return
+
+    // Require the selection to be inside an .ai-message element
+    if (!anchorEl?.closest('.ai-message')) return
+
+    const msgId = messageEl.getAttribute('data-message-id')
+    if (!msgId) return
+
+    const isUserMessage =
+      messageEl.className.includes('from-accent-pink') ||
+      messageEl.className.includes('from-accent-violet')
+
+    savedDataRef.current = { text, messageId: msgId }
+
+    clearShowTimer()
+    showTimerRef.current = window.setTimeout(() => {
+      // Position above the selection, centred horizontally
+      const rawX = rect.left + rect.width / 2
+      const rawY = Math.max(rect.top - 10, 8)
+      const { x, y } = clampToViewport(rawX, rawY)
+
+      setTooltip({
+        visible: true,
+        x,
+        y,
+        text,
+        messageId: msgId,
+        isUserMessage,
+        anchorRect: rect,
+      })
+      showTimerRef.current = null
+    }, SHOW_DELAY_MS)
+  }, [clearShowTimer, clampToViewport])
+
+  // --------------------------------------------------------------------------
+  // Touch / iOS events
+  // --------------------------------------------------------------------------
+
+  useEffect(() => {
+    // touchend: wait for the browser to commit the selection after the finger lifts
+    const handleTouchEnd = () => {
+      window.setTimeout(() => {
+        tryShowTooltipFromSelection()
+      }, 350)
+    }
+
+    // selectionchange: fires when the user drags iOS selection handles
+    const handleSelectionChange = () => {
+      clearSelectionChangeTimer()
+      selectionChangeTimerRef.current = window.setTimeout(() => {
+        tryShowTooltipFromSelection()
+        selectionChangeTimerRef.current = null
+      }, 300)
+    }
+
+    document.addEventListener('touchend', handleTouchEnd, { passive: true })
+    document.addEventListener('selectionchange', handleSelectionChange, { passive: true })
+
+    return () => {
+      document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('selectionchange', handleSelectionChange)
+      clearSelectionChangeTimer()
+    }
+  }, [tryShowTooltipFromSelection, clearSelectionChangeTimer])
 
   // --------------------------------------------------------------------------
   // Mouse events
@@ -244,8 +336,9 @@ export default function SelectionTooltip({
     return () => {
       clearHideTimer()
       clearShowTimer()
+      clearSelectionChangeTimer()
     }
-  }, [clearHideTimer, clearShowTimer])
+  }, [clearHideTimer, clearShowTimer, clearSelectionChangeTimer])
 
   // --------------------------------------------------------------------------
   // Action handlers
@@ -313,6 +406,14 @@ export default function SelectionTooltip({
               e.preventDefault()
               e.stopPropagation()
             }}
+            onTouchStart={(e) => {
+              e.stopPropagation()
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleDrift()
+            }}
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -334,6 +435,14 @@ export default function SelectionTooltip({
           onMouseDown={(e) => {
             e.preventDefault()
             e.stopPropagation()
+          }}
+          onTouchStart={(e) => {
+            e.stopPropagation()
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleSave()
           }}
           onClick={(e) => {
             e.preventDefault()

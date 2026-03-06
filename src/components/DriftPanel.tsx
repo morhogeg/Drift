@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone } from 'lucide-react'
+import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import { sendMessageToGemini, type ChatMessage as GeminiMessage } from '../services/gemini'
@@ -655,101 +655,93 @@ export default function DriftPanel({
     `}>
       {/* Panel */}
       <div className={`
-        w-full h-full bg-[#0d0d12]
+        w-full h-full bg-dark-bg
         border-l border-accent-violet/[0.12]
         shadow-[-8px_0_60px_rgba(168,85,247,0.08)]
         flex flex-col overflow-hidden
       `}>
         {/* Header */}
-        <header className="relative z-10 border-b border-white/[0.05] bg-[#0f0f15]/95 backdrop-blur-xl pt-safe">
-          {/* Top bar: brand + controls */}
-          <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-br from-accent-pink to-accent-violet shrink-0" />
-              <span className="text-[10px] font-bold tracking-[0.15em] uppercase bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">
-                Drift
-              </span>
-            </div>
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => setIsExpanded(v => !v)}
-                className="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
-                title={isExpanded ? 'Collapse panel' : 'Expand panel'}
-              >
-                {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className={`w-3.5 h-3.5 ${showExpandHint ? 'text-accent-pink' : ''}`} />}
-              </button>
-              <button
-                onClick={() => onClose(driftOnlyMessages)}
-                className="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
-                title="Close"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Selected text context block */}
-          <div className="px-4 pb-3">
-            <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-accent-violet/[0.07] border border-accent-violet/[0.15]">
-              <div className="w-0.5 self-stretch bg-gradient-to-b from-accent-pink to-accent-violet rounded-full shrink-0 mt-0.5" />
-              <p
-                className="text-[12px] text-text-secondary/90 leading-relaxed italic line-clamp-2"
-                title={selectedText}
-              >
-                "{selectedText}"
-              </p>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="px-4 pb-3 flex items-center gap-1.5">
+        <header className="relative z-10 border-b border-white/[0.05] bg-dark-surface/95 backdrop-blur-xl pt-safe">
+          {/* Slim header bar: close | selected text | expand */}
+          <div className="px-2 py-1 flex items-center gap-1 min-h-[44px]">
+            {/* Close / back button */}
             <button
-              onClick={handlePushToMain}
-              disabled={isPushing || (!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
-                border transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed
-                ${pushedToMain
-                  ? 'text-accent-pink border-accent-pink/40 bg-accent-pink/10'
-                  : 'text-text-muted border-white/10 bg-white/[0.03] hover:border-accent-violet/40 hover:text-accent-violet hover:bg-accent-violet/[0.08]'}
-              `}
-              title={isPushing ? 'Pushing...' : pushedToMain ? 'Undo push to main' : 'Push to main chat'}
+              onClick={() => onClose(driftOnlyMessages)}
+              className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors shrink-0"
+              title="Close"
             >
-              {pushedToMain ? <Undo2 className="w-3 h-3" /> : <ArrowLeft className="w-3 h-3" />}
-              {pushedToMain ? 'Undo' : 'Push'}
+              <ChevronDown className="w-4 h-4" />
             </button>
 
-            {selectedTargets && selectedTargets.length > 1 && (
+            {/* Selected text — acts as the title */}
+            <p
+              className="flex-1 text-[12px] italic text-text-muted/70 truncate text-center px-1 select-none"
+              title={selectedText}
+            >
+              "{selectedText}"
+            </p>
+
+            {/* Expand button */}
+            <button
+              onClick={() => setIsExpanded(v => !v)}
+              className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors shrink-0"
+              title={isExpanded ? 'Collapse panel' : 'Expand panel'}
+            >
+              {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className={`w-3.5 h-3.5 ${showExpandHint ? 'text-accent-pink' : ''}`} />}
+            </button>
+          </div>
+
+          {/* Action bar — only visible when there are messages to act on */}
+          {driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length > 0 && (
+            <div className="px-3 pb-2 flex items-center gap-1.5">
               <button
-                onClick={handleCompareAcrossModels}
-                disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
+                onClick={handlePushToMain}
+                disabled={isPushing || (!pushedToMain && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0)}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
                   border transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed
-                  ${isComparing
-                    ? 'text-accent-violet border-accent-violet/50 bg-accent-violet/[0.08]'
+                  ${pushedToMain
+                    ? 'text-accent-pink border-accent-pink/40 bg-accent-pink/10'
                     : 'text-text-muted border-white/10 bg-white/[0.03] hover:border-accent-violet/40 hover:text-accent-violet hover:bg-accent-violet/[0.08]'}
                 `}
-                title="Compare answers from selected models"
+                title={isPushing ? 'Pushing...' : pushedToMain ? 'Undo push to main' : 'Push to main chat'}
               >
-                <Megaphone className="w-3 h-3" />
-                {isComparing ? 'Comparing…' : 'Compare'}
+                {pushedToMain ? <Undo2 className="w-3 h-3" /> : <ArrowLeft className="w-3 h-3" />}
+                {pushedToMain ? 'Undo' : 'Push'}
               </button>
-            )}
 
-            <button
-              onClick={handleSaveAsChat}
-              disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
-                border transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed
-                ${savedAsChat
-                  ? 'text-cyan-300 border-cyan-500/40 bg-cyan-500/[0.08]'
-                  : 'text-text-muted border-white/10 bg-white/[0.03] hover:border-cyan-400/40 hover:text-cyan-300 hover:bg-cyan-500/[0.08]'}
-              `}
-              title={savedAsChat ? 'Undo save as chat' : 'Save as new chat'}
-            >
-              {savedAsChat ? <Undo2 className="w-3 h-3" /> : <Save className="w-3 h-3" />}
-              {savedAsChat ? 'Saved' : 'Save'}
-            </button>
-          </div>
+              {selectedTargets && selectedTargets.length > 1 && (
+                <button
+                  onClick={handleCompareAcrossModels}
+                  disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
+                    border transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed
+                    ${isComparing
+                      ? 'text-accent-violet border-accent-violet/50 bg-accent-violet/[0.08]'
+                      : 'text-text-muted border-white/10 bg-white/[0.03] hover:border-accent-violet/40 hover:text-accent-violet hover:bg-accent-violet/[0.08]'}
+                  `}
+                  title="Compare answers from selected models"
+                >
+                  <Megaphone className="w-3 h-3" />
+                  {isComparing ? 'Comparing…' : 'Compare'}
+                </button>
+              )}
+
+              <button
+                onClick={handleSaveAsChat}
+                disabled={!savedAsChat && driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length === 0}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
+                  border transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed
+                  ${savedAsChat
+                    ? 'text-cyan-300 border-cyan-500/40 bg-cyan-500/[0.08]'
+                    : 'text-text-muted border-white/10 bg-white/[0.03] hover:border-cyan-400/40 hover:text-cyan-300 hover:bg-cyan-500/[0.08]'}
+                `}
+                title={savedAsChat ? 'Undo save as chat' : 'Save as new chat'}
+              >
+                {savedAsChat ? <Undo2 className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+                {savedAsChat ? 'Saved' : 'Save'}
+              </button>
+            </div>
+          )}
         </header>
         
         {/* Messages */}
@@ -783,7 +775,7 @@ export default function DriftPanel({
                         onMouseLeave={() => setHoveredMessageId(null)}
                       >
                         <div className="relative" data-drift-message-id={col.id}>
-                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-[#13131a] border border-white/[0.08] text-text-secondary min-h-[40px]">
+                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-dark-elevated border border-white/[0.08] text-text-secondary min-h-[40px]">
                             {/* Overlay header chips: model tag (left) + actions (right) */}
                             {!col.isUser && (
                               <>
@@ -831,70 +823,64 @@ export default function DriftPanel({
                   onMouseEnter={() => setHoveredMessageId(msg.id)}
                   onMouseLeave={() => setHoveredMessageId(null)}
                 >
-                  <div className="relative max-w-[85%]" data-drift-message-id={msg.id}>
-                    <div className={`relative rounded-2xl ${msg.isUser ? 'px-3.5 py-2.5 bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-[0_4px_24px_rgba(168,85,247,0.22)]' : 'px-3.5 pt-6 pb-3 bg-[#13131a] border border-white/[0.08] text-text-secondary'}`}>
-                      {/* Overlay header for assistant: model tag and actions */}
-                      {!msg.isUser && (
-                        <>
-                          {msg.modelTag && (
-                            <span className="absolute top-1 left-1 px-1 py-0.5 rounded bg-dark-elevated/70 border border-dark-border/50 text-[10px] text-text-muted">
-                              {msg.modelTag}
-                            </span>
-                          )}
-                          <div className="absolute top-1 right-1 flex items-center gap-1.5 opacity-80 hover:opacity-100">
-                            <button
-                              onClick={() => handlePushSingleMessage(msg)}
-                              className="w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border border-dark-border/50 hover:border-accent-pink/60 hover:bg-accent-pink/10 transition-all duration-150"
-                              title="Push this message to main chat"
-                            >
-                              <ArrowLeft className="w-3 h-3 text-text-muted" />
-                            </button>
-                            <button
-                              onClick={() => handleToggleSaveMessage(msg)}
-                              className={`w-6 h-6 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-dark-border/50'} hover:border-cyan-500/60 hover:bg-cyan-500/10 transition-all duration-150`}
-                              title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
-                            >
-                              <Bookmark className={`w-3 h-3 ${savedMessageIds.has(msg.id) ? 'text-cyan-300 fill-cyan-300' : 'text-text-muted'}`} />
-                            </button>
-                          </div>
-                        </>
+                  {msg.isUser ? (
+                    /* User bubble — subtle, not garish */
+                    <div
+                      className="relative max-w-[75%]"
+                      data-drift-message-id={msg.id}
+                    >
+                      <div className="px-4 py-2.5 bg-accent-violet/15 border border-accent-violet/25 rounded-2xl rounded-br-md">
+                        <p className={`text-sm text-text-primary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    /* AI response — transparent, clean */
+                    <div
+                      className="relative w-full"
+                      data-drift-message-id={msg.id}
+                    >
+                      {msg.modelTag && (
+                        <span className="block mb-1 text-[10px] text-text-muted/60 pl-1">{msg.modelTag}</span>
                       )}
-                      {msg.isUser ? (
-                        <>
-                          <div className="flex items-center justify-end mb-1">
-                            <button
-                              onClick={() => handleToggleSaveMessage(msg)}
-                              className={`w-7 h-7 inline-flex items-center justify-center rounded-full bg-dark-elevated/70 border ${savedMessageIds.has(msg.id) ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-dark-border/50'} hover:border-cyan-500/60 hover:bg-cyan-500/10 transition-all duration-150`}
-                              title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
-                            >
-                              <Bookmark className={`w-3.5 h-3.5 ${savedMessageIds.has(msg.id) ? 'text-cyan-300 fill-cyan-300' : 'text-text-muted'}`} />
-                            </button>
-                          </div>
-                          <p className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>
-                        </>
-                      ) : (
-                        <div className={`${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
-                          <ReactMarkdown className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20" remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <p className="mb-2">{children}</p>, br: () => <br />, table: ({children}) => (<div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>) }}>
+                      <div className="px-1 pb-1">
+                        <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
+                          <ReactMarkdown className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20" remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <p className="mb-2">{children}</p>, br: () => <br />, table: ({children}) => (<div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>) }}>
                             {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                           </ReactMarkdown>
                         </div>
-                      )}
+                        {/* Action row — visible on hover (desktop) or always on mobile */}
+                        <div className="mt-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 lg:opacity-0 lg:group-hover:opacity-100">
+                          <button
+                            onClick={() => handlePushSingleMessage(msg)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.08] transition-all duration-150"
+                            title="Push this message to main chat"
+                          >
+                            <ArrowLeft className="w-3 h-3" />
+                            Push
+                          </button>
+                          <button
+                            onClick={() => handleToggleSaveMessage(msg)}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] transition-all duration-150 ${savedMessageIds.has(msg.id) ? 'text-cyan-300 bg-cyan-500/[0.08]' : 'text-text-muted hover:text-cyan-300 hover:bg-cyan-500/[0.08]'}`}
+                            title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
+                          >
+                            <Bookmark className={`w-3 h-3 ${savedMessageIds.has(msg.id) ? 'fill-cyan-300' : ''}`} />
+                            {savedMessageIds.has(msg.id) ? 'Saved' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    
-                  </div>
+                  )}
                 </div>
               )
             })
           })()}
           
           {isTyping && (
-            <div className="flex justify-start">
-              <div className="bg-[#13131a] border border-white/[0.08] rounded-2xl px-4 py-3">
-                <div className="flex gap-1.5 items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-accent-pink to-accent-violet animate-bounce opacity-80" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-accent-pink to-accent-violet animate-bounce opacity-80" style={{ animationDelay: '120ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-accent-pink to-accent-violet animate-bounce opacity-80" style={{ animationDelay: '240ms' }} />
-                </div>
+            <div className="flex justify-start pl-1">
+              <div className="flex gap-1 items-center py-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '120ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '240ms' }} />
               </div>
             </div>
           )}
@@ -904,8 +890,8 @@ export default function DriftPanel({
         
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 z-10">
-          <div className="h-8 bg-gradient-to-t from-[#0d0d12] to-transparent pointer-events-none" />
-          <div className="bg-[#0d0d12] px-4 pt-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+          <div className="h-8 bg-gradient-to-t from-dark-bg to-transparent pointer-events-none" />
+          <div className="bg-dark-bg px-4 pt-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
             <div className="relative">
               <textarea
                 ref={inputRef}
@@ -921,7 +907,7 @@ export default function DriftPanel({
                 rows={1}
                 dir={getTextDirection(message)}
                 className={`
-                  w-full bg-[#16161f] text-text-primary text-[13px]
+                  w-full bg-dark-elevated text-text-primary text-[13px]
                   rounded-2xl px-4 py-3 pr-12
                   border border-white/[0.08]
                   focus:outline-none focus:border-accent-violet/30
