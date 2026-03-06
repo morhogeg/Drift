@@ -140,11 +140,16 @@ export async function sendMessageToGemini(
   try {
     response = await doFetch(body)
 
-    // If grounding caused a 400, retry without it (not all models/keys support it)
+    // If grounding caused a 400 specifically about tools/search, retry without it
     if (!response.ok && response.status === 400 && useGrounding) {
-      console.warn('[gemini] Grounding returned 400 — retrying without google_search')
-      const { tools: _tools, ...bodyWithoutGrounding } = body as any
-      response = await doFetch(bodyWithoutGrounding)
+      const errBody = await response.clone().text().catch(() => '')
+      console.warn('[gemini] 400 with grounding:', errBody)
+      // Only strip grounding if the error is about the tool itself
+      if (errBody.includes('google_search') || errBody.includes('tool') || errBody.includes('INVALID_ARGUMENT')) {
+        console.warn('[gemini] Retrying without google_search grounding')
+        const { tools: _tools, ...bodyWithoutGrounding } = body as any
+        response = await doFetch(bodyWithoutGrounding)
+      }
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return

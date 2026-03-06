@@ -72,7 +72,7 @@ interface UIStore {
 }
 
 export const useUIStore = create<UIStore>((set, get) => ({
-  sidebarOpen: true,
+  sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 1024 : false,
   settingsOpen: false,
   galleryOpen: false,
   userMenuOpen: false,

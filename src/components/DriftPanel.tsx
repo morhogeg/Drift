@@ -647,8 +647,9 @@ export default function DriftPanel({
 
   return (
     <div className={`
-      fixed top-0 right-0 h-full z-20
-      ${isExpanded ? 'w-[70vw] max-w-[920px]' : 'w-[450px] md:w-[520px]'}
+      fixed inset-0 z-30
+      lg:inset-auto lg:top-0 lg:right-0 lg:h-full lg:z-20
+      ${isExpanded ? 'lg:w-[70vw] lg:max-w-[920px]' : 'lg:w-[450px]'}
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
     `}>
@@ -660,7 +661,7 @@ export default function DriftPanel({
         flex flex-col overflow-hidden
       `}>
         {/* Header */}
-        <header className="relative z-10 border-b border-white/[0.05] bg-[#0f0f15]/95 backdrop-blur-xl">
+        <header className="relative z-10 border-b border-white/[0.05] bg-[#0f0f15]/95 backdrop-blur-xl pt-safe">
           {/* Top bar: brand + controls */}
           <div className="px-4 pt-3 pb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -672,14 +673,14 @@ export default function DriftPanel({
             <div className="flex items-center gap-0.5">
               <button
                 onClick={() => setIsExpanded(v => !v)}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
+                className="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
                 title={isExpanded ? 'Collapse panel' : 'Expand panel'}
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className={`w-3.5 h-3.5 ${showExpandHint ? 'text-accent-pink' : ''}`} />}
               </button>
               <button
                 onClick={() => onClose(driftOnlyMessages)}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
+                className="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-secondary hover:bg-white/5 transition-colors"
                 title="Close"
               >
                 <X className="w-3.5 h-3.5" />
@@ -904,7 +905,7 @@ export default function DriftPanel({
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 z-10">
           <div className="h-8 bg-gradient-to-t from-[#0d0d12] to-transparent pointer-events-none" />
-          <div className="bg-[#0d0d12] px-4 pb-4 pt-1">
+          <div className="bg-[#0d0d12] px-4 pt-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
             <div className="relative">
               <textarea
                 ref={inputRef}

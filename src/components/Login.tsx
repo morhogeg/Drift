@@ -59,8 +59,8 @@ export function Login({ onLogin }: LoginProps) {
         ))}
       </div>
 
-      {/* Main container with better layout */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-8 flex items-center justify-center">
+      {/* Main container with better layout — desktop only */}
+      <div className="hidden lg:flex relative z-10 w-full max-w-7xl mx-auto px-8 items-center justify-center">
         <div className="w-full grid lg:grid-cols-[1fr,480px,1fr] gap-16 items-center">
           
           {/* Left side - Core capabilities */}
@@ -297,7 +297,7 @@ export function Login({ onLogin }: LoginProps) {
       </div>
 
       {/* Mobile version */}
-      <div className="lg:hidden absolute inset-0 flex items-center justify-center p-6">
+      <div className="lg:hidden absolute inset-0 z-20 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="text-center mb-6">
             <h1 className="text-3xl font-bold text-white">Drift</h1>

@@ -9,7 +9,7 @@ const defaultSettings: AISettings = {
   useDummyAI: false,
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY || '',
   openRouterModel: OPENROUTER_MODELS.OSS,
-  geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyAAQ4C79flJfL1Ggn2zukbhpMizA6hQ2RU',
+  geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
   geminiModel: GEMINI_MODELS.FLASH_LITE_PREVIEW,
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'llama2',

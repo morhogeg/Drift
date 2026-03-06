@@ -1159,10 +1159,18 @@ function App() {
 
   // ── JSX ─────────────────────────────────────────────────────────────────────
   return (
-    <div className="h-screen flex bg-dark-bg relative overflow-hidden">
+    <div className="h-[100dvh] flex bg-dark-bg relative overflow-hidden">
       <ToastContainer />
       {/* Gradient overlay for depth */}
       <div className="absolute inset-0 bg-gradient-to-br from-dark-bg via-dark-surface/50 to-dark-bg pointer-events-none" />
+
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/60 z-10 backdrop-blur-sm"
+          onClick={() => uiStore.setSidebarOpen(false)}
+        />
+      )}
 
       {/* Sidebar */}
       <aside className={`
@@ -1350,42 +1358,42 @@ function App() {
       <div className={`
         flex-1 flex flex-col relative
         transition-all duration-150 ease-in-out
-        ${sidebarOpen ? 'ml-[260px]' : 'ml-0'}
-        ${driftOpen ? 'mr-[450px]' : 'mr-0'}
+        ${sidebarOpen ? 'lg:ml-[260px]' : 'ml-0'}
+        ${driftOpen ? 'lg:mr-[450px]' : 'mr-0'}
       `}>
         {/* Header */}
-        <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80">
-          <div className="px-4 py-2.5 flex items-center justify-between">
+        <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
+          <div className="px-3 py-1.5 flex items-center justify-between">
             <div className="flex items-center gap-4">
               {!sidebarOpen ? (
                 <>
                   <button
                     onClick={() => uiStore.setSidebarOpen(true)}
-                    className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
+                    className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75"
                     title="Open sidebar"
                   >
-                    <Menu className="w-5 h-5 text-text-muted" />
+                    <Menu className="w-4 h-4 text-text-muted" />
                   </button>
                   <div className="w-px h-6 bg-dark-border/30" />
                 </>
               ) : (
-                <div className="w-[41px]" />
+                <div className="w-[36px]" />
               )}
 
               <div className="flex items-center gap-2">
                 {/* New Chat Button */}
                 <button
                   onClick={createNewChat}
-                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                  className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
                   title="New chat (⌘⌥N)"
                 >
-                  <Plus className="w-5 h-5 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
+                  <Plus className="w-4 h-4 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
                 </button>
 
-                {/* Snippet Gallery Button */}
+                {/* Snippet Gallery Button — hidden on mobile */}
                 <button
                   onClick={() => uiStore.setGalleryOpen(true)}
-                  className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative"
+                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative"
                   title="Snippet Gallery"
                 >
                   <Bookmark className="w-5 h-5 text-text-muted group-hover:text-cyan-400 transition-colors duration-75" />
@@ -1400,25 +1408,28 @@ function App() {
 
             <div className="flex-1 flex items-center justify-center">
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold text-text-secondary tracking-tight">Drift</h1>
+                <h1 className="text-base font-semibold text-text-secondary tracking-tight">Sidedrift</h1>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => uiStore.setSettingsOpen(true)}
-                className="p-2 hover:bg-dark-elevated rounded-lg transition-colors duration-75"
+                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75"
                 title="AI settings"
               >
                 <SettingsIcon className="w-4 h-4 text-text-muted" />
               </button>
-              <HeaderControls
-                aiSettings={aiSettings}
-                selectedTargets={selectedTargets}
-                setSelectedTargets={setSelectedTargetsPersist}
-                isConnecting={isConnecting}
-                apiConnected={apiConnected}
-              />
+              {/* Model picker — hidden on mobile */}
+              <div className="hidden lg:flex">
+                <HeaderControls
+                  aiSettings={aiSettings}
+                  selectedTargets={selectedTargets}
+                  setSelectedTargets={setSelectedTargetsPersist}
+                  isConnecting={isConnecting}
+                  apiConnected={apiConnected}
+                />
+              </div>
             </div>
           </div>
         </header>
@@ -1426,14 +1437,14 @@ function App() {
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'pr-[450px] md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
+            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
               {showScrollButton && (
                 <div className={`fixed bottom-24 z-20 transition-all duration-150
-                  ${sidebarOpen ? 'left-[calc(50%+130px)]' : 'left-1/2'}
+                  left-1/2 lg:${sidebarOpen ? 'left-[calc(50%+130px)]' : 'left-1/2'}
                   transform -translate-x-1/2
-                  ${driftOpen ? 'mr-[225px]' : ''}
+                  ${driftOpen ? 'lg:mr-[225px]' : ''}
                 `}>
                   <button
                     onClick={() => {
@@ -1521,6 +1532,19 @@ function App() {
                   </div>
                 )
               })()}
+
+              {/* Empty state */}
+              {messages.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center text-center px-8 py-16">
+                  <div className="w-12 h-12 rounded-2xl bg-accent-violet/10 flex items-center justify-center mb-4">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 3 L12 12 M12 12 L8 17 M12 12 L16 17" stroke="#a855f7" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-text-primary font-medium text-lg mb-2">Start a conversation</h3>
+                  <p className="text-text-muted text-sm leading-relaxed">Ask anything. Highlight text to drift into a side conversation.</p>
+                </div>
+              )}
 
               {/* Message list */}
               {messages.map((msg, index) => {
@@ -2136,7 +2160,7 @@ function App() {
         </div>
 
         {/* Input area */}
-        <div className={`absolute bottom-0 left-0 right-0 z-10 pb-2 px-4 pt-4 ${driftOpen && !driftExpanded ? 'mr-[450px] md:mr-[520px]' : ''}`}>
+        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-4 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
@@ -2174,17 +2198,16 @@ function App() {
                     onClick={stopGeneration}
                     className={`
                       absolute right-2
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
-                      w-8 h-8 rounded-full
-                      bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-pink/30
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-1.5' : 'top-1/2 -translate-y-1/2'}
+                      min-w-[44px] min-h-[44px] rounded-full
                       flex items-center justify-center
-                      hover:scale-105 active:scale-95
-                      transition-all duration-100
+                      active:scale-90 transition-all duration-100
                     `}
                     title="Stop generating"
                   >
-                    <Square className="w-3.5 h-3.5" fill="currentColor" />
+                    <div className="w-7 h-7 rounded-full bg-white/10 border border-white/20 flex items-center justify-center">
+                      <Square className="w-3 h-3 text-text-muted" fill="currentColor" />
+                    </div>
                   </button>
                 ) : (
                   <button
@@ -2192,17 +2215,16 @@ function App() {
                     disabled={!message.trim()}
                     className={`
                       absolute right-2
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2' : 'top-1/2 -translate-y-1/2'}
-                      w-8 h-8 rounded-full
-                      bg-gradient-to-br from-accent-pink to-accent-violet
-                      text-white shadow-lg shadow-accent-pink/30
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-1.5' : 'top-1/2 -translate-y-1/2'}
+                      min-w-[44px] min-h-[44px] rounded-full
                       flex items-center justify-center
-                      hover:scale-105 active:scale-95
-                      disabled:opacity-50 disabled:cursor-not-allowed
+                      active:scale-90 disabled:opacity-30
                       transition-all duration-100
                     `}
                   >
-                    <ArrowUp className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-accent-pink to-accent-violet flex items-center justify-center shadow-md shadow-accent-pink/20">
+                      <ArrowUp className="w-3.5 h-3.5 text-white" />
+                    </div>
                   </button>
                 )}
               </div>
