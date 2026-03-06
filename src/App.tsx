@@ -437,8 +437,8 @@ function App() {
             strandId,
             canvasId
           }
-          // append empty bubble
-          chatStore.setMessages([...chatStore.messages, aiMessage])
+          // append empty bubble — use getState() to avoid stale closure overwriting user message
+          chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
           await streamer(
             apiMessages as any,
             (chunk) => {
