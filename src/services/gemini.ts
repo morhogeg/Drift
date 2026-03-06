@@ -128,14 +128,24 @@ export async function sendMessageToGemini(
   }
   if (systemInstruction) body.systemInstruction = systemInstruction
 
-  let response: Response
-  try {
-    response = await fetch(url, {
+  const doFetch = (b: Record<string, unknown>) =>
+    fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(b),
       signal,
     })
+
+  let response: Response
+  try {
+    response = await doFetch(body)
+
+    // If grounding caused a 400, retry without it (not all models/keys support it)
+    if (!response.ok && response.status === 400 && useGrounding) {
+      console.warn('[gemini] Grounding returned 400 — retrying without google_search')
+      const { tools: _tools, ...bodyWithoutGrounding } = body as any
+      response = await doFetch(bodyWithoutGrounding)
+    }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return
     throw err

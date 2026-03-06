@@ -28,9 +28,15 @@ export const settingsStorage = {
       if (!stored) return defaultSettings
       
       const parsed = JSON.parse(stored)
-      // If the stored API key is empty but we have one in env, use the env one
+      // Rescue API keys from defaults if missing in stored settings
       if (!parsed.openRouterApiKey && defaultSettings.openRouterApiKey) {
         parsed.openRouterApiKey = defaultSettings.openRouterApiKey
+      }
+      if (!parsed.geminiApiKey) {
+        parsed.geminiApiKey = defaultSettings.geminiApiKey
+      }
+      if (!parsed.geminiModel) {
+        parsed.geminiModel = defaultSettings.geminiModel
       }
       // Ensure modelPresets exists with sensible defaults
       if (!Array.isArray(parsed.modelPresets)) {
@@ -39,12 +45,22 @@ export const settingsStorage = {
         // Migrate older preset shapes or missing fields
         parsed.modelPresets = parsed.modelPresets.map((p: any) => ({
           id: p.id || p.key || `preset-${Math.random().toString(36).slice(2)}`,
-          provider: p.provider === 'openrouter' || p.provider === 'ollama' ? p.provider : 'openrouter',
+          // Preserve all known providers — do NOT fall back to 'openrouter' for 'gemini'
+          provider: ['openrouter', 'ollama', 'gemini', 'dummy'].includes(p.provider) ? p.provider : 'openrouter',
           label: p.label || 'Model',
           model: p.model || (p.provider === 'ollama' ? (parsed.ollamaModel || 'llama2') : parsed.openRouterModel || OPENROUTER_MODELS.OSS),
           serverUrl: p.serverUrl || (p.provider === 'ollama' ? (parsed.ollamaUrl || 'http://localhost:11434') : undefined),
           enabled: typeof p.enabled === 'boolean' ? p.enabled : true,
         }))
+
+        // If no Gemini presets exist yet (old settings pre-Gemini), inject the defaults
+        const hasGemini = parsed.modelPresets.some((p: any) => p.provider === 'gemini')
+        if (!hasGemini) {
+          parsed.modelPresets = [
+            ...defaultSettings.modelPresets.filter((p) => p.provider === 'gemini'),
+            ...parsed.modelPresets,
+          ]
+        }
       }
       // Merge with defaults to ensure all fields exist
       return { ...defaultSettings, ...parsed }
