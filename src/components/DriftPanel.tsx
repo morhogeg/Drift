@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { X, Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
+import { sendMessageToGemini, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -38,9 +39,9 @@ interface DriftPanelProps {
   existingMessages?: Message[]
   driftChatId?: string
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'openrouter' | 'ollama'
+  selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
   // Optional: allow running compare against multiple targets from main
-  selectedTargets?: Array<{ provider: 'openrouter' | 'ollama'; key: string; label: string }>
+  selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
 }
 
@@ -328,13 +329,14 @@ export default function DriftPanel({
         { role: 'user' as const, content: message }
       ]
       
+      const envGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
+      const geminiKey = envGeminiKey || aiSettings.geminiApiKey
       const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
-      const settingsKey = aiSettings.openRouterApiKey
-      const effectiveApiKey = envKey || settingsKey
+      const effectiveApiKey = envKey || aiSettings.openRouterApiKey
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' = selectedProvider
+      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
         ? selectedProvider
-        : (effectiveApiKey ? 'openrouter' : 'ollama')
+        : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
 
       console.log('Drift panel - provider chosen:', provider)
       console.log('Drift panel - API messages:', apiMessages)
@@ -357,33 +359,31 @@ export default function DriftPanel({
         setMessages(prev => [...prev, aiMessage])
         setDriftOnlyMessages(prev => [...prev, aiMessage])
         
+        const onChunk = (chunk: string) => {
+          accumulatedResponse += chunk
+          setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+          setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
+        }
+
         // Stream the response using the chosen provider
-        if (provider === 'openrouter') {
+        if (provider === 'gemini') {
+          const apiKey = geminiKey
+          if (!apiKey) throw new Error('No Gemini API key found. Please set it in Settings.')
+          const sTargets = selectedTargets || []
+          const preset = sTargets.length === 1 ? sTargets[0] : null
+          const model = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
+          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
+        } else if (provider === 'openrouter') {
           const apiKey = effectiveApiKey
           if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          // Choose model based on selected target when single-target
           const sTargets = selectedTargets || []
           const useQwen3 = (sTargets.length === 1 && (sTargets[0].key === 'qwen3' || sTargets[0].label === 'Qwen3'))
           const model = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
-          await sendMessageToOpenRouter(
-            apiMessages as any,
-            (chunk) => {
-              accumulatedResponse += chunk
-              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-            },
-            apiKey,
-            abortController.signal,
-            model
-          )
+          await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, abortController.signal, model)
         } else if (provider === 'ollama') {
           await sendMessageToOllama(
-            apiMessages as any,
-            (chunk) => {
-              accumulatedResponse += chunk
-              setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-              setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-            },
+            apiMessages as OllamaMessage[],
+            onChunk,
             abortController.signal,
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel

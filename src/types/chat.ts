@@ -4,7 +4,7 @@
  * without circular dependency issues.
  */
 
-export type Provider = 'openrouter' | 'ollama'
+export type Provider = 'openrouter' | 'ollama' | 'gemini'
 
 export interface Target {
   provider: Provider

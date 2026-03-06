@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Check, Megaphone } from 'lucide-react'
-type Provider = 'openrouter' | 'ollama'
+type Provider = 'openrouter' | 'ollama' | 'gemini'
 type Target = { provider: Provider, key: string, label: string }
 
 interface Props {
@@ -90,8 +90,8 @@ export default function HeaderControls(props: Props) {
             <div className="py-1">
               {items.map(t => {
                 const active = visibleTargets.some(x => x.key === t.key)
-                const accent = t.provider === 'openrouter' ? 'text-blue-300' : 'text-emerald-300'
-                const dot = t.provider === 'openrouter' ? 'bg-blue-400' : 'bg-emerald-400'
+                const accent = t.provider === 'gemini' ? 'text-sky-300' : t.provider === 'openrouter' ? 'text-blue-300' : 'text-emerald-300'
+                const dot = t.provider === 'gemini' ? 'bg-sky-400' : t.provider === 'openrouter' ? 'bg-blue-400' : 'bg-emerald-400'
                 const modelSuffix = (() => {
                   const p = (aiSettings?.modelPresets || []).find((x: any) => x.id === t.key)
                   if (!p) return t.provider === 'openrouter' ? (aiSettings?.openRouterModel || '') : (aiSettings?.ollamaModel || '')

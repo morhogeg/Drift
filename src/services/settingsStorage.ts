@@ -1,19 +1,23 @@
 import type { AISettings } from '../components/Settings'
 import { OPENROUTER_MODELS } from './openrouter'
+import { GEMINI_MODELS } from './gemini'
 
 const SETTINGS_KEY = 'drift_ai_settings'
 
 const defaultSettings: AISettings = {
-  useOpenRouter: true,
+  useOpenRouter: false,
   useDummyAI: false,
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY || '',
   openRouterModel: OPENROUTER_MODELS.OSS,
+  geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyAAQ4C79flJfL1Ggn2zukbhpMizA6hQ2RU',
+  geminiModel: GEMINI_MODELS.FLASH_LITE_PREVIEW,
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'llama2',
   modelPresets: [
-    { id: 'qwen3', provider: 'openrouter', label: 'Qwen3', model: OPENROUTER_MODELS.QWEN3, enabled: true },
-    { id: 'oss', provider: 'openrouter', label: 'OpenAI OSS', model: OPENROUTER_MODELS.OSS, enabled: true },
-    { id: 'ollama', provider: 'ollama', label: 'Ollama', model: 'llama2', serverUrl: 'http://localhost:11434', enabled: true },
+    { id: 'gemini-flash-lite', provider: 'gemini', label: 'Gemini Flash Lite', model: GEMINI_MODELS.FLASH_LITE_PREVIEW, enabled: true },
+    { id: 'gemini-flash', provider: 'gemini', label: 'Gemini Flash', model: GEMINI_MODELS.FLASH_PREVIEW, enabled: true },
+    { id: 'ollama', provider: 'ollama', label: 'Ollama', model: 'llama2', serverUrl: 'http://localhost:11434', enabled: false },
+    { id: 'qwen3', provider: 'openrouter', label: 'Qwen3', model: OPENROUTER_MODELS.QWEN3, enabled: false },
   ]
 }
 

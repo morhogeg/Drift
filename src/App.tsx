@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, cloneElement, isValidElement } from 'react
 import { Menu, Plus, Search, MessageCircle, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
+import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
 import { checkDummyConnection } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
@@ -271,6 +272,19 @@ function App() {
           setApiConnected(connected)
           setIsConnecting(false)
           return
+        }
+
+        const hasGeminiPreset = (aiSettings.modelPresets || []).some((p: any) => p.provider === 'gemini' && p.enabled)
+        if (hasGeminiPreset) {
+          const apiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
+          if (!apiKey?.trim()) {
+            uiStore.setSettingsOpen(true)
+            setApiConnected(false)
+            setIsConnecting(false)
+            return
+          }
+          const connected = await checkGeminiConnection(apiKey, aiSettings.geminiModel)
+          setApiConnected(connected)
         } else if (aiSettings.useOpenRouter) {
           const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
           if (!apiKey || apiKey.trim() === '') {
@@ -449,7 +463,17 @@ function App() {
           setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
           const tasks: Promise<void>[] = []
           for (const t of targets) {
-            if (t.provider === 'openrouter') {
+            if (t.provider === 'gemini') {
+              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+              const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
+              if (!apiKey) throw new Error('No Gemini API key found.')
+              const model = (preset?.model || aiSettings.geminiModel) as any
+              tasks.push(
+                streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                  sendMessageToGemini(msgs, onChunk, apiKey, signal, model)
+                , t.label, broadcastGroupId)
+              )
+            } else if (t.provider === 'openrouter') {
               const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
               const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
               if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
@@ -473,7 +497,15 @@ function App() {
           await Promise.allSettled(tasks)
         } else {
           const t = targets[0]
-          if (t.provider === 'openrouter') {
+          if (t.provider === 'gemini') {
+            const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
+            if (!apiKey) throw new Error('No Gemini API key found.')
+            const model = (preset?.model || aiSettings.geminiModel) as any
+            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+              sendMessageToGemini(msgs, onChunk, apiKey, signal, model)
+            , t.label, undefined, activeStrandId || undefined, undefined)
+          } else if (t.provider === 'openrouter') {
             const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
             const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
             if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
@@ -2203,10 +2235,11 @@ function App() {
         selectedTargets={selectedTargets}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          if (targets.some(t => t.provider === 'gemini')) return 'gemini'
           if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
           if (targets.some(t => t.provider === 'ollama')) return 'ollama'
-          return 'openrouter'
+          return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
       />

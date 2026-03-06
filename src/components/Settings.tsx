@@ -3,6 +3,8 @@ import { X, Save, Eye, EyeOff, Info, ExternalLink, CheckCircle, AlertCircle, Plu
 import type { OpenRouterModel } from '../services/openrouter'
 import { checkOpenRouterConnection, OPENROUTER_MODELS } from '../services/openrouter'
 import { checkOllamaConnection } from '../services/ollama'
+import type { GeminiModel } from '../services/gemini'
+import { checkGeminiConnection, GEMINI_MODELS } from '../services/gemini'
 
 interface SettingsProps {
   isOpen: boolean
@@ -16,12 +18,14 @@ export interface AISettings {
   useDummyAI: boolean
   openRouterApiKey: string
   openRouterModel: OpenRouterModel
+  geminiApiKey: string
+  geminiModel: GeminiModel
   ollamaUrl: string
   ollamaModel: string
   modelPresets: ModelPreset[]
 }
 
-export type Provider = 'openrouter' | 'ollama' | 'dummy'
+export type Provider = 'openrouter' | 'ollama' | 'dummy' | 'gemini'
 
 export interface ModelPreset {
   id: string
@@ -72,11 +76,14 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
       setConnectionStatus('connected')
       return
     }
-    
+
     setConnectionStatus('checking')
     try {
       let connected = false
-      if (settings.useOpenRouter && settings.openRouterApiKey) {
+      const hasGeminiPreset = (settings.modelPresets || []).some(p => p.provider === 'gemini' && p.enabled)
+      if (hasGeminiPreset && settings.geminiApiKey) {
+        connected = await checkGeminiConnection(settings.geminiApiKey, settings.geminiModel)
+      } else if (settings.useOpenRouter && settings.openRouterApiKey) {
         connected = await checkOpenRouterConnection(settings.openRouterApiKey, settings.openRouterModel)
       } else if (!settings.useOpenRouter && !settings.useDummyAI && settings.ollamaUrl) {
         connected = await checkOllamaConnection(settings.ollamaUrl)
@@ -351,7 +358,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
                     <div key={preset.id} className="rounded-xl border border-dark-border/60 bg-dark-elevated/60 overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-border/60 bg-dark-bg/60">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${preset.provider === 'openrouter' ? 'bg-blue-400' : preset.provider === 'ollama' ? 'bg-emerald-400' : 'bg-violet-400'}`} />
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${preset.provider === 'gemini' ? 'bg-sky-400' : preset.provider === 'openrouter' ? 'bg-blue-400' : preset.provider === 'ollama' ? 'bg-emerald-400' : 'bg-violet-400'}`} />
                           <input type="text" value={preset.label} onChange={(e) => updatePreset(preset.id, { label: e.target.value })} className="px-2 py-1 rounded-md bg-dark-elevated/60 border border-dark-border/60 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-violet min-w-0 w-48" placeholder="Provider name" />
                           <span className="text-[11px] text-text-muted hidden md:inline">• {preset.provider === 'openrouter' ? 'OpenRouter' : preset.provider === 'ollama' ? 'Ollama' : 'Dummy'}</span>
                         </div>
@@ -369,12 +376,44 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
                         <div>
                           <label className="block text-xs text-text-muted mb-1">Provider</label>
                           <div className="inline-flex rounded-lg border border-dark-border/60 bg-dark-bg p-0.5">
+                            <button type="button" onClick={() => updatePreset(preset.id, { provider: 'gemini' })} className={`px-3 py-1.5 rounded-md text-sm ${preset.provider === 'gemini' ? 'bg-dark-elevated/60 text-text-primary' : 'text-text-muted hover:text-text-primary'}`}>Gemini</button>
                             <button type="button" onClick={() => updatePreset(preset.id, { provider: 'openrouter' })} className={`px-3 py-1.5 rounded-md text-sm ${preset.provider === 'openrouter' ? 'bg-dark-elevated/60 text-text-primary' : 'text-text-muted hover:text-text-primary'}`}>OpenRouter</button>
                             <button type="button" onClick={() => updatePreset(preset.id, { provider: 'ollama' })} className={`px-3 py-1.5 rounded-md text-sm ${preset.provider === 'ollama' ? 'bg-dark-elevated/60 text-text-primary' : 'text-text-muted hover:text-text-primary'}`}>Ollama</button>
                             <button type="button" onClick={() => updatePreset(preset.id, { provider: 'dummy' })} className={`px-3 py-1.5 rounded-md text-sm ${preset.provider === 'dummy' ? 'bg-dark-elevated/60 text-text-primary' : 'text-text-muted hover:text-text-primary'}`}>Dummy</button>
                           </div>
                         </div>
-                        {preset.provider === 'openrouter' ? (
+                        {preset.provider === 'gemini' ? (
+                          <div className="md:col-span-2 space-y-3">
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">Model</label>
+                              <select
+                                value={preset.model || settings.geminiModel}
+                                onChange={(e) => updatePreset(preset.id, { model: e.target.value })}
+                                className="w-full px-3 py-2 bg-dark-bg border border-dark-border/60 rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-violet"
+                              >
+                                {Object.entries(GEMINI_MODELS).map(([, id]) => (
+                                  <option key={id} value={id}>{id}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">API Key</label>
+                              <div className="relative">
+                                <input
+                                  type={showApiKey ? 'text' : 'password'}
+                                  value={preset.apiKey ?? settings.geminiApiKey}
+                                  onChange={(e) => updatePreset(preset.id, { apiKey: e.target.value })}
+                                  placeholder="AIzaSy..."
+                                  className="w-full px-3 py-2 pr-20 bg-dark-bg border border-dark-border/60 rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent-violet"
+                                />
+                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                  <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="p-1.5 rounded-md hover:bg-dark-elevated">{showApiKey ? <EyeOff className="w-4 h-4 text-text-muted" /> : <Eye className="w-4 h-4 text-text-muted" />}</button>
+                                  <button type="button" onClick={() => navigator.clipboard?.writeText(preset.apiKey || settings.geminiApiKey || '')} className="p-1.5 rounded-md hover:bg-dark-elevated"><Copy className="w-4 h-4 text-text-muted" /></button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : preset.provider === 'openrouter' ? (
                           <div className="md:col-span-2">
                             <label className="block text-xs text-text-muted mb-1">Model ID</label>
                             <input list={`or-models-${preset.id}`} value={preset.model || ''} onChange={(e) => updatePreset(preset.id, { model: e.target.value })} placeholder="e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet" className="w-full px-3 py-2 bg-dark-bg border border-dark-border/60 rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-violet" />

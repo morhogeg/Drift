@@ -11,13 +11,13 @@ import type { Target } from '@/types/chat'
 const CHAT_MODEL_PREFS_KEY = 'drift_chat_model_prefs'
 
 export const DEFAULT_TARGET: Target = {
-  provider: 'openrouter',
-  key: 'qwen3',
-  label: 'Qwen3',
+  provider: 'gemini',
+  key: 'gemini-flash-lite',
+  label: 'Gemini Flash Lite',
 }
 
 // Allowed target keys — guards against corrupt/legacy localStorage values
-const ALLOWED_KEYS = new Set(['qwen3', 'oss', 'ollama', 'dummy-basic', 'openrouter'])
+const ALLOWED_KEYS = new Set(['qwen3', 'oss', 'ollama', 'dummy-basic', 'openrouter', 'gemini-flash-lite', 'gemini-flash', 'gemini-flash-25', 'gemini-flash-20'])
 
 /** Normalise a target list, de-duplicating and migrating legacy keys. */
 function normaliseTargets(targets: Target[]): Target[] {
@@ -27,8 +27,15 @@ function normaliseTargets(targets: Target[]): Target[] {
     const key =
       t.key === 'dummy-basic' ? 'qwen3' : t.key === 'openrouter' ? 'oss' : t.key
     const provider: Target['provider'] =
-      t.provider === 'openrouter' || t.provider === 'ollama' ? t.provider : 'openrouter'
-    const label = key === 'qwen3' ? 'Qwen3' : key === 'oss' ? 'OpenAI OSS' : t.label
+      t.provider === 'openrouter' || t.provider === 'ollama' || t.provider === 'gemini'
+        ? t.provider
+        : 'openrouter'
+    const label =
+      key === 'qwen3' ? 'Qwen3' :
+      key === 'oss' ? 'OpenAI OSS' :
+      key === 'gemini-flash-lite' ? 'Gemini Flash Lite' :
+      key === 'gemini-flash' ? 'Gemini Flash' :
+      t.label
     if (ALLOWED_KEYS.has(key)) map.set(key, { provider, key, label })
   }
   return map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
