@@ -217,7 +217,8 @@ function App() {
         }
         return node
       }
-      return node
+      // Skip unrenderable plain objects (would show as [object Object])
+      return null
     }
 
     return walk(children)
@@ -1965,14 +1966,18 @@ function App() {
                                   {msg.modelTag}
                                 </span>
                               )}
-                              <span className="whitespace-nowrap">
-                                <span className="text-text-secondary/80">About:</span> "{msg.driftPushMetadata?.selectedText}"
+                              <div className="flex flex-col gap-0.5 min-w-0">
+                                <div className="flex items-baseline gap-1 min-w-0">
+                                  <span className="text-text-secondary/80 text-[10px] shrink-0">From</span>
+                                  <span className="truncate text-text-secondary/90">"{msg.driftPushMetadata?.selectedText}"</span>
+                                </div>
                                 {msg.driftPushMetadata?.userQuestion && (
-                                  <>
-                                    {' '}• <span className="text-text-secondary/80">Q:</span> "{msg.driftPushMetadata.userQuestion}"
-                                  </>
+                                  <div className="flex items-baseline gap-1 min-w-0">
+                                    <span className="text-text-secondary/80 text-[10px] shrink-0">Q</span>
+                                    <span className="truncate text-text-primary/80">"{msg.driftPushMetadata.userQuestion}"</span>
+                                  </div>
                                 )}
-                              </span>
+                              </div>
                             </div>
                           )}
 
