@@ -68,7 +68,7 @@ src/
 ## What's Pending / Next Ideas
 
 ### Must do
-- [ ] **Push to GitHub** — SSH auth issue (macOS Keychain has stale credentials). Fix: `ssh-keygen -t ed25519` → add to GitHub → `git remote set-url origin git@github.com:morhogeg/Drift.git`
+- [x] **Push to GitHub** — SSH auth fixed. Key: `~/.ssh/github_drift` (ed25519), added to GitHub account. Remote set to `git@github.com:morhogeg/Drift.git`. Future sessions: just `git push origin main`.
 
 ### Good next features
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
