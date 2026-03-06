@@ -107,6 +107,7 @@ export async function sendMessageToGemini(
   apiKey: string,
   signal?: AbortSignal,
   model: GeminiModel = GEMINI_MODELS.FLASH_LITE_PREVIEW,
+  useGrounding = true,
 ): Promise<void> {
   if (!apiKey?.trim()) {
     throw new Error('Gemini API key not configured. Please set it in Settings.')
@@ -118,6 +119,8 @@ export async function sendMessageToGemini(
 
   const body: Record<string, unknown> = {
     contents,
+    // Google Search grounding — model decides when to search
+    ...(useGrounding && { tools: [{ google_search: {} }] }),
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 8192,
