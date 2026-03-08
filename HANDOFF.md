@@ -1,58 +1,48 @@
 # Drift — Session Handoff
 
-**Date:** March 6, 2026
+**Date:** March 8, 2026
 **Branch:** `feature/list-anchors-links`
-**Status:** Fully working on iOS (Capacitor/TestFlight). Light/dark theme system live.
+**Status:** Fully working on iOS (Capacitor). Major UI polish + voice input added.
 
 ---
 
 ## What Was Done This Session
 
-### 1. iOS Keyboard Fix
-- `#root` changed from `height: 100dvh` to `height: 100%` (follows body height that Capacitor resizes)
-- Root div changed from `h-[100dvh] overflow-hidden` to `h-full` — allows layout to reflow when keyboard appears
-- Input field now stays above keyboard when tapped
+### 1. AI Reply Design — Containerless, Full Width
+- Removed the gray card/border/shadow from plain AI messages — text renders directly on background
+- AI messages now take full width (no `max-w-[85%]` constraint)
+- Model label (e.g. "Gemini Flash Lite") moved above the message as a small muted `text-[11px]` label
+- Copy/bookmark action row no longer has the card's `border-t` separator
+- User bubbles kept as gradient pill but narrowed to `max-w-[80%]`
 
-### 2. Header Cleanup
-- Removed "Sidedrift" title from header
-- Plus (new chat) button moved to right side of header (where Settings was)
-- Settings removed from header — now lives in sidebar footer
-- Header height shrunk: `py-1.5` → `py-0.5`, `px-3` → `px-2`
+### 2. DriftPanel iOS Keyboard Fix
+- Messages scroll area: `paddingBottom: calc(var(--kb-h, 0px) + 5rem)` — scrolls above keyboard
+- Input container: `paddingBottom: calc(var(--kb-h, 0px) + env(safe-area-inset-bottom) + 0.5rem)`
+- `--kb-h` CSS var is set globally by `keyboardWillShow` listener in App.tsx (already existed)
 
-### 3. Sidebar Cleanup
-- Removed "Chat History" label
-- Search bar and collapse arrow combined into single row
-- Chat item icons (MessageCircle, GitBranch) removed
-- Tapping a chat now auto-closes sidebar (`switchChat` + `setSidebarOpen(false)`)
+### 3. Sidebar Wider
+- Width: `w-[85vw] max-w-[340px]` (was fixed `w-[260px]`)
+- Chat titles: removed `truncate` — titles now wrap to second line instead of cutting off
+- Desktop main content margin updated to `lg:ml-[340px]`
 
-### 4. Light/Dark Theme System
-- Tailwind `darkMode: 'class'` strategy
-- CSS variables as RGB triplets in `:root` (light) and `.dark` (dark) — supports opacity modifiers
-- `uiStore.ts` — `theme: 'dark' | 'light'`, `setTheme()`, persisted to localStorage, applies `dark` class to `<html>`
-- Defaults to dark theme
+### 4. Input Field Placement in Long Chats
+- Messages container bottom padding: `calc(9rem + var(--kb-h, 0px))` (was 6rem)
+- Last message no longer slides under the floating input bar
 
-### 5. Settings Screen Redesign
-- Full panel redesign: sections (MODELS, APPEARANCE, ADVANCED), clean rows, custom toggle switches
-- API keys moved inside each model's expanded section (no separate API KEYS section)
-- Theme toggle in APPEARANCE section — live dark/light switch
+### 5. Design Polish — Claude/Gemini Feel
+- **Empty state**: New centered "What's on your mind?" screen with gradient Drift logo mark and subtitle
+- **AI text**: Bumped from `text-[13px] leading-6` → `text-[15px] leading-7` (more readable)
+- **User text**: Bumped to `text-[14px] font-medium`
+- **Typing indicator**: Bare 3 dots (`w-1.5 h-1.5`), no card container
+- **Messages area**: Removed heavy `bg-dark-surface/90 rounded-t-2xl shadow-inner` wrapper
+- **Message spacing**: `space-y-2` with `mt-6` on each user message for natural conversation rhythm
 
-### 6. DriftPanel Redesign
-- Slim header: chevron-down close + selected text (italic) + expand — no "DRIFT" label
-- Removed quote block (selected text now lives in header)
-- User bubbles: `max-w-[75%]` subtle violet-tinted, not gradient blobs
-- AI bubbles: transparent background, clean typography
-- Push/Save actions: slim bar below header, only shown when messages exist
-- Typing indicator: 3 bare dots, no container
-
-### 7. Drift Link Tap on iOS
-- Added `onTouchEnd` + `e.preventDefault()` + `e.stopPropagation()` to inline drift link buttons in main chat
-- Prevents iOS text-selection handler from swallowing the tap
-- Both temp drifts (in panel) and saved drift chats now open correctly on tap
-
-### 8. iOS Text Selection for Drift
-- `SelectionTooltip.tsx`: added `selectionchange` (debounced 300ms) and `touchend` (350ms delay) listeners
-- Uses `getBoundingClientRect()` for tooltip positioning on mobile
-- Tooltip buttons have `onTouchStart`/`onTouchEnd` to prevent selection loss
+### 6. Voice Input (Web Speech API)
+- New hook: `src/hooks/useVoiceInput.ts` — wraps `SpeechRecognition` / `webkitSpeechRecognition`
+- Mic button added to main chat input (between textarea and send button)
+- Mic button added to DriftPanel input area
+- Idle: ghost circular button; Listening: red + `animate-pulse`; Appends transcript to input text
+- Hidden automatically if browser doesn't support SpeechRecognition
 
 ---
 
@@ -60,7 +50,11 @@
 
 ```
 src/
-  App.tsx                    ~2350 lines
+  App.tsx                    ~2380 lines
+  hooks/
+    useVoiceInput.ts         NEW — Web Speech API wrapper
+    useAutoScroll.ts
+    useToast.ts
   store/
     chatStore.ts             chat sessions + IndexedDB persistence
     driftStore.ts            drift panel open/closed + temp conversations
@@ -73,9 +67,9 @@ src/
     db.ts                    IndexedDB (idb)
     settingsStorage.ts       localStorage settings
   components/
-    DriftPanel.tsx           redesigned side panel
+    DriftPanel.tsx           side panel (keyboard-aware input)
     SelectionTooltip.tsx     iOS-aware text selection tooltip
-    Settings.tsx             redesigned settings panel
+    Settings.tsx             settings panel
     Login.tsx                mobile + desktop layouts
     HeaderControls.tsx       model picker chip
 ios/
@@ -108,4 +102,5 @@ VITE_GEMINI_API_KEY=your_key_here
 - [ ] **TestFlight submission** — archive in Xcode → upload to App Store Connect
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
 - [ ] **Multi-level drift** — drift from inside a drift conversation
-- [ ] **App.tsx refactor** — still ~2350 lines, could extract more hooks
+- [ ] **App.tsx refactor** — still ~2380 lines, could extract more hooks
+- [ ] **Voice output** — TTS read-back of AI responses

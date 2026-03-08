@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown } from 'lucide-react'
+import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown, Mic } from 'lucide-react'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import { sendMessageToGemini, type ChatMessage as GeminiMessage } from '../services/gemini'
@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
 import { snippetStorage } from '../services/snippetStorage'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
+import { useVoiceInput } from '../hooks/useVoiceInput'
 
 interface Message {
   id: string
@@ -82,6 +83,9 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const voiceInput = useVoiceInput((transcript) => {
+    setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
+  })
   const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
@@ -745,7 +749,7 @@ export default function DriftPanel({
         </header>
         
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4 bg-transparent custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-transparent custom-scrollbar" style={{ paddingBottom: 'calc(var(--kb-h, 0px) + 5rem)' }}>
           {(() => {
             const renderedGroups = new Set<string>()
             return messages.map((msg) => {
@@ -891,69 +895,87 @@ export default function DriftPanel({
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 z-10">
           <div className="h-8 bg-gradient-to-t from-dark-bg to-transparent pointer-events-none" />
-          <div className="bg-dark-bg px-4 pt-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
-            <div className="relative">
-              <textarea
-                ref={inputRef}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
-                    e.preventDefault()
-                    sendMessage()
-                  }
-                }}
-                placeholder="Explore this drift…"
-                rows={1}
-                dir={getTextDirection(message)}
-                className={`
-                  w-full bg-dark-elevated text-text-primary text-[13px]
-                  rounded-2xl px-4 py-3 pr-12
-                  border border-white/[0.08]
-                  focus:outline-none focus:border-accent-violet/30
-                  focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]
-                  placeholder:text-text-muted/50
-                  transition-all duration-150
-                  resize-none
-                  min-h-[46px] max-h-[200px]
-                  ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
-                  custom-scrollbar
-                  ${getRTLClassName(message)}
-                `}
-              />
-              {isTyping ? (
-                <button
-                  onClick={stopGeneration}
+          <div className="bg-dark-bg px-4 pt-1" style={{ paddingBottom: 'calc(var(--kb-h, 0px) + env(safe-area-inset-bottom) + 0.5rem)' }}>
+            <div className="flex gap-2 items-end">
+              <div className="relative flex-1">
+                <textarea
+                  ref={inputRef}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                      e.preventDefault()
+                      sendMessage()
+                    }
+                  }}
+                  placeholder="Explore this drift…"
+                  rows={1}
+                  dir={getTextDirection(message)}
                   className={`
-                    absolute right-2.5
-                    ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
-                    w-7 h-7 rounded-full
-                    bg-dark-elevated border border-white/10
-                    text-text-primary
-                    flex items-center justify-center
-                    hover:border-accent-violet/40 active:scale-95
-                    transition-all duration-100
+                    w-full bg-dark-elevated text-text-primary text-[13px]
+                    rounded-2xl px-4 py-3 pr-12
+                    border border-white/[0.08]
+                    focus:outline-none focus:border-accent-violet/30
+                    focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]
+                    placeholder:text-text-muted/50
+                    transition-all duration-150
+                    resize-none
+                    min-h-[46px] max-h-[200px]
+                    ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
+                    custom-scrollbar
+                    ${getRTLClassName(message)}
                   `}
-                  title="Stop generating"
-                >
-                  <Square className="w-3 h-3" fill="currentColor" />
-                </button>
-              ) : (
+                />
+                {isTyping ? (
+                  <button
+                    onClick={stopGeneration}
+                    className={`
+                      absolute right-2.5
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
+                      w-7 h-7 rounded-full
+                      bg-dark-elevated border border-white/10
+                      text-text-primary
+                      flex items-center justify-center
+                      hover:border-accent-violet/40 active:scale-95
+                      transition-all duration-100
+                    `}
+                    title="Stop generating"
+                  >
+                    <Square className="w-3 h-3" fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                    className={`
+                      absolute right-2.5
+                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
+                      w-7 h-7 rounded-full
+                      flex items-center justify-center
+                      transition-all duration-150 active:scale-95
+                      ${message.trim()
+                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-[0_2px_12px_rgba(168,85,247,0.4)]'
+                        : 'bg-white/[0.05] border border-white/10 text-text-muted cursor-not-allowed opacity-40'}
+                    `}
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {voiceInput.isSupported && (
                 <button
-                  onClick={sendMessage}
-                  disabled={!message.trim()}
+                  onClick={voiceInput.isListening ? voiceInput.stopListening : voiceInput.startListening}
                   className={`
-                    absolute right-2.5
-                    ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
-                    w-7 h-7 rounded-full
+                    flex-shrink-0 w-9 h-9 rounded-full
                     flex items-center justify-center
                     transition-all duration-150 active:scale-95
-                    ${message.trim()
-                      ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-[0_2px_12px_rgba(168,85,247,0.4)]'
-                      : 'bg-white/[0.05] border border-white/10 text-text-muted cursor-not-allowed opacity-40'}
+                    ${voiceInput.isListening
+                      ? 'bg-red-500/20 border border-red-500/50 text-red-400 animate-pulse'
+                      : 'bg-dark-elevated border border-white/[0.08] text-text-muted hover:text-text-primary hover:border-accent-violet/30'}
                   `}
+                  title={voiceInput.isListening ? 'Stop listening' : 'Voice input'}
                 >
-                  <ArrowUp className="w-3.5 h-3.5" />
+                  <Mic className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

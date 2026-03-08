@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
@@ -26,6 +26,7 @@ import { useUIStore } from '@/store/uiStore'
 import type { Message, ChatSession } from '@/types/chat'
 import { toast } from '@/hooks/useToast'
 import { ToastContainer } from '@/components/ui'
+import { useVoiceInput } from '@/hooks/useVoiceInput'
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -67,6 +68,9 @@ function App() {
   const activeMessageIdRef = useRef<string | null>(null)
   const listIndexedMessageIdsRef = useRef<Set<string>>(new Set())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const voiceInput = useVoiceInput((transcript) => {
+    chatStore.setInputText((chatStore.inputText ? chatStore.inputText + ' ' : '') + transcript)
+  })
 
   // ── Convenience aliases ─────────────────────────────────────────────────────
   const messages = chatStore.messages
@@ -85,10 +89,36 @@ function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
+  // ── iOS keyboard: instant input lift via keyboardWillShow ───────────────────
+  useEffect(() => {
+    let cleanupFns: Array<() => void> = []
+    const setup = async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard')
+        const show = await Keyboard.addListener('keyboardWillShow', (info) => {
+          document.documentElement.style.setProperty('--kb-h', `${info.keyboardHeight}px`)
+          // Scroll to bottom so the last message stays visible
+          setTimeout(() => {
+            const c = document.querySelector('.chat-messages-container')
+            if (c) c.scrollTop = c.scrollHeight
+          }, 50)
+        })
+        const hide = await Keyboard.addListener('keyboardWillHide', () => {
+          document.documentElement.style.setProperty('--kb-h', '0px')
+        })
+        cleanupFns = [() => show.remove(), () => hide.remove()]
+      } catch {
+        // Not running in Capacitor (web dev) — no-op
+      }
+    }
+    setup()
+    return () => cleanupFns.forEach(fn => fn())
+  }, [])
+
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
   const galleryOpen = uiStore.galleryOpen
-  const hoveredMessageId = uiStore.hoveredMessageId
+
   const copiedMessageId = uiStore.copiedMessageId
   const savedMessageIds = uiStore.savedMessageIds
   const editingChatId = uiStore.editingChatId
@@ -1181,7 +1211,7 @@ function App() {
 
       {/* Sidebar */}
       <aside className={`
-        fixed z-20 w-[260px] h-full bg-dark-surface/95 backdrop-blur-sm
+        fixed z-20 w-[85vw] max-w-[340px] h-full bg-dark-surface/95 backdrop-blur-sm
         border-r border-dark-border/30 flex flex-col
         transition-all duration-150 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -1277,7 +1307,7 @@ function App() {
                     />
                   ) : (
                     <h3
-                      className={`text-[13px] font-medium text-text-primary truncate ${getRTLClassName(chat.title)}`}
+                      className={`text-[13px] font-medium text-text-primary ${getRTLClassName(chat.title)}`}
                       dir={getTextDirection(chat.title)}
                     >
                       {chat.title}
@@ -1358,7 +1388,7 @@ function App() {
       <div className={`
         flex-1 flex flex-col relative
         transition-all duration-150 ease-in-out
-        ${sidebarOpen ? 'lg:ml-[260px]' : 'ml-0'}
+        ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
         ${driftOpen ? 'lg:mr-[450px]' : 'mr-0'}
       `}>
         {/* Header */}
@@ -1422,13 +1452,13 @@ function App() {
 
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0 bg-dark-surface/90 rounded-t-2xl shadow-inner">
-            <div className={`h-full overflow-y-auto pt-4 pb-24 space-y-4 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
+          <div className="absolute inset-0">
+            <div style={{ paddingBottom: 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
               {showScrollButton && (
                 <div className={`fixed bottom-24 z-20 transition-all duration-150
-                  left-1/2 lg:${sidebarOpen ? 'left-[calc(50%+130px)]' : 'left-1/2'}
+                  left-1/2 lg:${sidebarOpen ? 'left-[calc(50%+170px)]' : 'left-1/2'}
                   transform -translate-x-1/2
                   ${driftOpen ? 'lg:mr-[225px]' : ''}
                 `}>
@@ -1521,14 +1551,21 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center text-center px-8 py-16">
-                  <div className="w-12 h-12 rounded-2xl bg-accent-violet/10 flex items-center justify-center mb-4">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 3 L12 12 M12 12 L8 17 M12 12 L16 17" stroke="#a855f7" strokeWidth="1.5" strokeLinecap="round"/>
+                <div className="h-full flex flex-col items-center justify-center text-center px-8 pb-32">
+                  <div className="mb-6">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="mx-auto mb-5 opacity-80">
+                      <circle cx="20" cy="20" r="18" stroke="url(#dg)" strokeWidth="1.5" fill="none"/>
+                      <path d="M13 20 Q20 12 27 20 Q20 28 13 20Z" fill="url(#dg)" opacity="0.9"/>
+                      <defs>
+                        <linearGradient id="dg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                          <stop stopColor="#ff006e"/>
+                          <stop offset="1" stopColor="#a855f7"/>
+                        </linearGradient>
+                      </defs>
                     </svg>
+                    <h2 className="text-text-primary font-semibold text-[22px] leading-snug mb-2">What's on your mind?</h2>
+                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[260px] mx-auto">Ask anything. Highlight any response to <span className="text-accent-violet">drift</span> into a focused side chat.</p>
                   </div>
-                  <h3 className="text-text-primary font-medium text-lg mb-2">Start a conversation</h3>
-                  <p className="text-text-muted text-sm leading-relaxed">Ask anything. Highlight text to drift into a side conversation.</p>
                 </div>
               )}
 
@@ -1548,6 +1585,7 @@ function App() {
                   (nextMsg?.isDriftPush && !nextMsg?.text.startsWith('📌') && !nextMsg?.isHiddenContext) ||
                   (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌') && !prevMsg?.isHiddenContext)
                 )
+                const isPlainAI = !msg.isUser && !isDriftMessage
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
@@ -1674,7 +1712,7 @@ function App() {
 
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''}`}
                     key={msg.id}
                   >
                     {/* Drift group header */}
@@ -1693,7 +1731,10 @@ function App() {
                       </div>
                     )}
 
-                    <div className={`px-6 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
+                    <div className={`px-5 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
+                      {isPlainAI && msg.modelTag && (
+                        <div className="text-[11px] text-text-muted mb-1 mt-1">{msg.modelTag}</div>
+                      )}
                       <div
                         className={`flex ${
                           msg.isDriftPush && !msg.isUser && msg.driftPushMetadata?.originSide === 'right'
@@ -1702,25 +1743,26 @@ function App() {
                         } animate-fade-up relative group
                                     ${isDriftMessage && hasMultipleDriftMessages && !isLastDriftMessage ? 'mb-2' : ''}`}
                         style={{ animationDelay: `${index * 50}ms` }}
-                        onMouseEnter={() => !msg.isUser && uiStore.setHoveredMessageId(msg.id)}
-                        onMouseLeave={() => uiStore.setHoveredMessageId(null)}
                       >
                         <div
                           className={`
-                            ${(isDriftMessage && !msg.isUser) || isSinglePushMessage ? 'max-w-[95%] min-w-[320px] sm:min-w-[360px] md:min-w-[420px]' : 'max-w-[85%]'} rounded-2xl px-5 ${
-                              (isDriftMessage && !msg.isUser) || isSinglePushMessage
-                                ? 'pt-10 pb-3'
-                                : (!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3')
+                            ${isPlainAI
+                              ? 'w-full py-2'
+                              : (isDriftMessage && !msg.isUser) || isSinglePushMessage
+                                ? 'max-w-[95%] min-w-[320px] sm:min-w-[360px] md:min-w-[420px] rounded-2xl px-5 pt-10 pb-3'
+                                : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
                             } relative
-                            ${msg.isUser
-                              ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
-                              : isSinglePushMessage
-                                ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer drift-push-glow'
-                                : isDriftMessage
-                                  ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
-                                  : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                            ${isPlainAI
+                              ? 'text-text-secondary'
+                              : msg.isUser
+                                ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
+                                : isSinglePushMessage
+                                  ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer drift-push-glow'
+                                  : isDriftMessage
+                                    ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
+                                    : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                             }
-                            transition-all duration-100 hover:scale-[1.02]
+                            ${!isPlainAI ? 'transition-all duration-100 hover:scale-[1.02]' : ''}
                             ${!msg.isUser && !isDriftMessage ? 'select-text' : ''}
                           `}
                           data-message-id={msg.id}
@@ -1797,52 +1839,6 @@ function App() {
                             }
                           }}
                         >
-                          {/* Message actions for AI messages */}
-                          {!msg.isUser && (
-                            <div className={`absolute -right-9 top-2 flex flex-col gap-1 transition-all duration-100 pointer-events-none ${hoveredMessageId === msg.id ? 'opacity-100' : 'opacity-0'}`}>
-                              <button
-                                onClick={() => handleCopyMessage(msg.text, msg.id)}
-                                className="p-1.5 rounded-lg bg-dark-elevated border border-dark-border/50 pointer-events-auto
-                                         hover:bg-dark-surface hover:border-accent-violet/30 transition-all duration-100
-                                         shadow-lg hover:scale-110"
-                                title="Copy message"
-                              >
-                                {copiedMessageId === msg.id ? (
-                                  <Check className="w-3.5 h-3.5 text-green-400" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5 text-text-muted hover:text-accent-violet" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleToggleSaveMessage(msg)}
-                                className={`p-1.5 rounded-lg bg-dark-elevated border pointer-events-auto
-                                         ${savedMessageIds.has(msg.id)
-                                           ? 'border-cyan-500/50 bg-cyan-500/10'
-                                           : 'border-dark-border/50'}
-                                         hover:bg-dark-surface hover:border-cyan-500/50 transition-all duration-100
-                                         shadow-lg hover:scale-110`}
-                                title={savedMessageIds.has(msg.id) ? "Remove from snippets" : "Save to snippets"}
-                              >
-                                <Bookmark
-                                  className={`w-3.5 h-3.5 transition-colors duration-75
-                                    ${savedMessageIds.has(msg.id)
-                                      ? 'text-cyan-400 fill-cyan-400'
-                                      : 'text-text-muted hover:text-cyan-400'}`}
-                                />
-                              </button>
-                              {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
-                                <button
-                                  onClick={() => handleSavePushedDriftAsChat(msg)}
-                                  className="p-1.5 rounded-lg bg-dark-elevated border border-accent-violet/50 pointer-events-auto
-                                           hover:bg-accent-violet/10 hover:border-accent-violet/70 transition-all duration-100
-                                           shadow-lg hover:scale-110"
-                                  title="Save drift as new chat"
-                                >
-                                  <Save className="w-3.5 h-3.5 text-accent-violet" />
-                                </button>
-                              )}
-                            </div>
-                          )}
 
                           {/* Strand bead */}
                           {msg.strandId && msg.strandId === activeStrandId && (
@@ -1854,7 +1850,7 @@ function App() {
                           )}
 
                           {/* Model tag */}
-                          {!msg.isUser && msg.modelTag && !(isDriftMessage && (isSinglePushMessage || isFirstDriftMessage)) && (
+                          {!msg.isUser && !isPlainAI && msg.modelTag && !(isDriftMessage && (isSinglePushMessage || isFirstDriftMessage)) && (
                             msg.broadcastGroupId ? (
                               <button
                                 onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
@@ -1994,7 +1990,7 @@ function App() {
                           {/* Message content */}
                           {msg.isUser ? (
                             <p
-                              className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
+                              className={`text-[14px] leading-6 font-medium ${getRTLClassName(msg.text)}`}
                               dir={getTextDirection(msg.text)}
                             >
                               {msg.text}
@@ -2005,7 +2001,7 @@ function App() {
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
-                                className="prose prose-sm prose-invert max-w-none text-[13px] leading-6
+                                className="prose prose-sm prose-invert max-w-none text-[15px] leading-7
                                   prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                                   prose-p:text-text-secondary prose-p:mb-2
                                   prose-strong:text-text-primary prose-strong:font-semibold
@@ -2092,7 +2088,7 @@ function App() {
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
-                                className="text-[13px] leading-6 prose prose-sm prose-invert max-w-none
+                                className="text-[15px] leading-7 prose prose-sm prose-invert max-w-none
                                 prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3
                                 prose-p:text-text-secondary prose-p:mb-2
                                 prose-strong:text-text-primary prose-strong:font-semibold
@@ -2131,6 +2127,40 @@ function App() {
                               </ReactMarkdown>
                             </div>
                           )}
+
+                          {/* Bottom action row — Gemini-style */}
+                          {!msg.isUser && (
+                            <div className={`flex items-center gap-0.5 mt-2 ${!isPlainAI ? 'pt-1.5 border-t border-dark-border/20' : ''}`}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleCopyMessage(msg.text, msg.id) }}
+                                onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleCopyMessage(msg.text, msg.id) }}
+                                className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-text-muted hover:text-text-primary hover:bg-dark-elevated/60 active:bg-dark-elevated transition-colors"
+                                title="Copy"
+                              >
+                                {copiedMessageId === msg.id
+                                  ? <Check className="w-4 h-4 text-green-400" />
+                                  : <Copy className="w-4 h-4" />}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleToggleSaveMessage(msg) }}
+                                onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleToggleSaveMessage(msg) }}
+                                className={`p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg transition-colors ${savedMessageIds.has(msg.id) ? 'text-cyan-400' : 'text-text-muted hover:text-text-primary hover:bg-dark-elevated/60 active:bg-dark-elevated'}`}
+                                title={savedMessageIds.has(msg.id) ? 'Remove from snippets' : 'Save to snippets'}
+                              >
+                                <Bookmark className={`w-4 h-4 ${savedMessageIds.has(msg.id) ? 'fill-cyan-400' : ''}`} />
+                              </button>
+                              {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}
+                                  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}
+                                  className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-text-muted hover:text-accent-violet hover:bg-dark-elevated/60 active:bg-dark-elevated transition-colors"
+                                  title="Save drift as new chat"
+                                >
+                                  <Save className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2139,14 +2169,12 @@ function App() {
               })}
 
               {isTyping && !streamingResponse && !messages.some(m => !m.isUser && (!m.text || m.text.length === 0)) && (
-                <div className="max-w-5xl mx-auto px-6">
-                  <div className="flex justify-start animate-fade-up">
-                    <div className="bg-dark-bubble border border-dark-border/50 rounded-2xl px-5 py-3 shadow-lg">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
+                <div className="max-w-5xl mx-auto px-5">
+                  <div className="flex justify-start animate-fade-up py-2">
+                    <div className="flex gap-1.5 items-center px-1">
+                      <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   </div>
                 </div>
@@ -2158,7 +2186,7 @@ function App() {
         </div>
 
         {/* Input area */}
-        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-4 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
+        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-4 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
@@ -2226,6 +2254,22 @@ function App() {
                   </button>
                 )}
               </div>
+              {voiceInput.isSupported && (
+                <button
+                  onClick={voiceInput.isListening ? voiceInput.stopListening : voiceInput.startListening}
+                  className={`
+                    flex-shrink-0 min-w-[44px] min-h-[44px] rounded-full
+                    flex items-center justify-center
+                    transition-all duration-150 active:scale-90
+                    ${voiceInput.isListening
+                      ? 'bg-red-500/20 border border-red-500/50 text-red-400 animate-pulse'
+                      : 'bg-dark-elevated/90 border border-dark-border/60 text-text-muted hover:text-text-primary hover:border-accent-violet/40'}
+                  `}
+                  title={voiceInput.isListening ? 'Stop listening' : 'Voice input'}
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
