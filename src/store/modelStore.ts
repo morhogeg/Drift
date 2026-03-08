@@ -17,7 +17,7 @@ export const DEFAULT_TARGET: Target = {
 }
 
 // Allowed target keys — guards against corrupt/legacy localStorage values
-const ALLOWED_KEYS = new Set(['qwen3', 'oss', 'ollama', 'dummy-basic', 'openrouter', 'gemini-flash-lite', 'gemini-flash', 'gemini-flash-25', 'gemini-flash-20'])
+const ALLOWED_KEYS = new Set(['qwen3', 'oss', 'ollama', 'dummy-basic', 'dummy-lite', 'openrouter', 'gemini-flash-lite', 'gemini-flash', 'gemini-flash-25', 'gemini-flash-20'])
 
 /** Normalise a target list, de-duplicating and migrating legacy keys. */
 function normaliseTargets(targets: Target[]): Target[] {
@@ -27,7 +27,7 @@ function normaliseTargets(targets: Target[]): Target[] {
     const key =
       t.key === 'dummy-basic' ? 'qwen3' : t.key === 'openrouter' ? 'oss' : t.key
     const provider: Target['provider'] =
-      t.provider === 'openrouter' || t.provider === 'ollama' || t.provider === 'gemini'
+      t.provider === 'openrouter' || t.provider === 'ollama' || t.provider === 'gemini' || t.provider === 'dummy'
         ? t.provider
         : 'openrouter'
     const label =
@@ -35,10 +35,18 @@ function normaliseTargets(targets: Target[]): Target[] {
       key === 'oss' ? 'OpenAI OSS' :
       key === 'gemini-flash-lite' ? 'Gemini Flash Lite' :
       key === 'gemini-flash' ? 'Gemini Flash' :
+      key === 'dummy-lite' ? 'Demo AI' :
       t.label
     if (ALLOWED_KEYS.has(key)) map.set(key, { provider, key, label })
   }
   return map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
+}
+
+/** Default dummy model preset for demo/testing. */
+export const DUMMY_TARGET: Target = {
+  provider: 'dummy',
+  key: 'dummy-lite',
+  label: 'Demo AI',
 }
 
 function loadPrefsFromStorage(): Record<string, Target[]> {

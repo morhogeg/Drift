@@ -3,7 +3,7 @@ import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, 
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
-import { checkDummyConnection } from './services/dummyAI'
+import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
@@ -16,6 +16,9 @@ import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
+import MultiModelCarousel from './components/MultiModelCarousel'
+import ModelPillRow from './components/ModelPillRow'
+import ModelPickerSheet from './components/ModelPickerSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
@@ -56,6 +59,10 @@ function App() {
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
   const prevContinueTargetsRef = useRef<typeof modelStore.selectedTargets | null>(null)
+
+  // Mobile carousel + model picker state
+  const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
+  const [modelPickerOpen, setModelPickerOpen] = useState(false)
 
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
@@ -530,6 +537,12 @@ function App() {
                   await sendMessageToOllama(msgs, onChunk, signal!, url, model)
                 }, t.label, broadcastGroupId)
               )
+            } else if (t.provider === 'dummy') {
+              tasks.push(
+                streamIntoNewMessage(async (msgs, onChunk, signal) =>
+                  sendMessageToDummy(msgs, onChunk, signal)
+                , t.label, broadcastGroupId)
+              )
             }
           }
           await Promise.allSettled(tasks)
@@ -558,6 +571,10 @@ function App() {
             await streamIntoNewMessage(async (msgs, onChunk, signal) => {
               await sendMessageToOllama(msgs, onChunk, signal!, url, model)
             }, t.label, undefined, activeStrandId || undefined, undefined)
+          } else if (t.provider === 'dummy') {
+            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+              sendMessageToDummy(msgs, onChunk, signal)
+            , t.label, undefined, activeStrandId || undefined, undefined)
           }
         }
 
@@ -624,6 +641,8 @@ function App() {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
     } else if (modelTag === 'Ollama') {
       setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
+    } else if (modelTag === 'Demo AI') {
+      setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-lite', label: 'Demo AI' }])
     }
     setTimeout(() => {
       if (!targetId) return
@@ -1605,6 +1624,19 @@ function App() {
                       className="max-w-5xl mx-auto px-6"
                       data-broadcast-group={groupId}
                     >
+                      {/* Mobile: horizontal scroll-snap carousel */}
+                      <div className="md:hidden">
+                        <MultiModelCarousel
+                          messages={groupMessages}
+                          broadcastGroupId={groupId}
+                          activeBroadcastGroupId={activeBroadcastGroupId}
+                          onContinueWith={continueWithModel}
+                          onActiveCardChange={(modelTag) => setActiveCarouselModel(modelTag)}
+                        />
+                      </div>
+
+                      {/* Desktop: existing 2-column grid */}
+                      <div className="hidden md:block">
                       <div className="grid gap-4 items-start md:grid-cols-2">
                         {groupMessages.map((gm) => (
                           <div key={`resp-${gm.id}`} className="w-full">
@@ -1706,6 +1738,7 @@ function App() {
                           )
                         })}
                       </div>
+                      </div> {/* end hidden md:block */}
                     </div>
                   )
                 }
@@ -2186,8 +2219,24 @@ function App() {
         </div>
 
         {/* Input area */}
-        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-4 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
+        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
+            {/* Mobile-only: model pill row above textarea */}
+            <div className="lg:hidden">
+              <ModelPillRow
+                selectedTargets={selectedTargets}
+                onToggleTarget={(target) => {
+                  modelStore.toggleTarget(target)
+                  setSelectedTargetsPersist(modelStore.selectedTargets)
+                }}
+                onOpenPicker={() => setModelPickerOpen(true)}
+              />
+              {selectedTargets.length > 1 && activeCarouselModel && (
+                <div className="px-1 pb-1 text-[11px] text-text-muted">
+                  Replying to: <span className="text-accent-violet font-medium">{activeCarouselModel}</span>
+                </div>
+              )}
+            </div>
             <div className="relative flex gap-3 items-end">
               <div className="flex-1 relative">
                 <textarea
@@ -2301,10 +2350,10 @@ function App() {
         aiSettings={aiSettings}
         existingMessages={driftContext?.existingMessages}
         driftChatId={driftContext?.driftChatId}
-        selectedTargets={selectedTargets}
+        selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          if (targets.length === 1 && targets[0].provider !== 'dummy') return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
           if (targets.some(t => t.provider === 'gemini')) return 'gemini'
           if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
           if (targets.some(t => t.provider === 'ollama')) return 'ollama'
@@ -2319,6 +2368,17 @@ function App() {
         onClose={() => uiStore.setSettingsOpen(false)}
         onSave={handleSaveSettings}
         currentSettings={aiSettings}
+      />
+
+      {/* Mobile Model Picker Sheet */}
+      <ModelPickerSheet
+        isOpen={modelPickerOpen}
+        onClose={() => setModelPickerOpen(false)}
+        selectedTargets={selectedTargets}
+        onToggleTarget={(target) => {
+          modelStore.toggleTarget(target)
+          setSelectedTargetsPersist(modelStore.selectedTargets)
+        }}
       />
 
       {/* Snippet Gallery */}

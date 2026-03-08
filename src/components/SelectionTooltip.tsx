@@ -39,6 +39,9 @@ export default function SelectionTooltip({
   const lastAnchorRectRef = useRef<DOMRect | null>(null)
   const selectionChangeTimerRef = useRef<number | null>(null)
 
+  // Detect touch/iOS device
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+
   // --------------------------------------------------------------------------
   // Helpers
   // --------------------------------------------------------------------------
@@ -130,43 +133,64 @@ export default function SelectionTooltip({
 
     clearShowTimer()
     showTimerRef.current = window.setTimeout(() => {
-      // Position above the selection, centred horizontally
-      const rawX = rect.left + rect.width / 2
-      const rawY = Math.max(rect.top - 10, 8)
-      const { x, y } = clampToViewport(rawX, rawY)
+      if (isTouchDevice) {
+        // On touch devices, use a fixed bottom bar — no position calculation needed
+        setTooltip({
+          visible: true,
+          x: 0,
+          y: 0,
+          text,
+          messageId: msgId,
+          isUserMessage,
+          anchorRect: rect,
+        })
+      } else {
+        // Position above the selection, centred horizontally
+        const rawX = rect.left + rect.width / 2
+        const rawY = Math.max(rect.top - 10, 8)
+        const { x, y } = clampToViewport(rawX, rawY)
 
-      setTooltip({
-        visible: true,
-        x,
-        y,
-        text,
-        messageId: msgId,
-        isUserMessage,
-        anchorRect: rect,
-      })
+        setTooltip({
+          visible: true,
+          x,
+          y,
+          text,
+          messageId: msgId,
+          isUserMessage,
+          anchorRect: rect,
+        })
+      }
       showTimerRef.current = null
     }, SHOW_DELAY_MS)
-  }, [clearShowTimer, clampToViewport])
+  }, [clearShowTimer, clampToViewport, isTouchDevice])
 
   // --------------------------------------------------------------------------
   // Touch / iOS events
   // --------------------------------------------------------------------------
 
   useEffect(() => {
+    if (!isTouchDevice) return
+
     // touchend: wait for the browser to commit the selection after the finger lifts
     const handleTouchEnd = () => {
       window.setTimeout(() => {
         tryShowTooltipFromSelection()
-      }, 350)
+      }, 150)
     }
 
     // selectionchange: fires when the user drags iOS selection handles
     const handleSelectionChange = () => {
       clearSelectionChangeTimer()
       selectionChangeTimerRef.current = window.setTimeout(() => {
-        tryShowTooltipFromSelection()
+        const selection = window.getSelection()
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+          // User deliberately deselected — hide the bar
+          dismissTooltip()
+        } else {
+          tryShowTooltipFromSelection()
+        }
         selectionChangeTimerRef.current = null
-      }, 300)
+      }, 200)
     }
 
     document.addEventListener('touchend', handleTouchEnd, { passive: true })
@@ -177,13 +201,15 @@ export default function SelectionTooltip({
       document.removeEventListener('selectionchange', handleSelectionChange)
       clearSelectionChangeTimer()
     }
-  }, [tryShowTooltipFromSelection, clearSelectionChangeTimer])
+  }, [tryShowTooltipFromSelection, clearSelectionChangeTimer, dismissTooltip, isTouchDevice])
 
   // --------------------------------------------------------------------------
-  // Mouse events
+  // Mouse events (desktop only)
   // --------------------------------------------------------------------------
 
   useEffect(() => {
+    if (isTouchDevice) return
+
     const handleMouseUp = (e: MouseEvent) => {
       // Don't process clicks that land on the tooltip itself
       if ((e.target as HTMLElement).closest('.drift-tooltip')) return
@@ -329,7 +355,7 @@ export default function SelectionTooltip({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tooltip, clearHideTimer, clearShowTimer, clampToViewport, dismissTooltip])
+  }, [tooltip, clearHideTimer, clearShowTimer, clampToViewport, dismissTooltip, isTouchDevice])
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -383,6 +409,52 @@ export default function SelectionTooltip({
 
   if (!tooltip?.visible) return null
 
+  // Touch/iOS: persistent bottom bar
+  if (isTouchDevice) {
+    const selectedText = tooltip.text
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          bottom: `calc(env(safe-area-inset-bottom) + 80px)`,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 'calc(100vw - 32px)',
+          maxWidth: '400px',
+          zIndex: 9999,
+        }}
+        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 shadow-2xl"
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        {/* Selected text preview */}
+        <span className="flex-1 text-[11px] text-white/40 truncate">
+          &ldquo;{selectedText.length > 35 ? selectedText.slice(0, 35) + '\u2026' : selectedText}&rdquo;
+        </span>
+        {/* Save button */}
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded-xl text-[13px] font-medium text-white/60 border border-white/10 active:opacity-70"
+          onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
+          onClick={handleSave}
+        >
+          Save
+        </button>
+        {/* Drift button */}
+        {!tooltip.isUserMessage && (
+          <button
+            type="button"
+            className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet active:opacity-80 shadow-md"
+            onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
+            onClick={handleDrift}
+          >
+            Drift
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // Desktop: original floating tooltip above selection
   return (
     <div
       ref={tooltipRef}

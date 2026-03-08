@@ -1,13 +1,31 @@
 # Drift — Session Handoff
 
-**Date:** March 8, 2026
+**Date:** March 9, 2026
 **Branch:** `feature/list-anchors-links`
-**Status:** Fully working on iOS (Capacitor). Major UI polish + voice input added.
+**Status:** Mobile multi-model carousel + iOS drift selection fix implemented. Builds clean.
 
 ---
 
 ## What Was Done This Session
 
+### 7. Mobile Multi-Model Chat (NEW)
+- **Model pills row** — horizontal scrollable chips above the textarea (mobile-only, `lg:hidden`)
+- **"+ Add model"** chip opens a **ModelPickerSheet** bottom sheet (slide-up) to select up to 3 models
+- **Swipeable card carousel** — `MultiModelCarousel` component replaces the desktop grid on mobile; uses CSS `scroll-snap-type: x mandatory` for full-width per-model cards
+- **Pagination dots** — tappable dots below the carousel show current card position
+- **"Replying to: X"** label above textarea updates live as user swipes between model cards
+- **"Continue →"** button on each card (appears when broadcast is active and response is ready)
+- **Demo AI model** — wired in as `dummy-lite` target; streams word-by-word with 30-50ms delay
+- Desktop (md+) keeps the existing 2-column grid unchanged
+
+### 8. iOS Drift Text Selection Fix (NEW)
+- On touch/iOS devices, the tooltip no longer tries to appear above the selection (conflicts with native iOS copy menu)
+- Instead: a **persistent bottom bar** appears fixed at the bottom of screen with selected text preview + Save + Drift buttons
+- Touch events isolated from mouse events — touch path fires at 150ms (was 350ms); selectionchange debounce 200ms (was 300ms)
+- Bottom bar stays visible after native iOS menu dismisses; hides only when selection is cleared
+- Desktop floating tooltip unchanged
+
+### Previous Sessions (1-6)
 ### 1. AI Reply Design — Containerless, Full Width
 - Removed the gray card/border/shadow from plain AI messages — text renders directly on background
 - AI messages now take full width (no `max-w-[85%]` constraint)
@@ -95,6 +113,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
+- [ ] **Real model for multi-model** — wire in Gemini Flash as second model alongside Flash Lite in the default picker (add more real models to ModelPickerSheet's ALL_MODELS list)
 - [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
@@ -102,5 +121,5 @@ VITE_GEMINI_API_KEY=your_key_here
 - [ ] **TestFlight submission** — archive in Xcode → upload to App Store Connect
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
 - [ ] **Multi-level drift** — drift from inside a drift conversation
-- [ ] **App.tsx refactor** — still ~2380 lines, could extract more hooks
+- [ ] **App.tsx refactor** — still ~2400 lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
