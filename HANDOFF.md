@@ -1,8 +1,8 @@
 # Drift — Session Handoff
 
 **Date:** March 9, 2026
-**Branch:** `feature/list-anchors-links`
-**Status:** Mobile multi-model carousel + iOS drift selection fix implemented. Builds clean.
+**Branch:** `main` (was `feature/list-anchors-links`, merged to main)
+**Status:** Major session — multi-model mobile UX, iOS drift fix, ChatGPT-style input, voice fix. All pushed.
 
 ---
 
@@ -24,6 +24,21 @@
 - Touch events isolated from mouse events — touch path fires at 150ms (was 350ms); selectionchange debounce 200ms (was 300ms)
 - Bottom bar stays visible after native iOS menu dismisses; hides only when selection is cleared
 - Desktop floating tooltip unchanged
+
+### 9. ChatGPT-Style Input Field (NEW)
+- Both mic and send buttons now live **inside** the textarea, right edge (no external floating buttons)
+- Field takes full container width with dynamic right-padding to accommodate buttons
+- **Empty state**: mic icon + dimmed send visible inside field
+- **Typing state**: mic hidden, send glows pink→violet gradient
+- **Voice listening state**: red ring on field border + pulsing red stop button
+- Old external floating send/mic buttons fully removed
+
+### 10. Voice Input — Properly Fixed (NEW)
+- **Tap to speak / tap to stop** (was hold-to-speak, now toggle)
+- `isListeningRef` pattern fixes iOS auto-stop quirk: recognition restarts on `onend` if user hasn't explicitly stopped, so mic stays live across silence gaps
+- Three-tier fallback: `webkitSpeechRecognition` → `SpeechRecognition` → `@capacitor-community/speech-recognition` (Capacitor plugin, auto-detected if installed)
+- Transcript accumulates across chunks; `onResult` callback fires per chunk for real-time textarea updates
+- Fully backward-compatible: `onResult` optional, same return shape
 
 ### Previous Sessions (1-6)
 ### 1. AI Reply Design — Containerless, Full Width
@@ -68,28 +83,32 @@
 
 ```
 src/
-  App.tsx                    ~2380 lines
+  App.tsx                    ~2420 lines
   hooks/
-    useVoiceInput.ts         NEW — Web Speech API wrapper
+    useVoiceInput.ts         tap-to-speak, 3-tier fallback, iOS-safe
     useAutoScroll.ts
     useToast.ts
   store/
     chatStore.ts             chat sessions + IndexedDB persistence
     driftStore.ts            drift panel open/closed + temp conversations
-    modelStore.ts            selected targets + per-chat model prefs
+    modelStore.ts            selected targets + per-chat model prefs (+ dummy provider)
     uiStore.ts               panels + theme (dark/light) state
   services/
     gemini.ts                PRIMARY — Gemini REST + SSE + grounding
     openrouter.ts            secondary
     ollama.ts                local models
+    dummyAI.ts               streaming demo model (Demo AI)
     db.ts                    IndexedDB (idb)
     settingsStorage.ts       localStorage settings
   components/
     DriftPanel.tsx           side panel (keyboard-aware input)
-    SelectionTooltip.tsx     iOS-aware text selection tooltip
+    SelectionTooltip.tsx     iOS: persistent bottom bar; desktop: floating tooltip
+    MultiModelCarousel.tsx   NEW — mobile swipeable card carousel for broadcast
+    ModelPillRow.tsx         NEW — model selection chips above input (mobile)
+    ModelPickerSheet.tsx     NEW — bottom sheet model picker (up to 3 models)
     Settings.tsx             settings panel
     Login.tsx                mobile + desktop layouts
-    HeaderControls.tsx       model picker chip
+    HeaderControls.tsx       model picker chip (desktop)
 ios/
   App/                       Capacitor Xcode project
 ```
