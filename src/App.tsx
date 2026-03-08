@@ -2237,87 +2237,97 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="relative flex gap-3 items-end">
-              <div className="flex-1 relative">
-                <textarea
-                  ref={textareaRef}
-                  value={message}
-                  onChange={(e) => chatStore.setInputText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
-                      e.preventDefault()
-                      sendMessage()
-                    }
-                  }}
-                  placeholder={"Type your message..."}
-                  rows={1}
-                  dir={getTextDirection(message)}
-                  className={`
-                    w-full bg-dark-elevated/90 backdrop-blur-md text-text-primary
-                    rounded-2xl px-5 py-3 pr-14
-                    border border-dark-border/60
-                    shadow-lg shadow-black/50
-                    focus:outline-none focus:border-accent-pink/50
-                    focus:shadow-[0_0_20px_rgba(255,0,122,0.15)]
-                    placeholder:text-text-muted
-                    transition-all duration-150
-                    resize-none
-                    min-h-[48px] max-h-[200px]
-                    ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
-                    custom-scrollbar
-                    ${getRTLClassName(message)}
-                  `}
-                />
-                {isTyping ? (
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(e) => chatStore.setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                    e.preventDefault()
+                    sendMessage()
+                  }
+                }}
+                placeholder={"Type your message..."}
+                rows={1}
+                dir={getTextDirection(message)}
+                className={`
+                  w-full bg-dark-elevated/90 backdrop-blur-md text-text-primary
+                  rounded-2xl px-5 py-3
+                  ${message.trim() || voiceInput.isListening || !voiceInput.isSupported ? 'pr-14' : 'pr-24'}
+                  border
+                  ${voiceInput.isListening ? 'border-red-500/40' : 'border-dark-border/60'}
+                  shadow-lg shadow-black/50
+                  focus:outline-none focus:border-accent-pink/50
+                  focus:shadow-[0_0_20px_rgba(255,0,122,0.15)]
+                  placeholder:text-text-muted
+                  transition-all duration-150
+                  resize-none
+                  min-h-[48px] max-h-[200px]
+                  ${message.split('\n').length > 5 ? 'overflow-y-auto' : 'overflow-y-hidden'}
+                  custom-scrollbar
+                  ${getRTLClassName(message)}
+                `}
+              />
+
+              {/* Buttons container — absolutely positioned inside the textarea on the right */}
+              <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                {/* Mic button — only when no text, not listening, and voice is supported */}
+                {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
+                  <button
+                    onClick={voiceInput.startListening}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
+                    title="Voice input"
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Stop-generation button when AI is typing */}
+                {isTyping && (
                   <button
                     onClick={stopGeneration}
-                    className={`
-                      absolute right-2
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-1.5' : 'top-1/2 -translate-y-1/2'}
-                      min-w-[44px] min-h-[44px] rounded-full
-                      flex items-center justify-center
-                      active:scale-90 transition-all duration-100
-                    `}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
                     title="Stop generating"
                   >
-                    <div className="w-7 h-7 rounded-full bg-white/10 border border-white/20 flex items-center justify-center">
-                      <Square className="w-3 h-3 text-text-muted" fill="currentColor" />
-                    </div>
+                    <Square className="w-3.5 h-3.5" fill="currentColor" />
                   </button>
-                ) : (
+                )}
+
+                {/* Listening stop button with red pulse */}
+                {voiceInput.isListening && (
+                  <button
+                    onClick={voiceInput.stopListening}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
+                    title="Stop listening"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                )}
+
+                {/* Send button */}
+                {!isTyping && (
                   <button
                     onClick={sendMessage}
-                    disabled={!message.trim()}
+                    disabled={!message.trim() && !voiceInput.isListening}
                     className={`
-                      absolute right-2
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-1.5' : 'top-1/2 -translate-y-1/2'}
-                      min-w-[44px] min-h-[44px] rounded-full
-                      flex items-center justify-center
-                      active:scale-90 disabled:opacity-30
-                      transition-all duration-100
+                      w-9 h-9 rounded-xl flex items-center justify-center
+                      transition-all duration-150 active:scale-90
+                      ${message.trim() || voiceInput.isListening
+                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20'
+                        : 'bg-dark-border/40 text-text-muted cursor-default'
+                      }
                     `}
+                    title="Send message"
                   >
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-accent-pink to-accent-violet flex items-center justify-center shadow-md shadow-accent-pink/20">
-                      <ArrowUp className="w-3.5 h-3.5 text-white" />
-                    </div>
+                    <ArrowUp className="w-4 h-4" />
                   </button>
                 )}
               </div>
-              {voiceInput.isSupported && (
-                <button
-                  onClick={voiceInput.isListening ? voiceInput.stopListening : voiceInput.startListening}
-                  className={`
-                    flex-shrink-0 min-w-[44px] min-h-[44px] rounded-full
-                    flex items-center justify-center
-                    transition-all duration-150 active:scale-90
-                    ${voiceInput.isListening
-                      ? 'bg-red-500/20 border border-red-500/50 text-red-400 animate-pulse'
-                      : 'bg-dark-elevated/90 border border-dark-border/60 text-text-muted hover:text-text-primary hover:border-accent-violet/40'}
-                  `}
-                  title={voiceInput.isListening ? 'Stop listening' : 'Voice input'}
-                >
-                  <Mic className="w-4 h-4" />
-                </button>
+
+              {/* Voice listening: subtle red glow overlay */}
+              {voiceInput.isListening && (
+                <div className="absolute inset-0 rounded-2xl pointer-events-none ring-1 ring-red-500/40 shadow-[0_0_15px_rgba(239,68,68,0.15)]" />
               )}
             </div>
           </div>
