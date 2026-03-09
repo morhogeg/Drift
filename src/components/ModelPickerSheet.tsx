@@ -36,14 +36,14 @@ export default function ModelPickerSheet({ isOpen, onClose, selectedTargets, onT
 
       {/* Sheet */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl bg-[#0f0f18] border-t border-white/8 px-6 py-6"
+        className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl bg-dark-surface border-t border-dark-border/60 px-6 py-6"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
       >
         {/* Drag handle */}
-        <div className="w-10 h-1 rounded-full bg-white/10 mx-auto mb-5" />
+        <div className="w-10 h-1 rounded-full bg-dark-border/80 mx-auto mb-5" />
 
-        <h3 className="text-[15px] font-semibold text-white mb-1">Choose Models</h3>
-        <p className="text-[12px] text-white/40 mb-5">Select up to 3 models to compare responses</p>
+        <h3 className="text-[15px] font-semibold text-text-primary mb-1">Choose Models</h3>
+        <p className="text-[12px] text-text-muted mb-5">Select up to 3 models to compare responses</p>
 
         <div className="space-y-2">
           {ALL_MODELS.map((model) => {
@@ -59,14 +59,14 @@ export default function ModelPickerSheet({ isOpen, onClose, selectedTargets, onT
                 disabled={isDisabled}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left ${
                   isSelected
-                    ? 'bg-accent-violet/15 border border-accent-violet/40'
+                    ? 'bg-accent-violet/10 border border-accent-violet/40'
                     : isDisabled
-                    ? 'bg-white/3 border border-white/5 opacity-40 cursor-default'
-                    : 'bg-white/5 border border-white/8 active:bg-white/10'
+                    ? 'bg-dark-elevated/40 border border-dark-border/30 opacity-40 cursor-default'
+                    : 'bg-dark-elevated border border-dark-border/60 active:opacity-70'
                 }`}
               >
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[model.provider] ?? 'bg-white/40'}`} />
-                <span className={`flex-1 text-[14px] font-medium ${isSelected ? 'text-white' : 'text-white/70'}`}>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[model.provider] ?? 'bg-text-muted/40'}`} />
+                <span className={`flex-1 text-[14px] font-medium ${isSelected ? 'text-text-primary' : 'text-text-secondary'}`}>
                   {model.label}
                 </span>
                 {isSelected && (

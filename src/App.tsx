@@ -64,6 +64,9 @@ function App() {
   const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
 
+  // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
 
@@ -693,7 +696,8 @@ function App() {
         setContinuedModelByGroup(prev => ({ ...prev, [gid]: modelTag }))
         setActiveBroadcastGroupId(gid)
       }
-      if (gid && msg?.modelTag) {
+      if (gid && msg?.modelTag && !isTouchDevice) {
+        // Canvas view is desktop-only; on mobile messages flow into main thread
         const canvasId = `${gid}:${msg.modelTag}`
         setActiveCanvasId(canvasId)
         const lastAssistant = [...messages].reverse().find(m => m.canvasId === canvasId && !m.isUser)
@@ -1543,7 +1547,7 @@ function App() {
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0">
-            <div style={{ paddingBottom: 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
+            <div style={{ paddingBottom: selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
               {showScrollButton && (
