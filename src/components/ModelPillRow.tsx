@@ -25,12 +25,12 @@ export default function ModelPillRow({ selectedTargets, onToggleTarget, onOpenPi
           onClick={() => {
             if (selectedTargets.length > 1) onToggleTarget(target)
           }}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-violet/15 border border-accent-violet/30 text-[12px] font-medium text-white whitespace-nowrap flex-shrink-0 active:opacity-70 transition-opacity"
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-violet/15 border border-accent-violet/30 text-[12px] font-medium text-text-primary whitespace-nowrap flex-shrink-0 active:opacity-70 transition-opacity"
         >
           <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[target.provider] ?? 'bg-white/40'}`} />
           {target.label}
           {selectedTargets.length > 1 && (
-            <span className="text-white/30 ml-0.5 text-[10px]">✕</span>
+            <span className="text-text-muted ml-0.5 text-[10px]">✕</span>
           )}
         </button>
       ))}
@@ -38,7 +38,7 @@ export default function ModelPillRow({ selectedTargets, onToggleTarget, onOpenPi
       {selectedTargets.length < 3 && (
         <button
           onClick={onOpenPicker}
-          className="flex items-center gap-1 px-3 py-1 rounded-full border border-white/10 text-[12px] text-white/40 whitespace-nowrap flex-shrink-0 active:opacity-70 transition-opacity"
+          className="flex items-center gap-1 px-3 py-1 rounded-full border border-dark-border/60 text-[12px] text-text-muted whitespace-nowrap flex-shrink-0 active:opacity-70 transition-opacity"
         >
           <span className="text-[14px] leading-none">+</span>
           <span>Add model</span>

@@ -641,8 +641,12 @@ function App() {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
     } else if (modelTag === 'Ollama') {
       setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
-    } else if (modelTag === 'Demo AI') {
+    } else if (modelTag === 'Demo AI' || modelTag === 'dummy-lite') {
       setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-lite', label: 'Demo AI' }])
+    } else if (modelTag === 'Gemini Flash Lite' || modelTag === 'gemini-flash-lite') {
+      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash-lite', label: 'Gemini Flash Lite' }])
+    } else if (modelTag === 'Gemini Flash' || modelTag === 'gemini-flash') {
+      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash', label: 'Gemini Flash' }])
     }
     setTimeout(() => {
       if (!targetId) return
@@ -2226,8 +2230,9 @@ function App() {
               <ModelPillRow
                 selectedTargets={selectedTargets}
                 onToggleTarget={(target) => {
-                  modelStore.toggleTarget(target)
-                  setSelectedTargetsPersist(modelStore.selectedTargets)
+                  const exists = selectedTargets.some(t => t.key === target.key)
+                  const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
+                  setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
                 }}
                 onOpenPicker={() => setModelPickerOpen(true)}
               />
@@ -2386,8 +2391,9 @@ function App() {
         onClose={() => setModelPickerOpen(false)}
         selectedTargets={selectedTargets}
         onToggleTarget={(target) => {
-          modelStore.toggleTarget(target)
-          setSelectedTargetsPersist(modelStore.selectedTargets)
+          const exists = selectedTargets.some(t => t.key === target.key)
+          const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
+          setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
         }}
       />
 

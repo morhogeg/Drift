@@ -50,6 +50,8 @@ export function useVoiceInput(
   const isListeningRef = useRef(false)
   const recognitionRef = useRef<any>(null)
   const onResultRef = useRef(onResult)
+  // Ref to startListeningWeb so onend can restart with a NEW instance (same instance can't be restarted in Chrome)
+  const startWebRef = useRef<(() => void) | null>(null)
 
   // Keep the callback ref current without recreating stable functions.
   useEffect(() => {
@@ -93,24 +95,33 @@ export function useVoiceInput(
     }
 
     recognition.onend = () => {
-      // iOS / some browsers auto-stop after silence. Restart if we still want
-      // to be listening (tap-to-speak semantics: keep going until stopListening).
+      // iOS / Chrome auto-stop after silence. Restart with a FRESH instance —
+      // calling start() on an already-ended instance throws InvalidStateError in Chrome.
+      recognitionRef.current = null
       if (isListeningRef.current) {
-        try {
-          recognition.start()
-        } catch {
-          // start() throws if already started; safe to ignore
-        }
+        setTimeout(() => {
+          if (isListeningRef.current) startWebRef.current?.()
+        }, 50)
       } else {
         setIsListening(false)
       }
     }
 
     recognitionRef.current = recognition
-    recognition.start()
+    try {
+      recognition.start()
+    } catch {
+      setError('Failed to start speech recognition')
+      isListeningRef.current = false
+      setIsListening(false)
+      return
+    }
     isListeningRef.current = true
     setIsListening(true)
   }, [])
+
+  // Keep ref pointing to the current function (stable since deps=[])
+  startWebRef.current = startListeningWeb
 
   const stopListeningWeb = useCallback(() => {
     isListeningRef.current = false
