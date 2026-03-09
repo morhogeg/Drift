@@ -1,13 +1,35 @@
 # Drift — Session Handoff
 
 **Date:** March 9, 2026
-**Branch:** `main` (was `feature/list-anchors-links`, merged to main)
-**Status:** Major session — multi-model mobile UX, iOS drift fix, ChatGPT-style input, voice fix. All pushed.
+**Branch:** `main`
+**Status:** Bug fix session — voice input, model picker light mode, model toggle revert. All pushed. Synced to Xcode.
 
 ---
 
 ## What Was Done This Session
 
+### 11. Voice Input — Restart Fix (BUG FIX)
+- **Root cause:** `recognition.onend` called `recognition.start()` on the already-ended instance → Chrome throws `InvalidStateError` → caught silently → mic dies after ~1ms
+- **Fix:** `onend` now restarts via `startWebRef` (ref to `startListeningWeb`) after a 50ms delay, always creating a **fresh** `SpeechRecognition` instance
+- Initial `start()` now wrapped in try/catch to surface real errors instead of silent failure
+- Mic now stays live across silence gaps as intended
+
+### 12. Model Picker — Light Mode Visibility (BUG FIX)
+- **Root cause:** `ModelPillRow` used `text-white / border-white/10 / text-white/40` — invisible against light-mode background (`rgb(242 242 247)`)
+- **Fix:** Replaced with theme-aware classes: `text-text-primary`, `text-text-muted`, `border-dark-border/60`
+- Pill ✕ label also updated from `text-white/30` → `text-text-muted`
+
+### 13. Model Selection — Toggle Revert Bug (BUG FIX)
+- **Root cause:** `onToggleTarget` called `modelStore.toggleTarget(target)` then immediately `setSelectedTargetsPersist(modelStore.selectedTargets)` — but `modelStore.selectedTargets` is the stale pre-render snapshot, so `setSelectedTargets(old_value)` **undid every toggle**
+- **Fix:** Compute next target list locally from current render's `selectedTargets` and call `setSelectedTargetsPersist(next)` directly — applied to both ModelPillRow and ModelPickerSheet handlers
+
+### 14. Continue → Button — Gemini Cases (BUG FIX)
+- `continueWithModel` previously had no cases for Gemini models — clicking "Continue →" on a Gemini broadcast card did nothing
+- Added `Gemini Flash Lite` / `gemini-flash-lite` and `Gemini Flash` / `gemini-flash` cases
+
+---
+
+## Previous Sessions (1-10)
 ### 7. Mobile Multi-Model Chat (NEW)
 - **Model pills row** — horizontal scrollable chips above the textarea (mobile-only, `lg:hidden`)
 - **"+ Add model"** chip opens a **ModelPickerSheet** bottom sheet (slide-up) to select up to 3 models
@@ -18,64 +40,28 @@
 - **Demo AI model** — wired in as `dummy-lite` target; streams word-by-word with 30-50ms delay
 - Desktop (md+) keeps the existing 2-column grid unchanged
 
-### 8. iOS Drift Text Selection Fix (NEW)
+### 8. iOS Drift Text Selection Fix
 - On touch/iOS devices, the tooltip no longer tries to appear above the selection (conflicts with native iOS copy menu)
 - Instead: a **persistent bottom bar** appears fixed at the bottom of screen with selected text preview + Save + Drift buttons
-- Touch events isolated from mouse events — touch path fires at 150ms (was 350ms); selectionchange debounce 200ms (was 300ms)
+- Touch events isolated from mouse events — touch path fires at 150ms; selectionchange debounce 200ms
 - Bottom bar stays visible after native iOS menu dismisses; hides only when selection is cleared
-- Desktop floating tooltip unchanged
 
-### 9. ChatGPT-Style Input Field (NEW)
-- Both mic and send buttons now live **inside** the textarea, right edge (no external floating buttons)
-- Field takes full container width with dynamic right-padding to accommodate buttons
+### 9. ChatGPT-Style Input Field
+- Both mic and send buttons now live **inside** the textarea, right edge
 - **Empty state**: mic icon + dimmed send visible inside field
 - **Typing state**: mic hidden, send glows pink→violet gradient
 - **Voice listening state**: red ring on field border + pulsing red stop button
-- Old external floating send/mic buttons fully removed
 
-### 10. Voice Input — Properly Fixed (NEW)
-- **Tap to speak / tap to stop** (was hold-to-speak, now toggle)
-- `isListeningRef` pattern fixes iOS auto-stop quirk: recognition restarts on `onend` if user hasn't explicitly stopped, so mic stays live across silence gaps
-- Three-tier fallback: `webkitSpeechRecognition` → `SpeechRecognition` → `@capacitor-community/speech-recognition` (Capacitor plugin, auto-detected if installed)
-- Transcript accumulates across chunks; `onResult` callback fires per chunk for real-time textarea updates
-- Fully backward-compatible: `onResult` optional, same return shape
+### 10. Voice Input — Toggle Fix (superseded by session 11)
+- Tap-to-speak / tap-to-stop; `isListeningRef` pattern; three-tier fallback
 
-### Previous Sessions (1-6)
-### 1. AI Reply Design — Containerless, Full Width
-- Removed the gray card/border/shadow from plain AI messages — text renders directly on background
-- AI messages now take full width (no `max-w-[85%]` constraint)
-- Model label (e.g. "Gemini Flash Lite") moved above the message as a small muted `text-[11px]` label
-- Copy/bookmark action row no longer has the card's `border-t` separator
-- User bubbles kept as gradient pill but narrowed to `max-w-[80%]`
-
-### 2. DriftPanel iOS Keyboard Fix
-- Messages scroll area: `paddingBottom: calc(var(--kb-h, 0px) + 5rem)` — scrolls above keyboard
-- Input container: `paddingBottom: calc(var(--kb-h, 0px) + env(safe-area-inset-bottom) + 0.5rem)`
-- `--kb-h` CSS var is set globally by `keyboardWillShow` listener in App.tsx (already existed)
-
-### 3. Sidebar Wider
-- Width: `w-[85vw] max-w-[340px]` (was fixed `w-[260px]`)
-- Chat titles: removed `truncate` — titles now wrap to second line instead of cutting off
-- Desktop main content margin updated to `lg:ml-[340px]`
-
-### 4. Input Field Placement in Long Chats
-- Messages container bottom padding: `calc(9rem + var(--kb-h, 0px))` (was 6rem)
-- Last message no longer slides under the floating input bar
-
-### 5. Design Polish — Claude/Gemini Feel
-- **Empty state**: New centered "What's on your mind?" screen with gradient Drift logo mark and subtitle
-- **AI text**: Bumped from `text-[13px] leading-6` → `text-[15px] leading-7` (more readable)
-- **User text**: Bumped to `text-[14px] font-medium`
-- **Typing indicator**: Bare 3 dots (`w-1.5 h-1.5`), no card container
-- **Messages area**: Removed heavy `bg-dark-surface/90 rounded-t-2xl shadow-inner` wrapper
-- **Message spacing**: `space-y-2` with `mt-6` on each user message for natural conversation rhythm
-
-### 6. Voice Input (Web Speech API)
-- New hook: `src/hooks/useVoiceInput.ts` — wraps `SpeechRecognition` / `webkitSpeechRecognition`
-- Mic button added to main chat input (between textarea and send button)
-- Mic button added to DriftPanel input area
-- Idle: ghost circular button; Listening: red + `animate-pulse`; Appends transcript to input text
-- Hidden automatically if browser doesn't support SpeechRecognition
+### 1–6. Previous Sessions
+1. AI Reply Design — containerless, full width
+2. DriftPanel iOS keyboard fix
+3. Sidebar wider (85vw/340px)
+4. Input field placement in long chats
+5. Design polish — Claude/Gemini feel
+6. Voice input (Web Speech API) — initial implementation
 
 ---
 
@@ -83,9 +69,9 @@
 
 ```
 src/
-  App.tsx                    ~2420 lines
+  App.tsx                    ~2430 lines
   hooks/
-    useVoiceInput.ts         tap-to-speak, 3-tier fallback, iOS-safe
+    useVoiceInput.ts         tap-to-speak, fresh-instance restart, 3-tier fallback
     useAutoScroll.ts
     useToast.ts
   store/
@@ -103,9 +89,9 @@ src/
   components/
     DriftPanel.tsx           side panel (keyboard-aware input)
     SelectionTooltip.tsx     iOS: persistent bottom bar; desktop: floating tooltip
-    MultiModelCarousel.tsx   NEW — mobile swipeable card carousel for broadcast
-    ModelPillRow.tsx         NEW — model selection chips above input (mobile)
-    ModelPickerSheet.tsx     NEW — bottom sheet model picker (up to 3 models)
+    MultiModelCarousel.tsx   mobile swipeable card carousel for broadcast
+    ModelPillRow.tsx         model selection chips above input (mobile, light+dark)
+    ModelPickerSheet.tsx     bottom sheet model picker (up to 3 models)
     Settings.tsx             settings panel
     Login.tsx                mobile + desktop layouts
     HeaderControls.tsx       model picker chip (desktop)
@@ -132,7 +118,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **Real model for multi-model** — wire in Gemini Flash as second model alongside Flash Lite in the default picker (add more real models to ModelPickerSheet's ALL_MODELS list)
+- [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
@@ -140,5 +126,5 @@ VITE_GEMINI_API_KEY=your_key_here
 - [ ] **TestFlight submission** — archive in Xcode → upload to App Store Connect
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
 - [ ] **Multi-level drift** — drift from inside a drift conversation
-- [ ] **App.tsx refactor** — still ~2400 lines, could extract more hooks
+- [ ] **App.tsx refactor** — still ~2430 lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
