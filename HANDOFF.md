@@ -2,12 +2,28 @@
 
 **Date:** March 9, 2026
 **Branch:** `main`
-**Build:** 9 (incremented this session)
-**Status:** Multi-model carousel text overflow fix + Drift bottom bar restored. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 10 (incremented this session)
+**Status:** 4 fixes: removed dot in single-model mode, carousel swipe enabled, Continue button moved below content, voice input fixed (Info.plist permissions). TypeScript clean. Synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 21. Single-model mode — remove purple dot (POLISH)
+- **Fix:** In `ModelPillRow.tsx`, the colored model dot is now hidden when only 1 target is selected. Shows only in multi-model mode where it helps distinguish models.
+
+### 22. Multi-model carousel — swipe enabled (BUG FIX)
+- **Root cause:** Outer `overflow-hidden` wrapper was creating a clipping context that blocked iOS touch-based horizontal scroll on the inner snap container
+- **Fix:** Changed outer wrapper to `style={{ overflowX: 'clip' }}` (doesn't intercept scroll events); inner container changed from `overflowX: 'auto'` → `'scroll'`; added `touchAction: 'pan-x'` for explicit iOS gesture routing; `scrollSnapAlign: 'start'` for better snap feel
+
+### 23. Continue button — moved below content (UX)
+- **Root cause:** `absolute top-2 right-3` positioned the button overlapping the first line of text
+- **Fix:** Button is now a flex row at the bottom of the card (`flex justify-end mt-3`), no longer overlapping content
+
+### 24. Voice input — fixed (BUG FIX)
+- **Root cause:** `Info.plist` was missing `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`. iOS silently denied `webkitSpeechRecognition.start()` with `not-allowed`, which was never shown to the user.
+- **Fix:** Added both privacy keys to `Info.plist`. Added `toast.error()` display for voice errors so failures are visible. Installed `@capacitor-community/speech-recognition@7.0.1` as a fallback (Capacitor plugin, SPM-incompatible warning is benign — web speech path works).
+- **⚠️ First launch after rebuild:** iOS will show a permission dialog for mic + speech. User must allow both.
 
 ### 19. Multi-model carousel — text overflow fix (BUG FIX)
 - **Root cause:** `minWidth: '100%'` in a flex scroll container allows children to expand beyond viewport width — text spilled horizontally instead of wrapping

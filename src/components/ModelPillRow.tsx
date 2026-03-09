@@ -27,7 +27,9 @@ export default function ModelPillRow({ selectedTargets, onToggleTarget, onOpenPi
           }}
           className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-violet/15 border border-accent-violet/30 text-[12px] font-medium text-text-primary whitespace-nowrap flex-shrink-0 active:opacity-70 transition-opacity"
         >
-          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[target.provider] ?? 'bg-white/40'}`} />
+          {selectedTargets.length > 1 && (
+            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[target.provider] ?? 'bg-white/40'}`} />
+          )}
           {target.label}
           {selectedTargets.length > 1 && (
             <span className="text-text-muted ml-0.5 text-[10px]">✕</span>

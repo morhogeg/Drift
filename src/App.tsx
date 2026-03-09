@@ -79,6 +79,16 @@ function App() {
     chatStore.setInputText((chatStore.inputText ? chatStore.inputText + ' ' : '') + transcript)
   })
 
+  // Show toast when voice recognition errors (e.g. permission denied)
+  useEffect(() => {
+    if (voiceInput.error) {
+      const msg = voiceInput.error === 'not-allowed'
+        ? 'Microphone access denied. Please allow it in Settings.'
+        : `Voice error: ${voiceInput.error}`
+      toast.error(msg)
+    }
+  }, [voiceInput.error])
+
   // ── Convenience aliases ─────────────────────────────────────────────────────
   const messages = chatStore.messages
   const chatHistory = chatStore.chatHistory

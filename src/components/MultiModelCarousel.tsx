@@ -54,47 +54,38 @@ export default function MultiModelCarousel({
   }
 
   return (
-    <div className="w-full overflow-hidden">
+    <div className="w-full" style={{ overflowX: 'clip' }}>
       {/* Horizontal scroll-snap container */}
       <div
         ref={scrollRef}
         className="flex"
         style={{
-          overflowX: 'auto',
+          overflowX: 'scroll',
           scrollSnapType: 'x mandatory',
           WebkitOverflowScrolling: 'touch',
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
+          touchAction: 'pan-x',
         } as React.CSSProperties}
         onScroll={handleScroll}
       >
         {messages.map((msg, i) => (
           <div
             key={msg.id}
-            style={{ minWidth: '100%', maxWidth: '100%', scrollSnapAlign: 'center' }}
+            style={{ minWidth: '100%', maxWidth: '100%', scrollSnapAlign: 'start' }}
             className="flex-shrink-0 min-w-0"
           >
             <div
-              className="ai-message relative select-text pt-6 pb-2 w-full overflow-hidden"
+              className="ai-message select-text pt-5 pb-2 w-full overflow-hidden"
               data-message-id={msg.id}
             >
-              {/* Model label top-left */}
-              <div className="absolute top-1 left-0 flex items-center gap-1.5">
+              {/* Model label */}
+              <div className="flex items-center gap-1.5 mb-3">
                 <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[i % MODEL_DOT_COLORS.length]}`} />
                 <span className="text-[11px] text-text-muted/60 uppercase tracking-wider">
                   {msg.modelTag}
                 </span>
               </div>
-
-              {/* Continue button (only on active broadcast, only when response is ready) */}
-              {broadcastGroupId === activeBroadcastGroupId && msg.text && msg.text.length > 0 && (
-                <button
-                  onClick={() => onContinueWith(msg.modelTag ?? '', msg.id)}
-                  className="absolute top-2 right-3 px-2.5 py-1 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet active:opacity-70 transition-opacity"
-                >
-                  Continue →
-                </button>
-              )}
 
               {/* Response content */}
               {msg.text && msg.text.length > 0 ? (
@@ -108,6 +99,18 @@ export default function MultiModelCarousel({
                   <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                   <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              )}
+
+              {/* Continue button — below content, right-aligned */}
+              {broadcastGroupId === activeBroadcastGroupId && msg.text && msg.text.length > 0 && (
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => onContinueWith(msg.modelTag ?? '', msg.id)}
+                    className="px-3 py-1.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[11px] font-medium text-accent-violet active:opacity-70 transition-opacity"
+                  >
+                    Continue →
+                  </button>
                 </div>
               )}
             </div>
