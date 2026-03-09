@@ -412,44 +412,51 @@ export default function SelectionTooltip({
   // Touch/iOS: persistent bottom bar
   if (isTouchDevice) {
     const selectedText = tooltip.text
+    const preview = selectedText.length > 32 ? selectedText.slice(0, 32) + '\u2026' : selectedText
     return (
       <div
         style={{
           position: 'fixed',
-          bottom: `calc(env(safe-area-inset-bottom) + 80px)`,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 'calc(100vw - 32px)',
-          maxWidth: '400px',
+          bottom: `calc(env(safe-area-inset-bottom) + 72px)`,
+          left: '12px',
+          right: '12px',
           zIndex: 9999,
         }}
-        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 shadow-2xl"
+        className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        {/* Selected text preview */}
-        <span className="flex-1 text-[11px] text-white/40 truncate">
-          &ldquo;{selectedText.length > 35 ? selectedText.slice(0, 35) + '\u2026' : selectedText}&rdquo;
-        </span>
-        {/* Save button */}
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded-xl text-[13px] font-medium text-white/60 border border-white/10 active:opacity-70"
-          onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
-          onClick={handleSave}
-        >
-          Save
-        </button>
-        {/* Drift button */}
-        {!tooltip.isUserMessage && (
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border/70 shadow-[0_8px_32px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.10)]">
+
+          {/* Gradient accent bar + selected text preview */}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <div className="w-[3px] h-7 rounded-full bg-gradient-to-b from-accent-pink to-accent-violet flex-shrink-0" />
+            <span className="text-[12px] text-text-muted italic truncate">
+              &ldquo;{preview}&rdquo;
+            </span>
+          </div>
+
+          {/* Save button */}
           <button
             type="button"
-            className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet active:opacity-80 shadow-md"
-            onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
-            onClick={handleDrift}
+            className="px-3.5 py-1.5 rounded-xl text-[13px] font-medium text-text-secondary bg-dark-elevated border border-dark-border/80 active:scale-95 active:opacity-70 transition-all flex-shrink-0"
+            onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
+            onClick={handleSave}
           >
-            Drift
+            Save
           </button>
-        )}
+
+          {/* Drift button */}
+          {!tooltip.isUserMessage && (
+            <button
+              type="button"
+              className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet shadow-[0_4px_14px_rgba(168,85,247,0.35)] active:scale-95 active:opacity-80 transition-all flex-shrink-0"
+              onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
+              onClick={handleDrift}
+            >
+              Drift
+            </button>
+          )}
+        </div>
       </div>
     )
   }
@@ -470,70 +477,45 @@ export default function SelectionTooltip({
         e.stopPropagation()
       }}
     >
-      <div className="flex gap-2 bg-dark-elevated/95 backdrop-blur rounded-full p-1.5 border border-dark-border/70 shadow-lg">
+      <div className="flex gap-1.5 bg-dark-surface/95 backdrop-blur-xl rounded-2xl p-1.5 border border-dark-border/70 shadow-[0_8px_24px_rgba(0,0,0,0.15),0_2px_6px_rgba(0,0,0,0.08)]">
         {!tooltip.isUserMessage && (
           <button
             type="button"
-            onMouseDown={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-            }}
-            onTouchStart={(e) => {
-              e.stopPropagation()
-            }}
-            onTouchEnd={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDrift()
-            }}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDrift()
-            }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onTouchStart={(e) => { e.stopPropagation() }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
             title="Drift on selected text (D)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                       bg-dark-bubble border border-dark-border/60 text-text-secondary
-                       hover:border-accent-violet/40 hover:text-text-primary
-                       transition-colors duration-150 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                       text-white bg-gradient-to-r from-accent-pink to-accent-violet
+                       shadow-[0_2px_8px_rgba(168,85,247,0.3)]
+                       hover:opacity-90 active:scale-95
+                       transition-all duration-150 cursor-pointer text-[12px] font-semibold"
           >
             <GitBranch className="w-3.5 h-3.5" />
-            <span className="text-[12px]">Drift</span>
+            Drift
           </button>
         )}
 
         <button
           type="button"
-          onMouseDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onTouchStart={(e) => {
-            e.stopPropagation()
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleSave()
-          }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleSave()
-          }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onTouchStart={(e) => { e.stopPropagation() }}
+          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
           title="Save selection to snippets (S)"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                     bg-dark-bubble border border-dark-border/60 text-text-secondary
-                     hover:border-accent-violet/40 hover:text-text-primary
-                     transition-colors duration-150 cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                     bg-dark-elevated border border-dark-border/70 text-text-secondary
+                     hover:border-accent-violet/40 hover:text-text-primary active:scale-95
+                     transition-all duration-150 cursor-pointer text-[12px] font-medium"
         >
-          <Bookmark className="w-3.5 h-3.5 text-text-muted" />
-          <span className="text-[12px]">Save</span>
+          <Bookmark className="w-3.5 h-3.5" />
+          Save
         </button>
       </div>
 
       {/* Downward arrow */}
-      <div className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 bg-dark-elevated/95 rotate-45 border-r border-b border-dark-border/70" />
+      <div className="absolute left-1/2 -translate-x-1/2 top-full w-2.5 h-2.5 bg-dark-surface/95 rotate-45 border-r border-b border-dark-border/70" />
     </div>
   )
 }
