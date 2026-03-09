@@ -2,11 +2,34 @@
 
 **Date:** March 9, 2026
 **Branch:** `main`
-**Status:** Bug fix session — voice input, model picker light mode, model toggle revert. All pushed. Synced to Xcode.
+**Build:** 6 (incremented this session)
+**Status:** Multi-model UX polish + DriftPanel input redesign + retroactive model add. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 15. Multi-model carousel — frameless card design
+- Removed the bordered card frame from each carousel card; each model's answer now renders as clean full-width content matching a normal single-model AI message
+- Model label (colored dot + name) kept, positioned subtly above the content
+- Pagination dots fixed for light mode: changed from `bg-white/15` (invisible on light bg) to theme-aware `bg-text-muted/30`
+
+### 16. Retroactive model add
+- When user adds a new model via ModelPillRow or ModelPickerSheet while an active broadcast group exists, the original user question is automatically sent to the new model
+- Response is added to the same `broadcastGroupId` so it appears as a new swipeable card alongside existing answers
+- Added `sendToTarget` helper that mirrors the broadcast dispatch switch-case for a single target
+
+### 17. DriftPanel input — match main chat
+- Moved mic button inside the textarea (was a separate external button to the right)
+- Now uses `absolute right-2 bottom-2 flex items-center gap-1` container matching main chat exactly
+- Button order: mic (when empty) → stop-generation → listening-stop → send
+- Red glow overlay on listening state added
+- Textarea `pr-24` to accommodate both buttons
+
+### 18. Input field polish
+- Inactive send button: removed grey background (`bg-white/[0.05] border border-white/10 opacity-40`) → just `text-text-muted cursor-default`, arrow visible without background
+- Send button positioning: `bottom-2` via container (no more conditional `top-1/2 -translate-y-1/2`)
+- Applies to DriftPanel; main chat was already using this style
 
 ### 11. Voice Input — Restart Fix (BUG FIX)
 - **Root cause:** `recognition.onend` called `recognition.start()` on the already-ended instance → Chrome throws `InvalidStateError` → caught silently → mic dies after ~1ms
@@ -118,12 +141,12 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
+- [ ] **TestFlight submission** — archive build 6 in Xcode → upload to App Store Connect
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
-- [ ] **TestFlight submission** — archive in Xcode → upload to App Store Connect
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
 - [ ] **Multi-level drift** — drift from inside a drift conversation
 - [ ] **App.tsx refactor** — still ~2430 lines, could extract more hooks

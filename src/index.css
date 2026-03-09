@@ -5,15 +5,20 @@
 
 /* ── Theme variables ── */
 
+/* Keyboard height — set by JS via keyboardWillShow event */
+:root {
+  --kb-h: 0px;
+}
+
 /* Light theme (default) — RGB triplets for Tailwind opacity modifier support */
 :root {
-  --color-bg: 245 245 247;
+  --color-bg: 250 250 250;
   --color-surface: 255 255 255;
-  --color-elevated: 235 235 235;
-  --color-border: 209 209 214;
-  --color-text-primary: 28 28 30;
-  --color-text-secondary: 60 60 67;
-  --color-text-muted: 142 142 147;
+  --color-elevated: 242 242 247;
+  --color-border: 220 220 225;
+  --color-text-primary: 17 17 17;
+  --color-text-secondary: 50 50 60;
+  --color-text-muted: 130 130 140;
 }
 
 /* Dark theme */
@@ -75,7 +80,7 @@ html, body {
   * {
     @apply transition-colors duration-200;
   }
-  
+
   body {
     @apply bg-dark-bg text-text-primary antialiased;
     /* FIX 6 — Prevent horizontal overflow */
@@ -111,6 +116,37 @@ html, body {
   }
 }
 
+/* ── Light-theme prose overrides ── */
+/* When NOT in dark mode, prose-invert gives white text — we want dark text instead */
+:root:not(.dark) .prose.prose-invert p,
+:root:not(.dark) .prose.prose-invert li,
+:root:not(.dark) .prose.prose-invert td,
+:root:not(.dark) .prose.prose-invert th {
+  color: rgb(50 50 60);
+}
+:root:not(.dark) .prose.prose-invert h1,
+:root:not(.dark) .prose.prose-invert h2,
+:root:not(.dark) .prose.prose-invert h3,
+:root:not(.dark) .prose.prose-invert h4,
+:root:not(.dark) .prose.prose-invert strong {
+  color: rgb(17 17 17);
+}
+:root:not(.dark) .prose.prose-invert code {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.08);
+}
+:root:not(.dark) .prose.prose-invert pre {
+  background: rgb(242 242 247);
+  border-color: rgb(220 220 225);
+}
+:root:not(.dark) .prose.prose-invert a {
+  color: #7c3aed;
+}
+:root:not(.dark) .prose.prose-invert blockquote {
+  color: rgb(130 130 140);
+  border-left-color: rgb(220 220 225);
+}
+
 /* Custom scrollbar for textarea */
 .custom-scrollbar {
   /* Firefox */
@@ -142,6 +178,8 @@ html, body {
 .ai-message {
   user-select: text;
   -webkit-user-select: text;
+  /* Suppress native iOS callout (Look Up, Share…) so our Drift tooltip shows instead */
+  -webkit-touch-callout: none;
 }
 
 /* Ensure text selection works */

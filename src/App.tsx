@@ -420,6 +420,63 @@ function App() {
     modelStore.setChatModelPrefs(activeChatId, modelStore.selectedTargets)
   }
 
+  // ── sendToTarget: stream a single target into a new message bubble ───────────
+  // Used when a model is added after a broadcast group is already active.
+  const sendToTarget = async (
+    target: (typeof modelStore.selectedTargets)[number],
+    contextMessages: { role: string; content: string }[],
+    broadcastGroupId: string
+  ) => {
+    const aiResponseId = (Date.now() + Math.random()).toString()
+    let acc = ''
+    const aiMessage: Message = {
+      id: aiResponseId,
+      text: '',
+      isUser: false,
+      timestamp: new Date(),
+      modelTag: target.label,
+      broadcastGroupId,
+    }
+    chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
+
+    const abortController = new AbortController()
+    const signal = abortController.signal
+
+    const onChunk = (chunk: string) => {
+      acc += chunk
+      chatStore.setStreaming(acc)
+      const current = useChatStore.getState().messages
+      chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+    }
+
+    try {
+      if (target.provider === 'gemini') {
+        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
+        if (!apiKey) throw new Error('No Gemini API key found.')
+        const model = (preset?.model || aiSettings.geminiModel) as any
+        await sendMessageToGemini(contextMessages as any, onChunk, apiKey, signal, model)
+      } else if (target.provider === 'openrouter') {
+        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
+        const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
+        if (!apiKey) throw new Error('No OpenRouter API key found.')
+        const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
+        await sendMessageToOpenRouter(contextMessages as any, onChunk, apiKey, signal, model as any)
+      } else if (target.provider === 'ollama') {
+        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
+        const url = preset?.serverUrl || aiSettings.ollamaUrl
+        const model = preset?.model || aiSettings.ollamaModel
+        await sendMessageToOllama(contextMessages as any, onChunk, signal, url, model)
+      } else if (target.provider === 'dummy') {
+        await sendMessageToDummy(contextMessages as any, onChunk, signal)
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Error'
+      const current = useChatStore.getState().messages
+      chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: `[Error: ${errMsg}]` } : m))
+    }
+  }
+
   // ── sendMessage ─────────────────────────────────────────────────────────────
   const sendMessage = async () => {
     if (message.trim()) {
@@ -2233,6 +2290,17 @@ function App() {
                   const exists = selectedTargets.some(t => t.key === target.key)
                   const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
                   setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
+                  // If a model was added and there's an active broadcast group, send the original question to it
+                  if (!exists && activeBroadcastGroupId) {
+                    const currentMessages = useChatStore.getState().messages
+                    const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
+                    const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
+                    const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
+                    if (userMsg && userMsg.isUser) {
+                      const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+                      sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+                    }
+                  }
                 }}
                 onOpenPicker={() => setModelPickerOpen(true)}
               />
@@ -2394,6 +2462,17 @@ function App() {
           const exists = selectedTargets.some(t => t.key === target.key)
           const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
           setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
+          // If a model was added and there's an active broadcast group, send the original question to it
+          if (!exists && activeBroadcastGroupId) {
+            const currentMessages = useChatStore.getState().messages
+            const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
+            const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
+            const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
+            if (userMsg && userMsg.isUser) {
+              const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+              sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+            }
+          }
         }}
       />
 

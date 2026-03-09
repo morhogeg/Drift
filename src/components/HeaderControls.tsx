@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Check, Megaphone } from 'lucide-react'
-type Provider = 'openrouter' | 'ollama' | 'gemini'
+type Provider = 'openrouter' | 'ollama' | 'gemini' | 'dummy'
 type Target = { provider: Provider, key: string, label: string }
 
 interface Props {

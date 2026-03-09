@@ -11,8 +11,8 @@ const config: CapacitorConfig = {
       backgroundColor: '#0a0a0a',
     },
     Keyboard: {
-      resize: 'body',
-      resizeOnFullScreen: true,
+      resize: 'none',
+      resizeOnFullScreen: false,
     },
   },
 };

@@ -896,8 +896,7 @@ export default function DriftPanel({
         <div className="absolute bottom-0 left-0 right-0 z-10">
           <div className="h-8 bg-gradient-to-t from-dark-bg to-transparent pointer-events-none" />
           <div className="bg-dark-bg px-4 pt-1" style={{ paddingBottom: 'calc(var(--kb-h, 0px) + env(safe-area-inset-bottom) + 0.5rem)' }}>
-            <div className="flex gap-2 items-end">
-              <div className="relative flex-1">
+            <div className="relative flex-1">
                 <textarea
                   ref={inputRef}
                   value={message}
@@ -913,7 +912,7 @@ export default function DriftPanel({
                   dir={getTextDirection(message)}
                   className={`
                     w-full bg-dark-elevated text-text-primary text-[13px]
-                    rounded-2xl px-4 py-3 pr-12
+                    rounded-2xl px-4 py-3 pr-24
                     border border-white/[0.08]
                     focus:outline-none focus:border-accent-violet/30
                     focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]
@@ -926,58 +925,52 @@ export default function DriftPanel({
                     ${getRTLClassName(message)}
                   `}
                 />
-                {isTyping ? (
-                  <button
-                    onClick={stopGeneration}
-                    className={`
-                      absolute right-2.5
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
-                      w-7 h-7 rounded-full
-                      bg-dark-elevated border border-white/10
-                      text-text-primary
-                      flex items-center justify-center
-                      hover:border-accent-violet/40 active:scale-95
-                      transition-all duration-100
-                    `}
-                    title="Stop generating"
-                  >
-                    <Square className="w-3 h-3" fill="currentColor" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={sendMessage}
-                    disabled={!message.trim()}
-                    className={`
-                      absolute right-2.5
-                      ${message.split('\n').length > 1 || message.length > 50 ? 'bottom-2.5' : 'top-1/2 -translate-y-1/2'}
-                      w-7 h-7 rounded-full
-                      flex items-center justify-center
-                      transition-all duration-150 active:scale-95
-                      ${message.trim()
-                        ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-[0_2px_12px_rgba(168,85,247,0.4)]'
-                        : 'bg-white/[0.05] border border-white/10 text-text-muted cursor-not-allowed opacity-40'}
-                    `}
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
+                <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                  {/* Mic — only when no text, not listening, not typing */}
+                  {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
+                    <button
+                      onClick={voiceInput.startListening}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
+                      title="Voice input"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                  )}
+                  {/* Stop generation */}
+                  {isTyping && (
+                    <button
+                      onClick={stopGeneration}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
+                      title="Stop generating"
+                    >
+                      <Square className="w-3.5 h-3.5" fill="currentColor" />
+                    </button>
+                  )}
+                  {/* Listening stop */}
+                  {voiceInput.isListening && (
+                    <button
+                      onClick={voiceInput.stopListening}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
+                      title="Stop listening"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                    </button>
+                  )}
+                  {/* Send button */}
+                  {!isTyping && (
+                    <button
+                      onClick={sendMessage}
+                      disabled={!message.trim() && !voiceInput.isListening}
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-150 active:scale-90 ${message.trim() || voiceInput.isListening ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20' : 'text-text-muted cursor-default'}`}
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                {/* Voice listening red glow overlay */}
+                {voiceInput.isListening && (
+                  <div className="absolute inset-0 rounded-2xl pointer-events-none ring-1 ring-red-500/40 shadow-[0_0_15px_rgba(239,68,68,0.15)]" />
                 )}
-              </div>
-              {voiceInput.isSupported && (
-                <button
-                  onClick={voiceInput.isListening ? voiceInput.stopListening : voiceInput.startListening}
-                  className={`
-                    flex-shrink-0 w-9 h-9 rounded-full
-                    flex items-center justify-center
-                    transition-all duration-150 active:scale-95
-                    ${voiceInput.isListening
-                      ? 'bg-red-500/20 border border-red-500/50 text-red-400 animate-pulse'
-                      : 'bg-dark-elevated border border-white/[0.08] text-text-muted hover:text-text-primary hover:border-accent-violet/30'}
-                  `}
-                  title={voiceInput.isListening ? 'Stop listening' : 'Voice input'}
-                >
-                  <Mic className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
           </div>
         </div>

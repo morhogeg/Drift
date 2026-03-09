@@ -12,7 +12,6 @@ interface MultiModelCarouselProps {
 }
 
 const MODEL_DOT_COLORS = ['bg-accent-violet', 'bg-sky-400', 'bg-emerald-400']
-const MODEL_BORDER_COLORS = ['border-accent-violet/20', 'border-sky-500/20', 'border-emerald-500/20']
 
 export default function MultiModelCarousel({
   messages,
@@ -76,13 +75,13 @@ export default function MultiModelCarousel({
             className="flex-shrink-0"
           >
             <div
-              className={`ai-message border ${MODEL_BORDER_COLORS[i % MODEL_BORDER_COLORS.length]} rounded-2xl px-5 pt-8 pb-4 relative select-text bg-dark-bubble`}
+              className="relative select-text pt-6 pb-2"
               data-message-id={msg.id}
             >
               {/* Model label top-left */}
-              <div className="absolute top-3 left-4 flex items-center gap-1.5">
+              <div className="absolute top-1 left-0 flex items-center gap-1.5">
                 <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[i % MODEL_DOT_COLORS.length]}`} />
-                <span className="text-[11px] font-medium text-white/40 uppercase tracking-wider">
+                <span className="text-[11px] text-text-muted/60 uppercase tracking-wider">
                   {msg.modelTag}
                 </span>
               </div>
@@ -126,7 +125,7 @@ export default function MultiModelCarousel({
               className={`rounded-full transition-all duration-200 ${
                 i === currentIndex
                   ? 'w-5 h-1.5 bg-accent-violet'
-                  : 'w-1.5 h-1.5 bg-white/15 active:bg-white/30'
+                  : 'w-1.5 h-1.5 bg-text-muted/30 active:bg-text-muted/50'
               }`}
             />
           ))}
