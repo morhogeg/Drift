@@ -3,11 +3,32 @@
 **Date:** March 9, 2026
 **Branch:** `main`
 **Build:** 10 (incremented this session)
-**Status:** 4 fixes: removed dot in single-model mode, carousel swipe enabled, Continue button moved below content, voice input fixed (Info.plist permissions). TypeScript clean. Synced to Xcode.
+**Status:** 7 fixes across 3 sub-sessions. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 27. Model picker — light mode (BUG FIX)
+- **Root cause:** `ModelPickerSheet.tsx` used hardcoded dark colors (`bg-[#0f0f18]`, `text-white`, `text-white/40`, `bg-white/5`) — invisible/ugly in light mode
+- **Fix:** All colors replaced with theme-aware Tailwind classes (`bg-dark-surface`, `text-text-primary`, `text-text-muted`, `bg-dark-elevated`, `border-dark-border`) — adapts to both themes automatically
+
+### 26. Scroll overlap in multi-model mode (BUG FIX)
+- **Root cause:** Messages container `padding-bottom: 9rem` didn't account for multi-model mode which adds ModelPillRow (~48px) + "Replying to" label (~24px) ≈ 72px extra bottom bar height
+- **Fix:** Padding-bottom is now dynamic: `12rem` when `selectedTargets.length > 1`, `9rem` for single model
+
+### 25. User message not appearing after "Continue →" on mobile (BUG FIX)
+- **Root cause:** `continueWithModel` set `activeCanvasId`, causing the user reply to get `canvasId` on send → filtered out by `if (msg.canvasId) return null`. The canvas section is `hidden md:block` (desktop only), so messages were invisible on mobile
+- **Fix:** Added `isTouchDevice` detection in App.tsx; `setActiveCanvasId` is now skipped on mobile so replies flow normally into the main message thread
+
+### 24b. Drift bottom bar — redesign (UX)
+- Full redesign of the iOS selection bottom bar (`SelectionTooltip.tsx` touch path)
+- **Before:** Hardcoded `bg-[#1a1a2e]`, `text-white/40` — broken in light mode, dated look
+- **After:** `bg-dark-surface/95 backdrop-blur-2xl` (white in light, dark in dark) + layered shadow
+- Added `3px` vertical pink→violet gradient accent bar beside text preview
+- **Drift button:** full gradient + `shadow-[0_4px_14px_rgba(168,85,247,0.35)]` + `active:scale-95`
+- **Save button:** `bg-dark-elevated + border-dark-border` — fully theme-aware
+- Desktop tooltip also updated to same treatment (gradient Drift, ghost Save)
 
 ### 21. Single-model mode — remove purple dot (POLISH)
 - **Fix:** In `ModelPillRow.tsx`, the colored model dot is now hidden when only 1 target is selected. Shows only in multi-model mode where it helps distinguish models.
@@ -165,9 +186,9 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 9 in Xcode → upload to App Store Connect
+- [ ] **TestFlight submission** — archive build 10 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
-- [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
+- [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
