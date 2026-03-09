@@ -2,12 +2,41 @@
 
 **Date:** March 9, 2026
 **Branch:** `main`
-**Build:** 10 (incremented this session)
-**Status:** 7 fixes across 3 sub-sessions. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 12 (incremented this session)
+**Status:** 5 major features/fixes in parallel agents. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 32. Scroll reliability (BUG FIX)
+- **Root cause:** Missing `touch-action: pan-y` on scroll container and intermediate wrapper div; MultiModelCarousel outer wrapper had no touch-action, intercepting vertical scroll gestures
+- **Fix:** Added `touch-action: pan-y` to `.chat-messages-container` CSS, the `absolute inset-0` wrapper div in App.tsx, and carousel outer wrapper. Inner carousel scroll div stays `pan-x`. Vertical scroll now works reliably anywhere in the chat.
+
+### 31. Swipe left/right to open/close sidebar (NEW FEATURE)
+- New `src/hooks/useSwipeGesture.ts` hook — 50px min horizontal, ≤0.5 vertical/horizontal ratio to distinguish from scroll
+- Swipe left anywhere in main chat → open sidebar; swipe right → close
+- Excludes touches starting inside `.multi-model-carousel` to avoid conflict with carousel swipe
+- Wired into main chat container in App.tsx
+
+### 30. Multi-model continue — only continued model responds (BUG FIX)
+- **Root cause:** Classic React stale closure — `sendMessage` captured `selectedTargets` from last render; `continueWithModel` updated the store synchronously but React hadn't re-rendered, so old multi-model array was used
+- **Fix:** `sendMessage` now reads `useModelStore.getState().selectedTargets` (Zustand escape hatch) at call time. Also fixed `setSelectedTargetsPersist` which was persisting a stale value.
+
+### 29. Drift bottom bar — reliability overhaul (BUG FIX)
+- **Root cause (multiple):**
+  1. Regular AI messages missing `.ai-message` class entirely — tooltip's `anchorEl.closest('.ai-message')` silently bailed
+  2. Drift push-back messages also missing `.ai-message`, and had `select-text` explicitly suppressed
+  3. DriftPanel AI messages missing both `.ai-message` and `data-message-id`
+  4. iOS `selectionchange` race: bar dismissed before selection committed after finger lift
+  5. Selection handle drag only checked `anchorNode`, not `focusNode`
+  6. Bottom bar z-index too low (9999)
+- **Fix:** Added `.ai-message` + `data-message-id` to all AI message render paths (App.tsx, DriftPanel.tsx). Fixed `select-text` suppression. Added `touchActiveRef` + 400ms post-touchend dismiss suppression. Now checks both `anchorNode` and `focusNode`. z-index raised to 99997.
+
+### 28. Single-model → retroactive multi-model carousel (NEW FEATURE)
+- New `retroactivelyUpgradeToBroadcast()` helper: when user adds a model after a single-model exchange, assigns a new `broadcastGroupId` to the last user + assistant messages
+- Both `onToggleTarget` handlers (ModelPillRow + ModelPickerSheet) now handle the single-model case: if no active broadcast group exists, upgrades the last exchange and sends to new model(s)
+- Result: existing response + new response(s) appear as a swipeable carousel, exactly like a native multi-model broadcast
 
 ### 27. Model picker — light mode (BUG FIX)
 - **Root cause:** `ModelPickerSheet.tsx` used hardcoded dark colors (`bg-[#0f0f18]`, `text-white`, `text-white/40`, `bg-white/5`) — invisible/ugly in light mode
@@ -186,7 +215,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 10 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 12 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response

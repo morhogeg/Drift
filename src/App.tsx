@@ -30,6 +30,7 @@ import type { Message, ChatSession } from '@/types/chat'
 import { toast } from '@/hooks/useToast'
 import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
+import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -137,6 +138,12 @@ function App() {
 
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
+
+  // ── Swipe gesture: left → open sidebar, right → close sidebar ───────────────
+  const swipeHandlers = useSwipeGesture(
+    () => uiStore.setSidebarOpen(true),   // swipe left → open
+    () => uiStore.setSidebarOpen(false),  // swipe right → close
+  )
   const galleryOpen = uiStore.galleryOpen
 
   const copiedMessageId = uiStore.copiedMessageId
@@ -430,7 +437,54 @@ function App() {
   // ── setSelectedTargets with per-chat persistence ────────────────────────────
   const setSelectedTargetsPersist = (targets: typeof modelStore.selectedTargets) => {
     modelStore.setSelectedTargets(targets)
-    modelStore.setChatModelPrefs(activeChatId, modelStore.selectedTargets)
+    // Use the passed-in `targets` rather than reading back modelStore.selectedTargets,
+    // which is the stale reactive binding from the last render.
+    modelStore.setChatModelPrefs(activeChatId, targets)
+  }
+
+  // ── retroactivelyUpgradeToBroadcast ─────────────────────────────────────────
+  // When the user was in single-model mode (no broadcastGroupId on the last
+  // exchange), assign a new broadcastGroupId to the last user message and last
+  // assistant message, set activeBroadcastGroupId, and return the new group id
+  // along with context messages for sendToTarget.  Returns null if there is no
+  // qualifying last exchange to upgrade.
+  const retroactivelyUpgradeToBroadcast = (): {
+    groupId: string
+    contextMsgs: { role: string; content: string }[]
+  } | null => {
+    const currentMessages = useChatStore.getState().messages
+    // Walk backwards to find the last assistant message that has no broadcastGroupId
+    const lastAsstIndex = [...currentMessages].reduceRight((found, m, i) => {
+      if (found !== -1) return found
+      if (!m.isUser && !m.broadcastGroupId && !m.canvasId) return i
+      return -1
+    }, -1)
+    if (lastAsstIndex === -1) return null
+
+    // The user message immediately before it
+    const lastUserIndex = lastAsstIndex - 1
+    if (lastUserIndex < 0 || !currentMessages[lastUserIndex].isUser) return null
+
+    const newGroupId = 'bg-' + Date.now()
+
+    // Patch both messages in place with the new broadcastGroupId
+    const upgraded = currentMessages.map((m, i) => {
+      if (i === lastUserIndex || i === lastAsstIndex) {
+        return { ...m, broadcastGroupId: newGroupId }
+      }
+      return m
+    })
+    chatStore.setMessages(upgraded)
+    setActiveBroadcastGroupId(newGroupId)
+    setContinuedModelByGroup(prev => ({ ...prev, [newGroupId]: null }))
+
+    // Context = everything up to (not including) the user message that started
+    // this exchange, so the new model receives the same context
+    const contextMsgs = currentMessages
+      .slice(0, lastUserIndex + 1)
+      .map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+
+    return { groupId: newGroupId, contextMsgs }
   }
 
   // ── sendToTarget: stream a single target into a new message bubble ───────────
@@ -569,7 +623,12 @@ function App() {
           chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(acc).slice(0, 100) })
         }
 
-        const targets = selectedTargets.length ? selectedTargets : [DEFAULT_TARGET]
+        // Read selectedTargets from the store directly at send-time to avoid
+        // stale closure issues when continueWithModel has just updated the store
+        // but React hasn't re-rendered yet (so the closure-captured `selectedTargets`
+        // would still reflect the old multi-model selection).
+        const freshTargets = useModelStore.getState().selectedTargets
+        const targets = freshTargets.length ? freshTargets : [DEFAULT_TARGET]
         const isBroadcast = targets.length > 1
 
         if (isBroadcast) {
@@ -1479,12 +1538,16 @@ function App() {
       </aside>
 
       {/* Main Chat Area */}
-      <div className={`
-        flex-1 flex flex-col relative
-        transition-all duration-150 ease-in-out
-        ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-        ${driftOpen ? 'lg:mr-[450px]' : 'mr-0'}
-      `}>
+      <div
+        className={`
+          flex-1 flex flex-col relative
+          transition-all duration-150 ease-in-out
+          ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
+          ${driftOpen ? 'lg:mr-[450px]' : 'mr-0'}
+        `}
+        onTouchStart={swipeHandlers.onTouchStart}
+        onTouchEnd={swipeHandlers.onTouchEnd}
+      >
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
           <div className="px-2 py-0.5 flex items-center justify-between">
@@ -1546,7 +1609,7 @@ function App() {
 
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0">
+          <div className="absolute inset-0" style={{ touchAction: 'pan-y' }}>
             <div style={{ paddingBottom: selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
@@ -1861,17 +1924,17 @@ function App() {
                                 : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
                             } relative
                             ${isPlainAI
-                              ? 'text-text-secondary'
+                              ? 'ai-message text-text-secondary'
                               : msg.isUser
                                 ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
                                 : isSinglePushMessage
                                   ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer drift-push-glow'
                                   : isDriftMessage
-                                    ? 'bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
+                                    ? 'ai-message bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
                                     : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                             }
                             ${!isPlainAI ? 'transition-all duration-100 hover:scale-[1.02]' : ''}
-                            ${!msg.isUser && !isDriftMessage ? 'select-text' : ''}
+                            ${!msg.isUser ? 'select-text' : ''}
                           `}
                           data-message-id={msg.id}
                           onClick={() => {
@@ -2304,15 +2367,23 @@ function App() {
                   const exists = selectedTargets.some(t => t.key === target.key)
                   const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
                   setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-                  // If a model was added and there's an active broadcast group, send the original question to it
-                  if (!exists && activeBroadcastGroupId) {
-                    const currentMessages = useChatStore.getState().messages
-                    const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-                    const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-                    const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-                    if (userMsg && userMsg.isUser) {
-                      const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-                      sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+                  if (!exists) {
+                    if (activeBroadcastGroupId) {
+                      // Existing broadcast group — send to newly added model
+                      const currentMessages = useChatStore.getState().messages
+                      const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
+                      const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
+                      const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
+                      if (userMsg && userMsg.isUser) {
+                        const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+                        sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+                      }
+                    } else {
+                      // Single-model mode — retroactively upgrade last exchange to broadcast
+                      const upgraded = retroactivelyUpgradeToBroadcast()
+                      if (upgraded) {
+                        sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
+                      }
                     }
                   }
                 }}
@@ -2476,15 +2547,23 @@ function App() {
           const exists = selectedTargets.some(t => t.key === target.key)
           const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
           setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-          // If a model was added and there's an active broadcast group, send the original question to it
-          if (!exists && activeBroadcastGroupId) {
-            const currentMessages = useChatStore.getState().messages
-            const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-            const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-            const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-            if (userMsg && userMsg.isUser) {
-              const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-              sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+          if (!exists) {
+            if (activeBroadcastGroupId) {
+              // Existing broadcast group — send to newly added model
+              const currentMessages = useChatStore.getState().messages
+              const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
+              const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
+              const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
+              if (userMsg && userMsg.isUser) {
+                const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+                sendToTarget(target, contextMsgs, activeBroadcastGroupId)
+              }
+            } else {
+              // Single-model mode — retroactively upgrade last exchange to broadcast
+              const upgraded = retroactivelyUpgradeToBroadcast()
+              if (upgraded) {
+                sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
+              }
             }
           }
         }}

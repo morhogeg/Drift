@@ -38,6 +38,10 @@ export default function SelectionTooltip({
   const isTooltipHoveredRef = useRef(false)
   const lastAnchorRectRef = useRef<DOMRect | null>(null)
   const selectionChangeTimerRef = useRef<number | null>(null)
+  /** True while a finger is on the screen — suppresses premature dismiss during selection handle dragging. */
+  const touchActiveRef = useRef(false)
+  /** Timestamp of the last touchend — used to suppress selectionchange-triggered dismiss that fires right after a tap/lift. */
+  const lastTouchEndRef = useRef(0)
 
   // Detect touch/iOS device
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -114,13 +118,19 @@ export default function SelectionTooltip({
     if (!rect || (rect.width === 0 && rect.height === 0)) return
     lastAnchorRectRef.current = rect
 
-    // Find the nearest .ai-message ancestor
+    // Find the nearest .ai-message ancestor — check both anchor and focus nodes
+    // because on iOS, dragging the end handle moves focusNode while anchorNode stays fixed.
     const anchorEl = selection.anchorNode?.parentElement
-    const messageEl = anchorEl?.closest('[data-message-id]') ?? null
-    if (!messageEl) return
+    const focusEl = selection.focusNode?.parentElement
+    const aiAncestorEl =
+      anchorEl?.closest('.ai-message') ?? focusEl?.closest('.ai-message') ?? null
+    if (!aiAncestorEl) return
 
-    // Require the selection to be inside an .ai-message element
-    if (!anchorEl?.closest('.ai-message')) return
+    const messageEl =
+      anchorEl?.closest('[data-message-id]') ??
+      focusEl?.closest('[data-message-id]') ??
+      null
+    if (!messageEl) return
 
     const msgId = messageEl.getAttribute('data-message-id')
     if (!msgId) return
@@ -171,17 +181,33 @@ export default function SelectionTooltip({
   useEffect(() => {
     if (!isTouchDevice) return
 
-    // touchend: wait for the browser to commit the selection after the finger lifts
-    const handleTouchEnd = () => {
-      window.setTimeout(() => {
-        tryShowTooltipFromSelection()
-      }, 150)
+    const handleTouchStart = () => {
+      touchActiveRef.current = true
     }
 
-    // selectionchange: fires when the user drags iOS selection handles
+    // touchend: wait for the browser to commit the selection after the finger lifts.
+    // Cancel any pending selectionchange dismiss first so it doesn't race us.
+    const handleTouchEnd = () => {
+      touchActiveRef.current = false
+      lastTouchEndRef.current = Date.now()
+      clearSelectionChangeTimer()
+      window.setTimeout(() => {
+        tryShowTooltipFromSelection()
+      }, 300)
+    }
+
+    // selectionchange: fires continuously while the user drags iOS selection handles.
+    // Only dismiss if: not mid-touch AND enough time has passed since last touchend
+    // (to avoid false-dismiss when iOS fires selectionchange right after finger lift).
     const handleSelectionChange = () => {
       clearSelectionChangeTimer()
       selectionChangeTimerRef.current = window.setTimeout(() => {
+        // Suppress if a finger is still down or we just lifted within 400ms
+        const msSinceTouchEnd = Date.now() - lastTouchEndRef.current
+        if (touchActiveRef.current || msSinceTouchEnd < 400) {
+          selectionChangeTimerRef.current = null
+          return
+        }
         const selection = window.getSelection()
         if (!selection || selection.isCollapsed || !selection.toString().trim()) {
           // User deliberately deselected — hide the bar
@@ -190,13 +216,15 @@ export default function SelectionTooltip({
           tryShowTooltipFromSelection()
         }
         selectionChangeTimerRef.current = null
-      }, 200)
+      }, 300)
     }
 
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
     document.addEventListener('touchend', handleTouchEnd, { passive: true })
     document.addEventListener('selectionchange', handleSelectionChange, { passive: true })
 
     return () => {
+      document.removeEventListener('touchstart', handleTouchStart)
       document.removeEventListener('touchend', handleTouchEnd)
       document.removeEventListener('selectionchange', handleSelectionChange)
       clearSelectionChangeTimer()
@@ -420,7 +448,7 @@ export default function SelectionTooltip({
           bottom: `calc(env(safe-area-inset-bottom) + 72px)`,
           left: '12px',
           right: '12px',
-          zIndex: 9999,
+          zIndex: 99997,
         }}
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}

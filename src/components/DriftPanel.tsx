@@ -840,7 +840,8 @@ export default function DriftPanel({
                   ) : (
                     /* AI response — transparent, clean */
                     <div
-                      className="relative w-full"
+                      className="ai-message relative w-full select-text"
+                      data-message-id={msg.id}
                       data-drift-message-id={msg.id}
                     >
                       {msg.modelTag && (

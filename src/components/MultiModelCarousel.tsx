@@ -54,11 +54,11 @@ export default function MultiModelCarousel({
   }
 
   return (
-    <div className="w-full" style={{ overflowX: 'clip' }}>
+    <div className="w-full" style={{ overflowX: 'clip', touchAction: 'pan-y' }}>
       {/* Horizontal scroll-snap container */}
       <div
         ref={scrollRef}
-        className="flex"
+        className="flex multi-model-carousel"
         style={{
           overflowX: 'scroll',
           scrollSnapType: 'x mandatory',
