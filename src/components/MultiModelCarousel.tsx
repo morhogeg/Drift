@@ -54,7 +54,7 @@ export default function MultiModelCarousel({
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full overflow-hidden">
       {/* Horizontal scroll-snap container */}
       <div
         ref={scrollRef}
@@ -71,11 +71,11 @@ export default function MultiModelCarousel({
         {messages.map((msg, i) => (
           <div
             key={msg.id}
-            style={{ minWidth: '100%', scrollSnapAlign: 'center' }}
-            className="flex-shrink-0"
+            style={{ minWidth: '100%', maxWidth: '100%', scrollSnapAlign: 'center' }}
+            className="flex-shrink-0 min-w-0"
           >
             <div
-              className="relative select-text pt-6 pb-2"
+              className="relative select-text pt-6 pb-2 w-full overflow-hidden"
               data-message-id={msg.id}
             >
               {/* Model label top-left */}
@@ -98,7 +98,7 @@ export default function MultiModelCarousel({
 
               {/* Response content */}
               {msg.text && msg.text.length > 0 ? (
-                <div className="prose prose-invert prose-sm max-w-none text-[15px] leading-7">
+                <div className="prose prose-invert prose-sm max-w-none text-[15px] leading-7 w-full overflow-hidden">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {msg.text.replace(/```([\s\S]*?)```/g, (_m, p1) => `\n\n\`\`\`\n${p1}\n\`\`\`\n\n`)}
                   </ReactMarkdown>
