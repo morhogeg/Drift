@@ -75,7 +75,7 @@ export default function MultiModelCarousel({
             className="flex-shrink-0 min-w-0"
           >
             <div
-              className="relative select-text pt-6 pb-2 w-full overflow-hidden"
+              className="ai-message relative select-text pt-6 pb-2 w-full overflow-hidden"
               data-message-id={msg.id}
             >
               {/* Model label top-left */}
