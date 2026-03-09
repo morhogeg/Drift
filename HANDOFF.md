@@ -2,12 +2,20 @@
 
 **Date:** March 9, 2026
 **Branch:** `main`
-**Build:** 6 (incremented this session)
-**Status:** Multi-model UX polish + DriftPanel input redesign + retroactive model add. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 9 (incremented this session)
+**Status:** Multi-model carousel text overflow fix + Drift bottom bar restored. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 19. Multi-model carousel — text overflow fix (BUG FIX)
+- **Root cause:** `minWidth: '100%'` in a flex scroll container allows children to expand beyond viewport width — text spilled horizontally instead of wrapping
+- **Fix:** Added `maxWidth: '100%'`, `min-w-0`, `overflow-hidden` on card and content divs so text wraps fully within the card, matching a normal single-model response
+
+### 20. Drift bottom bar — restored (BUG FIX)
+- **Root cause:** `SelectionTooltip` requires `.ai-message` class on the message element to know it's selectable AI content — the class was accidentally removed during the carousel restyle
+- **Fix:** Re-added `ai-message` to the carousel card's content div; Drift + Save bottom bar works again on iOS
 
 ### 15. Multi-model carousel — frameless card design
 - Removed the bordered card frame from each carousel card; each model's answer now renders as clean full-width content matching a normal single-model AI message
@@ -141,7 +149,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 6 in Xcode → upload to App Store Connect
+- [ ] **TestFlight submission** — archive build 9 in Xcode → upload to App Store Connect
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — hardcoded dark hex colors in App.tsx/DriftPanel.tsx bypass theme system
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
