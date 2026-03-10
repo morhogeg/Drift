@@ -1906,6 +1906,14 @@ function App() {
                       {isPlainAI && msg.modelTag && (
                         <div className="text-[11px] text-text-muted mb-1 mt-1">{msg.modelTag}</div>
                       )}
+                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-text-muted mb-1 mt-1">
+                          <span className="px-1.5 py-0.5 rounded bg-accent-violet/10 border border-accent-violet/20 text-accent-violet/80 text-[10px] font-medium">Drift</span>
+                          {msg.driftPushMetadata?.selectedText && (
+                            <span className="italic truncate">"{msg.driftPushMetadata.selectedText}"</span>
+                          )}
+                        </div>
+                      )}
                       <div
                         className={`flex ${
                           msg.isDriftPush && !msg.isUser && msg.driftPushMetadata?.originSide === 'right'
@@ -1917,23 +1925,17 @@ function App() {
                       >
                         <div
                           className={`
-                            ${isPlainAI
+                            ${(isPlainAI || isDriftMessage || isSinglePushMessage)
                               ? 'w-full py-2'
-                              : (isDriftMessage && !msg.isUser) || isSinglePushMessage
-                                ? 'max-w-[95%] min-w-[320px] sm:min-w-[360px] md:min-w-[420px] rounded-2xl px-5 pt-10 pb-3'
-                                : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
+                              : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
                             } relative
-                            ${isPlainAI
-                              ? 'ai-message text-text-secondary'
+                            ${(isPlainAI || isDriftMessage || isSinglePushMessage)
+                              ? `ai-message text-text-secondary${(isDriftMessage || isSinglePushMessage) ? ' cursor-pointer' : ''}`
                               : msg.isUser
                                 ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-pink/20'
-                                : isSinglePushMessage
-                                  ? 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 cursor-pointer drift-push-glow'
-                                  : isDriftMessage
-                                    ? 'ai-message bg-dark-bubble/80 border border-dark-border/30 text-text-secondary shadow-lg cursor-pointer hover:border-dark-border/60 drift-push-glow'
-                                    : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
+                                : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20'
                             }
-                            ${!isPlainAI ? 'transition-all duration-100 hover:scale-[1.02]' : ''}
+                            ${!isPlainAI && !isDriftMessage && !isSinglePushMessage ? 'transition-all duration-100 hover:scale-[1.02]' : ''}
                             ${!msg.isUser ? 'select-text' : ''}
                           `}
                           data-message-id={msg.id}
@@ -2080,15 +2082,9 @@ function App() {
                             </div>
                           )}
 
-                          {/* Drift tag */}
-                          {(isDriftMessage && (isFirstDriftMessage || isSinglePushMessage)) && (
-                            <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-accent-violet to-accent-pink text-[9px] font-medium text-white shadow-md opacity-80 group-hover:opacity-100">
-                              Drift
-                            </div>
-                          )}
 
-                          {/* Inline drift header */}
-                          {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
+                          {/* Inline drift header — removed, label is now above the bubble */}
+                          {false && (isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
                             <div
                               className="absolute top-2 left-3 right-3 flex items-center gap-2 text-[10px] text-text-muted/80 cursor-pointer hover:text-accent-violet/90 transition-colors duration-150 z-20 pointer-events-auto overflow-hidden"
                               style={{ minWidth: '220px' }}
@@ -2151,7 +2147,7 @@ function App() {
                                 {msg.driftPushMetadata?.userQuestion && (
                                   <div className="flex items-baseline gap-1 min-w-0">
                                     <span className="text-text-secondary/80 text-[10px] shrink-0">Q</span>
-                                    <span className="truncate text-text-primary/80">"{msg.driftPushMetadata.userQuestion}"</span>
+                                    <span className="truncate text-text-primary/80">"{msg.driftPushMetadata?.userQuestion}"</span>
                                   </div>
                                 )}
                               </div>
