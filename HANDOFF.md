@@ -2,12 +2,18 @@
 
 **Date:** March 10, 2026
 **Branch:** `main`
-**Build:** 14 (incremented this session)
-**Status:** Drift context fix, pushed drift redesign, model tag opacity fix. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 14
+**Status:** Cleaned up failed "Ask Drift" iOS text selection menu experiment. No net feature changes.
 
 ---
 
 ## What Was Done This Session
+
+### 36. "Ask Drift" in iOS text selection menu — explored & reverted (N/A)
+- Investigated adding "Ask Drift" to the native iOS text selection popup (like ChatGPT's "Ask ChatGPT")
+- Attempted via `AppIntents` / `AppShortcutsProvider` — hit multiple Swift compile errors
+- Root cause: "Ask ChatGPT" is a special Apple/OpenAI OS-level integration, not a public API
+- All changes reverted: removed `AskDriftIntent.swift`, `DriftShortcuts.swift`, URL scheme from `Info.plist`, and JS listener from `App.tsx`
 
 ### 35. Model tag label — increased opacity (POLISH)
 - **Root cause:** Model tag above AI messages used `text-text-muted` (`#6b7280`) — too faint, hard to read against the dark background.

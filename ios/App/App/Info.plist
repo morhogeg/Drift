@@ -51,5 +51,6 @@
 	<string>Drift uses your microphone for voice input so you can speak your messages instead of typing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Drift uses speech recognition to convert your voice to text.</string>
+
 </dict>
 </plist>
