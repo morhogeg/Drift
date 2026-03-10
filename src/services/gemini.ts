@@ -183,9 +183,14 @@ export async function sendMessageToGemini(
 
         try {
           const json = JSON.parse(data)
-          const text: string | undefined =
-            json?.candidates?.[0]?.content?.parts?.[0]?.text
-          if (text) onChunk(text)
+          const parts: unknown[] = json?.candidates?.[0]?.content?.parts ?? []
+          // Gemini grounding can return multiple parts per chunk; collect all string text
+          let chunk = ''
+          for (const part of parts) {
+            const t = (part as any)?.text
+            if (typeof t === 'string') chunk += t
+          }
+          if (chunk) onChunk(chunk)
         } catch {
           // Partial / non-JSON line — skip
         }

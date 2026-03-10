@@ -190,6 +190,10 @@ function App() {
       .trim()
   }
 
+  // ── Sanitize stored message text (remove stale [object Object] grounding artifacts) ──
+  const sanitizeText = (text: string) =>
+    text.replace(/,?\[object Object\],?/g, '').replace(/<br\/?>$/gm, '\n')
+
   // ── Index assistant lists ───────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -2023,7 +2027,7 @@ function App() {
                           )}
 
                           {/* Model tag */}
-                          {!msg.isUser && !isPlainAI && msg.modelTag && !(isDriftMessage && (isSinglePushMessage || isFirstDriftMessage)) && (
+                          {!msg.isUser && !isPlainAI && msg.modelTag && !isDriftMessage && !isSinglePushMessage && (
                             msg.broadcastGroupId ? (
                               <button
                                 onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
@@ -2246,7 +2250,7 @@ function App() {
                                   }
                                 })()}
                               >
-                                {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
+                                {sanitizeText(msg.text)}
                               </ReactMarkdown>
                             </div>
                           ) : (
@@ -2290,7 +2294,7 @@ function App() {
                                   }
                                 })()}
                               >
-                                {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
+                                {sanitizeText(msg.text)}
                               </ReactMarkdown>
                             </div>
                           )}
