@@ -3,7 +3,20 @@
 **Date:** March 10, 2026
 **Branch:** `main`
 **Build:** 14
-**Status:** Cleaned up failed "Ask Drift" iOS text selection menu experiment. No net feature changes.
+**Status:** Cleaned up failed "Ask Drift" iOS text selection menu experiment. Web desktop bug fixes (model tag overlap, grounding [object Object]). Pushed.
+
+---
+
+## Web Desktop Fixes (This Session)
+
+### 38. [object Object] in Gemini grounding responses — fixed (BUG FIX)
+- **Root cause:** Gemini SSE parser only read `parts[0]?.text`. With grounding active, some chunks have multiple parts where `parts[0].text` is a citation object (not a string). `acc += object` coerced to `"[object Object]"`, stored in IndexedDB.
+- **Fix 1 (`gemini.ts`):** SSE parser now iterates ALL parts per chunk, only accumulates where `typeof text === 'string'`.
+- **Fix 2 (`App.tsx`):** `sanitizeText()` strips residual `[object Object]` from `msg.text` before ReactMarkdown — cleans up already-stored messages.
+
+### 37. Model tag badge overlapping drift message text (BUG FIX)
+- **Root cause:** Absolute-positioned model tag (`absolute top-2 left-3`) was only excluded for `isSinglePushMessage || isFirstDriftMessage`. Mid-group drift messages still showed it, overlapping the first line of text.
+- **Fix:** Condition changed to `!isDriftMessage && !isSinglePushMessage` — excludes ALL drift push messages.
 
 ---
 
