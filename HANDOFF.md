@@ -2,12 +2,22 @@
 
 **Date:** March 10, 2026
 **Branch:** `main`
-**Build:** 14
-**Status:** Cleaned up failed "Ask Drift" iOS text selection menu experiment. Web desktop bug fixes (model tag overlap, grounding [object Object]). Pushed.
+**Build:** 15
+**Status:** Fixed [object Object] corruption in main chat when opening a drift side chat. Build 15 synced to Xcode.
 
 ---
 
-## Web Desktop Fixes (This Session)
+## What Was Done This Session
+
+### 39. [object Object] in main chat when opening side chat — fixed (BUG FIX)
+- **Root cause:** `processDriftText` (used to render drift-linked messages) called `String(children)` on the ReactMarkdown `children` prop. For list items, `children` is a React element tree, not a plain string — `String(<ReactElement>)` → `"[object Object]"`. This rendering path activates as soon as a message gains `driftInfos` (i.e., the moment you open a side chat from it), which is why text was fine before and corrupted immediately after opening the drift panel.
+- **Fix:** Replaced `String(children)` + string-split logic with a proper recursive tree walk (`walkNode`), matching the pattern in `processEntityText`. Only actual string leaf nodes are searched for drift text and replaced with buttons; all other React structure (bold, italic, code, etc.) is preserved via `cloneElement`.
+
+---
+
+## Previous Session Fixes
+
+### 38. [object Object] in Gemini grounding responses — fixed (BUG FIX)
 
 ### 38. [object Object] in Gemini grounding responses — fixed (BUG FIX)
 - **Root cause:** Gemini SSE parser only read `parts[0]?.text`. With grounding active, some chunks have multiple parts where `parts[0].text` is a citation object (not a string). `acc += object` coerced to `"[object Object]"`, stored in IndexedDB.
@@ -246,7 +256,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 12 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 15 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response

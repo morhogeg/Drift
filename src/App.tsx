@@ -2185,40 +2185,43 @@ function App() {
                                 remarkPlugins={[remarkGfm]}
                                 components={(() => {
                                   let liCounter = 0
-                                  const processDriftText = (children: any) => {
-                                    const text = String(children)
-                                    let result: React.ReactNode[] = []
-                                    let lastIndex = 0
-                                    const sortedDrifts = [...msg.driftInfos!].sort((a, b) => {
-                                      const aIndex = text.indexOf(a.selectedText)
-                                      const bIndex = text.indexOf(b.selectedText)
-                                      return aIndex - bIndex
-                                    })
-                                    sortedDrifts.forEach((drift, idx) => {
-                                      const driftIndex = text.indexOf(drift.selectedText, lastIndex)
-                                      if (driftIndex !== -1) {
-                                        if (driftIndex > lastIndex) result.push(text.substring(lastIndex, driftIndex))
-                                        result.push(
+                                  const processDriftText = (children: any): React.ReactNode => {
+                                    const drifts = msg.driftInfos!
+
+                                    const injectIntoString = (text: string): React.ReactNode => {
+                                      const matches: Array<{ start: number; end: number; drift: typeof drifts[0]; idx: number }> = []
+                                      drifts.forEach((drift, idx) => {
+                                        const pos = text.indexOf(drift.selectedText)
+                                        if (pos !== -1) matches.push({ start: pos, end: pos + drift.selectedText.length, drift, idx })
+                                      })
+                                      if (!matches.length) return text
+                                      matches.sort((a, b) => a.start - b.start)
+                                      const out: React.ReactNode[] = []
+                                      let cursor = 0
+                                      for (const m of matches) {
+                                        if (m.start < cursor) continue
+                                        if (m.start > cursor) out.push(text.slice(cursor, m.start))
+                                        out.push(
                                           <button
-                                            key={`drift-${idx}-${drift.driftChatId}`}
+                                            key={`drift-${m.idx}-${m.drift.driftChatId}`}
                                             onClick={(e) => {
                                               e.preventDefault()
                                               e.stopPropagation()
-                                              if (drift.driftChatId.startsWith('drift-temp-')) {
-                                                const existingDriftMessages = driftStore.getTempConversation(drift.driftChatId)
-                                                handleStartDrift(drift.selectedText, msg.id, drift.driftChatId, existingDriftMessages)
+                                              if (m.drift.driftChatId.startsWith('drift-temp-')) {
+                                                const existingDriftMessages = driftStore.getTempConversation(m.drift.driftChatId)
+                                                handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existingDriftMessages)
                                               } else {
-                                                switchChat(drift.driftChatId)
+                                                switchChat(m.drift.driftChatId)
                                               }
                                             }}
                                             onTouchEnd={(e) => {
                                               e.preventDefault()
                                               e.stopPropagation()
-                                              if (drift.driftChatId.startsWith('drift-temp-')) {
-                                                const existingDriftMessages = driftStore.getTempConversation(drift.driftChatId)
-                                                handleStartDrift(drift.selectedText, msg.id, drift.driftChatId, existingDriftMessages)
+                                              if (m.drift.driftChatId.startsWith('drift-temp-')) {
+                                                const existingDriftMessages = driftStore.getTempConversation(m.drift.driftChatId)
+                                                handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existingDriftMessages)
                                               } else {
-                                                switchChat(drift.driftChatId)
+                                                switchChat(m.drift.driftChatId)
                                               }
                                             }}
                                             className="inline px-1.5 py-0.5 rounded cursor-pointer
@@ -2226,17 +2229,30 @@ function App() {
                                                      border border-accent-violet/30 hover:border-accent-violet/50
                                                      text-accent-violet hover:text-accent-pink
                                                      transition-all duration-100"
-                                            title={drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
+                                            title={m.drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
                                           >
-                                            {drift.selectedText}
+                                            {m.drift.selectedText}
                                           </button>
                                         )
-                                        lastIndex = driftIndex + drift.selectedText.length
+                                        cursor = m.end
                                       }
-                                    })
-                                    if (lastIndex < text.length) result.push(text.substring(lastIndex))
-                                    if (result.length === 0) return children
-                                    return result
+                                      if (cursor < text.length) out.push(text.slice(cursor))
+                                      return out
+                                    }
+
+                                    const walkNode = (node: React.ReactNode): React.ReactNode => {
+                                      if (typeof node === 'string') return injectIntoString(node)
+                                      if (typeof node === 'number' || node == null || node === false) return node
+                                      if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkNode(n)}</span>)
+                                      if (isValidElement(node)) {
+                                        const props: any = (node as any).props || {}
+                                        if ('children' in props) return cloneElement(node as any, { ...props, children: walkNode(props.children) })
+                                        return node
+                                      }
+                                      return null
+                                    }
+
+                                    return walkNode(children)
                                   }
                                   return {
                                     p: ({ children }) => <p className="mb-2">{processDriftText(children)}</p>,
