@@ -1904,7 +1904,7 @@ function App() {
 
                     <div className={`px-5 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
                       {isPlainAI && msg.modelTag && (
-                        <div className="text-[11px] text-text-muted mb-1 mt-1">{msg.modelTag}</div>
+                        <div className="text-[11px] text-text-secondary mb-1 mt-1">{msg.modelTag}</div>
                       )}
                       {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
                         <div className="flex items-center gap-1.5 text-[11px] text-text-muted mb-1 mt-1">
