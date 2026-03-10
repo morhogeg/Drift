@@ -50,7 +50,7 @@ export default function DriftPanel({
   isOpen,
   onClose,
   selectedText,
-  contextMessages: _contextMessages,
+  contextMessages,
   sourceMessageId,
   highlightMessageId,
   parentChatId,
@@ -320,11 +320,20 @@ export default function DriftPanel({
         msg => !msg.text.startsWith('What would you like to know about') && msg.id !== newMessage.id
       )
       
+      // Build context string from parent conversation (last ~6 messages)
+      const parentContext = contextMessages.slice(-6).map(msg =>
+        `${msg.isUser ? 'User' : 'Assistant'}: ${msg.text}`
+      ).join('\n')
+
+      const systemContent = parentContext
+        ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
+        : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+
       // Convert messages to API format with special Drift context
       const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
         {
           role: 'system',
-          content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+          content: systemContent
         },
         ...driftConversation.map(msg => ({
           role: msg.isUser ? 'user' as const : 'assistant' as const,

@@ -1,13 +1,17 @@
 # Drift — Session Handoff
 
-**Date:** March 9, 2026
+**Date:** March 10, 2026
 **Branch:** `main`
-**Build:** 12 (incremented this session)
-**Status:** 5 major features/fixes in parallel agents. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 13 (incremented this session)
+**Status:** Drift context fix. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 33. Drift context — parent conversation now included (BUG FIX)
+- **Root cause:** `contextMessages` prop was passed into `DriftPanel` but destructured as `_contextMessages` (prefixed underscore = unused). The system prompt had zero knowledge of the parent conversation, so drifting on "Shila" from a Tel Aviv restaurants list gave the AI no idea it was a restaurant.
+- **Fix:** Removed the `_` prefix so `contextMessages` is used. Last 6 parent messages are now injected into the system prompt as labelled `User:`/`Assistant:` lines. The AI is instructed to answer in that context and not treat the selected text as ambiguous when the conversation makes its meaning clear. Falls back to the generic prompt when `contextMessages` is empty.
 
 ### 32. Scroll reliability (BUG FIX)
 - **Root cause:** Missing `touch-action: pan-y` on scroll container and intermediate wrapper div; MultiModelCarousel outer wrapper had no touch-action, intercepting vertical scroll gestures
