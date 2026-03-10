@@ -2,12 +2,20 @@
 
 **Date:** March 10, 2026
 **Branch:** `main`
-**Build:** 13 (incremented this session)
-**Status:** Drift context fix. TypeScript clean. Synced to Xcode. Pushed.
+**Build:** 14 (incremented this session)
+**Status:** Drift context fix, pushed drift redesign, model tag opacity fix. TypeScript clean. Synced to Xcode. Pushed.
 
 ---
 
 ## What Was Done This Session
+
+### 35. Model tag label — increased opacity (POLISH)
+- **Root cause:** Model tag above AI messages used `text-text-muted` (`#6b7280`) — too faint, hard to read against the dark background.
+- **Fix:** Changed to `text-text-secondary` (`#9ca3af`) — more readable while still clearly secondary.
+
+### 34. Pushed drift messages — redesigned to look like regular AI messages (UX)
+- **Root cause:** Pushed drift messages were rendered as a bordered dark card with `pt-10` top padding to fit an absolute-positioned `From:` / `Q:` header inside the bubble, plus a gradient "Drift" corner badge. Looked heavy and inconsistent with the rest of the chat.
+- **Fix:** Removed the card border/background, `pt-10`, inline absolute header, and corner badge. Drift messages now render full-width like plain AI messages. A small `[Drift] "selectedText"` label (styled like the model tag line) appears above the content — subtle and consistent.
 
 ### 33. Drift context — parent conversation now included (BUG FIX)
 - **Root cause:** `contextMessages` prop was passed into `DriftPanel` but destructured as `_contextMessages` (prefixed underscore = unused). The system prompt had zero knowledge of the parent conversation, so drifting on "Shila" from a Tel Aviv restaurants list gave the AI no idea it was a restaurant.
