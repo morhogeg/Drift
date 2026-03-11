@@ -1,13 +1,29 @@
 # Drift — Session Handoff
 
-**Date:** March 10, 2026
+**Date:** March 11, 2026
 **Branch:** `main`
-**Build:** 15
-**Status:** Fixed [object Object] corruption in main chat when opening a drift side chat. Build 15 synced to Xcode.
+**Build:** 16
+**Status:** Fixed input field positioning on iOS (keyboard open/closed), fixed retroactive multi-model not going into carousel. Build 16 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 42. Retroactive multi-model — stale activeBroadcastGroupId (BUG FIX)
+- **Root cause:** `activeBroadcastGroupId` was never cleared when a new single-model message was sent. If the user had a previous broadcast session in the same chat, the stale group ID caused "add model" to target the old broadcast group instead of retroactively upgrading the current exchange. New model's response got added to the old group; the current Demo AI response stayed as a plain message.
+- **Fix:** `sendMessage` single-model path now calls `setActiveBroadcastGroupId(null)` before sending, clearing any stale group so the next "add model" correctly upgrades the current exchange.
+
+### 41. Retroactive multi-model — user message included as carousel card (BUG FIX)
+- **Root cause:** `retroactivelyUpgradeToBroadcast` assigned `broadcastGroupId` to both the user message AND the assistant message. The carousel renderer triggers on the first message with that group ID — so the user's question became card 0, the Demo AI response card 1, the new model card 2. Wrong and confusing.
+- **Fix:** Only the assistant message gets `broadcastGroupId`. User messages are never given one. The carousel now starts at the first AI response, matching the normal broadcast behaviour.
+
+### 40. Input field gap when keyboard is open (BUG FIX)
+- **Root cause:** The input container had `paddingBottom: calc(env(safe-area-inset-bottom) + 0.5rem)` regardless of keyboard state. With `resize: none`, `translateY(-kb-h)` lifts the bar above the keyboard, but the safe-area padding inside the container still pushed the textarea up from the bottom of the bar — creating a visible gap between the input and the keyboard top.
+- **Fix:** Added `keyboardVisible` state (toggled in `keyboardWillShow`/`keyboardWillHide`). When keyboard is visible, `paddingBottom` is `0px`; when hidden, the normal safe-area padding is restored.
+
+---
+
+## Previous Session Fixes
 
 ### 39. [object Object] in main chat when opening side chat — fixed (BUG FIX)
 - **Root cause:** `processDriftText` (used to render drift-linked messages) called `String(children)` on the ReactMarkdown `children` prop. For list items, `children` is a React element tree, not a plain string — `String(<ReactElement>)` → `"[object Object]"`. This rendering path activates as soon as a message gains `driftInfos` (i.e., the moment you open a side chat from it), which is why text was fine before and corrupted immediately after opening the drift panel.
@@ -256,7 +272,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 15 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 16 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response

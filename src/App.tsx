@@ -53,6 +53,9 @@ function App() {
     return settings
   })
 
+  // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
+  const [keyboardVisible, setKeyboardVisible] = useState(false)
+
   // Broadcast / canvas transient state
   const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
   const [, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
@@ -118,6 +121,7 @@ function App() {
         const { Keyboard } = await import('@capacitor/keyboard')
         const show = await Keyboard.addListener('keyboardWillShow', (info) => {
           document.documentElement.style.setProperty('--kb-h', `${info.keyboardHeight}px`)
+          setKeyboardVisible(true)
           // Scroll to bottom so the last message stays visible
           setTimeout(() => {
             const c = document.querySelector('.chat-messages-container')
@@ -126,6 +130,7 @@ function App() {
         })
         const hide = await Keyboard.addListener('keyboardWillHide', () => {
           document.documentElement.style.setProperty('--kb-h', '0px')
+          setKeyboardVisible(false)
         })
         cleanupFns = [() => show.remove(), () => hide.remove()]
       } catch {
@@ -471,9 +476,12 @@ function App() {
 
     const newGroupId = 'bg-' + Date.now()
 
-    // Patch both messages in place with the new broadcastGroupId
+    // Patch only the assistant message with the new broadcastGroupId
+    // (user messages must NOT get broadcastGroupId — the carousel renderer
+    // triggers on the first message that has it, so including the user msg
+    // would make it the first carousel card)
     const upgraded = currentMessages.map((m, i) => {
-      if (i === lastUserIndex || i === lastAsstIndex) {
+      if (i === lastAsstIndex) {
         return { ...m, broadcastGroupId: newGroupId }
       }
       return m
@@ -680,6 +688,9 @@ function App() {
           }
           await Promise.allSettled(tasks)
         } else {
+          // Single-model send — clear any stale broadcast group so adding a model
+          // later correctly retroactively upgrades THIS exchange, not an old one
+          setActiveBroadcastGroupId(null)
           const t = targets[0]
           if (t.provider === 'gemini') {
             const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
@@ -2373,7 +2384,7 @@ function App() {
         </div>
 
         {/* Input area */}
-        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
+        <div style={{ paddingBottom: keyboardVisible ? '0px' : 'calc(env(safe-area-inset-bottom) + 0.5rem)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
             {/* Mobile-only: model pill row above textarea */}
             <div className="lg:hidden">
