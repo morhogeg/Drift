@@ -66,11 +66,10 @@ input, textarea, select {
 
 /* iOS safe area and viewport height fixes */
 html, body {
-  height: 100%;
-  height: 100dvh; /* dynamic viewport height — shrinks with keyboard on iOS */
+  height: 100vh; /* layout viewport — with viewport-fit:cover this reaches physical bottom */
 }
 #root {
-  height: 100%; /* follow body height (Capacitor resizes body when keyboard appears) */
+  height: 100%;
 }
 
 /* Safe area padding utilities */

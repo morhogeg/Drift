@@ -2,12 +2,21 @@
 
 **Date:** March 11, 2026
 **Branch:** `main`
-**Build:** 16
-**Status:** Fixed input field positioning on iOS (keyboard open/closed), fixed retroactive multi-model not going into carousel. Build 16 synced to Xcode.
+**Build:** 17
+**Status:** Fixed input bar floating above phone bottom (100dvh → 100vh). Build 17 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 43. Input bar gap at phone bottom when keyboard closed (BUG FIX)
+- **Root cause:** `html, body { height: 100dvh }` — on iOS WKWebView, `dvh` is the *dynamic/visual* viewport height, which excludes the home indicator safe area (~34px). This made the app body stop 34px short of the physical screen bottom. `absolute bottom-0` landed there, and we then added `env(safe-area-inset-bottom) + 0.5rem` padding inside the container on top — compounding the gap.
+- **Fix 1 (`index.css`):** Changed `height: 100dvh` → `height: 100vh`. With `viewport-fit=cover` in the meta tag, `100vh` is the full layout viewport including the physical screen bottom edge. `absolute bottom-0` now truly anchors at the screen bottom.
+- **Fix 2 (`App.tsx`):** Removed the extra `0.5rem` from the closed-keyboard bottom padding. `env(safe-area-inset-bottom, 8px)` alone is sufficient to clear the home indicator, keeping the input snug at the bottom.
+
+---
+
+## Previous Session Fixes
 
 ### 42. Retroactive multi-model — stale activeBroadcastGroupId (BUG FIX)
 - **Root cause:** `activeBroadcastGroupId` was never cleared when a new single-model message was sent. If the user had a previous broadcast session in the same chat, the stale group ID caused "add model" to target the old broadcast group instead of retroactively upgrading the current exchange. New model's response got added to the old group; the current Demo AI response stayed as a plain message.
@@ -272,7 +281,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 16 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 17 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
