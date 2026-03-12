@@ -29,6 +29,7 @@ interface UIStore {
   sidebarOpen: boolean
   settingsOpen: boolean
   galleryOpen: boolean
+  driftMapOpen: boolean
 
   // ── User account UI ────────────────────────────────────────────────────────
   userMenuOpen: boolean
@@ -61,6 +62,7 @@ interface UIStore {
   setSidebarOpen: (open: boolean) => void
   setSettingsOpen: (open: boolean) => void
   setGalleryOpen: (open: boolean) => void
+  setDriftMapOpen: (open: boolean) => void
   setUserMenuOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
 
@@ -95,6 +97,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 1024 : false,
   settingsOpen: false,
   galleryOpen: false,
+  driftMapOpen: false,
   userMenuOpen: false,
   profileOpen: false,
   hoveredMessageId: null,
@@ -119,6 +122,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setGalleryOpen: (open) => set({ galleryOpen: open }),
+  setDriftMapOpen: (open) => set({ driftMapOpen: open }),
   setUserMenuOpen: (open) => set({ userMenuOpen: open }),
   setProfileOpen: (open) => set({ profileOpen: open }),
 

@@ -199,8 +199,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       messages: [],
     })
 
-    persistChat(newChat)
-
     return newId
   },
 

@@ -7,6 +7,7 @@ interface SelectionTooltipProps {
   currentChatId?: string
   currentChatTitle?: string
   onSnippetSaved?: () => void
+  onFirstSelection?: () => void
 }
 
 interface TooltipState {
@@ -29,6 +30,7 @@ export default function SelectionTooltip({
   currentChatId = '',
   currentChatTitle = 'Chat',
   onSnippetSaved,
+  onFirstSelection,
 }: SelectionTooltipProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -42,6 +44,8 @@ export default function SelectionTooltip({
   const touchActiveRef = useRef(false)
   /** Timestamp of the last touchend — used to suppress selectionchange-triggered dismiss that fires right after a tap/lift. */
   const lastTouchEndRef = useRef(0)
+  /** Ensures onFirstSelection is called at most once. */
+  const hasCalledFirstSelection = useRef(false)
 
   // Detect touch/iOS device
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -112,6 +116,11 @@ export default function SelectionTooltip({
 
     const text = selection.toString().trim()
     if (text.length <= MIN_SELECTION_LENGTH) return
+
+    if (!hasCalledFirstSelection.current && onFirstSelection) {
+      hasCalledFirstSelection.current = true
+      onFirstSelection()
+    }
 
     const range = selection.getRangeAt(0)
     const rect = range.getBoundingClientRect()

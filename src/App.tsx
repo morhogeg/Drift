@@ -5,6 +5,7 @@ import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaM
 import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
+import DriftMapPanel from './components/DriftMapPanel'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
@@ -73,6 +74,13 @@ function App() {
 
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
+
+  // ── Coach mark (first AI message) ───────────────────────────────────────────
+  const [coachMarkSeen, setCoachMarkSeen] = useState(
+    () => localStorage.getItem('driftCoachMarkSeen') === 'true'
+  )
+  const [coachMarkActive, setCoachMarkActive] = useState(false)
+  const coachMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -143,6 +151,8 @@ function App() {
 
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
+  const driftMapOpen = uiStore.driftMapOpen
+  const setDriftMapOpen = uiStore.setDriftMapOpen
 
   // ── Swipe gesture: left → open sidebar, right → close sidebar ───────────────
   const swipeHandlers = useSwipeGesture(
@@ -169,8 +179,12 @@ function App() {
 
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    chatStore.loadChatsFromDB()
-  }, [])
+    const init = async () => {
+      await chatStore.loadChatsFromDB()
+      createNewChat()
+    }
+    init()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Per-chat model prefs ────────────────────────────────────────────────────
   useEffect(() => {
@@ -211,6 +225,22 @@ function App() {
       setContextLinkVersion(v => v + 1)
     })()
   }, [messages])
+
+  // ── Coach mark helpers ──────────────────────────────────────────────────────
+  const dismissCoachMark = () => {
+    setCoachMarkActive(false)
+    setCoachMarkSeen(true)
+    localStorage.setItem('driftCoachMarkSeen', 'true')
+    if (coachMarkTimerRef.current) clearTimeout(coachMarkTimerRef.current)
+  }
+
+  // Show coach mark on first completed AI message
+  useEffect(() => {
+    if (!isTyping && !coachMarkSeen && messages.some(m => !m.isUser)) {
+      setCoachMarkActive(true)
+      coachMarkTimerRef.current = setTimeout(() => dismissCoachMark(), 6000)
+    }
+  }, [isTyping]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Global navigation handlers ──────────────────────────────────────────────
   useEffect(() => {
@@ -331,10 +361,14 @@ function App() {
         e.preventDefault()
         createNewChat()
       }
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'm') {
+        e.preventDefault()
+        setDriftMapOpen(!driftMapOpen)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chatHistory, activeChatId, messages])
+  }, [chatHistory, activeChatId, messages, driftMapOpen])
 
   // ── API connection check ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1237,6 +1271,15 @@ function App() {
     }, 150)
   }
 
+  const handleDriftMapNavigate = (chatId: string, messageId?: string) => {
+    if (messageId) {
+      handleNavigateToSource(chatId, messageId)
+    } else {
+      switchChat(chatId)
+    }
+    setDriftMapOpen(false)
+  }
+
   const handleGoToSource = (chatId: string) => {
     const chat = chatHistory.find(c => c.id === chatId)
     if (chat?.metadata?.parentChatId && chat?.metadata?.sourceMessageId) {
@@ -1600,6 +1643,20 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Drift Map Button — shown when active chat has drifts */}
+              {messages.some(m => m.hasDrift) && (
+                <button
+                  onClick={() => setDriftMapOpen(true)}
+                  title="Drift map (⌘⌥M)"
+                  className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
+                    <circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M9 6h10a2 2 0 0 1 2 2v7"/>
+                  </svg>
+                </button>
+              )}
               {/* New Chat Button */}
               <button
                 onClick={createNewChat}
@@ -2028,6 +2085,32 @@ function App() {
                           }}
                         >
 
+                          {/* Per-message drift count badge */}
+                          {!msg.isUser && msg.driftInfos && msg.driftInfos.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const firstDrift = msg.driftInfos![0]
+                                if (firstDrift.driftChatId.startsWith('drift-temp-')) {
+                                  const existingDriftMessages = driftStore.getTempConversation(firstDrift.driftChatId)
+                                  handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existingDriftMessages)
+                                } else {
+                                  switchChat(firstDrift.driftChatId)
+                                }
+                              }}
+                              className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5
+                                         rounded-full text-xs
+                                         text-accent-violet/70 hover:text-accent-violet
+                                         bg-accent-violet/5 hover:bg-accent-violet/15
+                                         border border-accent-violet/20 hover:border-accent-violet/40
+                                         transition-all duration-150"
+                            >
+                              <span>↗</span>
+                              <span>{msg.driftInfos.length} {msg.driftInfos.length === 1 ? 'drift' : 'drifts'}</span>
+                            </button>
+                          )}
+
                           {/* Strand bead */}
                           {msg.strandId && msg.strandId === activeStrandId && (
                             <>
@@ -2235,11 +2318,10 @@ function App() {
                                                 switchChat(m.drift.driftChatId)
                                               }
                                             }}
-                                            className="inline px-1.5 py-0.5 rounded cursor-pointer
-                                                     bg-gradient-to-r from-accent-violet/20 to-accent-pink/20
-                                                     border border-accent-violet/30 hover:border-accent-violet/50
-                                                     text-accent-violet hover:text-accent-pink
-                                                     transition-all duration-100"
+                                            className="inline cursor-pointer
+                                                     border-b border-accent-violet/50 hover:border-accent-violet
+                                                     text-accent-violet hover:bg-accent-violet/10
+                                                     rounded-sm transition-all duration-100"
                                             title={m.drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
                                           >
                                             {m.drift.selectedText}
@@ -2383,6 +2465,32 @@ function App() {
           </div>
         </div>
 
+        {/* Coach mark — first-time drift hint */}
+        {coachMarkActive && (
+          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[99990] pointer-events-none animate-fade-in">
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-full
+                            bg-dark-surface/95 backdrop-blur-xl
+                            border border-accent-violet/30
+                            shadow-[0_4px_24px_rgba(168,85,247,0.25)]
+                            pointer-events-auto">
+              {/* Pulsing violet dot */}
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-violet opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-violet" />
+              </span>
+              <span className="text-sm text-text-primary">
+                Select any text to <span className="text-accent-violet font-medium">drift</span> →
+              </span>
+              <button
+                onClick={dismissCoachMark}
+                className="ml-1 text-text-muted hover:text-text-primary transition-colors text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Input area */}
         <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
           <div className="max-w-4xl mx-auto">
@@ -2525,6 +2633,7 @@ function App() {
         currentChatId={activeChatId}
         currentChatTitle={chatHistory.find(c => c.id === activeChatId)?.title || 'Chat'}
         onSnippetSaved={() => uiStore.setSnippetCount(snippetStorage.getAllSnippets().length)}
+        onFirstSelection={dismissCoachMark}
       />
 
       {/* Drift Panel */}
@@ -2594,6 +2703,15 @@ function App() {
             }
           }
         }}
+      />
+
+      {/* Drift Map Panel */}
+      <DriftMapPanel
+        open={driftMapOpen}
+        onClose={() => setDriftMapOpen(false)}
+        messages={messages}
+        chatHistory={chatHistory}
+        onNavigate={handleDriftMapNavigate}
       />
 
       {/* Snippet Gallery */}

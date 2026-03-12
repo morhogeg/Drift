@@ -1,13 +1,48 @@
 # Drift — Session Handoff
 
-**Date:** March 11, 2026
+**Date:** March 12, 2026
 **Branch:** `main`
-**Build:** 17
-**Status:** Fixed input bar floating above phone bottom (100dvh → 100vh). Build 17 synced to Xcode.
+**Build:** 18
+**Status:** 4 UX improvements — drift discoverability (coach mark + hover hint), new chat on every open, drift link restyle + per-message badges, Drift Map panel. Build 18 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 47. Drift Map panel — bird's eye view of all drifts (NEW FEATURE)
+- **New component:** `src/components/DriftMapPanel.tsx` — slides in from the right (320px), shows the active chat as a vertical spine of messages with violet branches for each drift child. Sub-branches rendered for nested drifts (up to 3 levels). No graph library — pure CSS border-left connecting lines.
+- **Access:** Header icon button (visible only when chat has ≥1 drift) + `⌘⌥M` keyboard shortcut.
+- **Navigation:** Clicking any node calls `handleDriftMapNavigate` — navigates to the drift chat or scrolls to the source message. Panel closes on navigate.
+- **Data:** Fully derived from existing `message.driftInfos` + `chatHistory` — zero schema changes.
+- **State:** `driftMapOpen` / `setDriftMapOpen` added to `uiStore.ts`.
+
+### 46. Per-message drift count badge (UX)
+- AI messages with `driftInfos.length > 0` now show an `↗ N drifts` pill badge at top-right of the bubble.
+- Clicking the badge opens the first drift for that message.
+- Doubles as a re-open affordance when the drift panel has been closed.
+
+### 45. Drift inline link restyle (POLISH)
+- Replaced the heavy filled-badge treatment (gradient background + border + colored text) with a lighter underline-only style: `border-b border-accent-violet/50` + `hover:bg-accent-violet/10`.
+- Drift links are now clearly interactive (universal underline signal) without visually overloading dense responses.
+
+### 44. First-message coach mark (NEW FEATURE)
+- One-time floating pill (`"Select any text to drift →"`) appears when the first AI message completes streaming.
+- Pulsing violet dot animation draws the eye without being intrusive.
+- Auto-dismisses after 6 seconds OR on first text selection (whichever comes first).
+- Stored in `localStorage` as `driftCoachMarkSeen: true` — never shown again after dismissal.
+- Desktop: ghost `"Select to drift"` hint fades in on hover over unseen AI messages.
+- `SelectionTooltip.tsx`: added `onFirstSelection` prop — fires callback once on first qualifying selection.
+
+### 43. New chat on every app open (UX)
+- App now always opens to a fresh empty chat ("What's on your mind?") instead of resuming the last session.
+- Sidebar still shows full chat history unchanged.
+- Empty new chats are **not persisted** to IndexedDB until the first message is sent — no ghost sessions litter the history on reload.
+- `chatStore.createChat()`: removed immediate `persistChat()` call; `addMessage()` handles first-persist naturally.
+- `App.tsx` on-mount `useEffect`: awaits `loadChatsFromDB()` then calls `createNewChat()`.
+
+---
+
+## Previous Session Fixes
 
 ### 43. Input bar gap at phone bottom when keyboard closed (BUG FIX)
 - **Root cause:** `html, body { height: 100dvh }` — on iOS WKWebView, `dvh` is the *dynamic/visual* viewport height, which excludes the home indicator safe area (~34px). This made the app body stop 34px short of the physical screen bottom. `absolute bottom-0` landed there, and we then added `env(safe-area-inset-bottom) + 0.5rem` padding inside the container on top — compounding the gap.
@@ -251,6 +286,7 @@ src/
     settingsStorage.ts       localStorage settings
   components/
     DriftPanel.tsx           side panel (keyboard-aware input)
+    DriftMapPanel.tsx        bird's eye drift map (timeline + branches, ⌘⌥M)
     SelectionTooltip.tsx     iOS: persistent bottom bar; desktop: floating tooltip
     MultiModelCarousel.tsx   mobile swipeable card carousel for broadcast
     ModelPillRow.tsx         model selection chips above input (mobile, light+dark)
@@ -281,13 +317,14 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 17 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 18 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
 - [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
-- [ ] **Multi-level drift** — drift from inside a drift conversation
-- [ ] **App.tsx refactor** — still ~2430 lines, could extract more hooks
+- [ ] **Multi-level drift** — drift from inside a drift conversation (DriftMapPanel already supports rendering nested drifts)
+- [ ] **App.tsx refactor** — still ~2430+ lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
+- [ ] **Drift Map — clickable spine nodes** — message spine nodes currently pass empty chatId; wire them to scroll to the source message in the main chat
