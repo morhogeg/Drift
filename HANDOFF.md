@@ -2,12 +2,22 @@
 
 **Date:** March 12, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 23
-**Status:** Drift breadcrumb navigation, exploration bar redesign, input button centering fix. Build 23 synced to Xcode.
+**Build:** 24
+**Status:** Frictionless model addition — AddModelSheet (Gemini), dynamic ModelPickerSheet, ALLOWED_KEYS removed, continueWithModel preset lookup. Build 24 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 68. Frictionless model addition — Gemini (NEW FEATURE)
+- **Problem:** ModelPickerSheet had a hardcoded list of 3 models; ALLOWED_KEYS whitelist in modelStore silently dropped custom preset targets; continueWithModel used a hardcoded label switch that broke for any user-added model.
+- **New component:** `src/components/AddModelSheet.tsx` — 3-phase bottom sheet: (1) API key entry with show/hide toggle and branded Google AI Studio badge, (2) live key validation via `checkGeminiConnection` with spinner, (3) searchable model picker showing all 4 Gemini models with descriptions, multi-select up to available slots, already-added models shown greyed out.
+- **ModelPickerSheet** now accepts `availableTargets: Target[]` (dynamic from presets) and `onOpenAddModel` prop. Replaced hardcoded `ALL_MODELS` with the dynamic list. Added "+ Connect a model..." dashed-border row at bottom. Demo AI always appended.
+- **modelStore.ts** — removed `ALLOWED_KEYS` whitelist, replaced with `isValidTarget()` structural validation. Any preset with a valid provider/key/label now passes through. Label overrides also removed — labels come from presets.
+- **settingsStorage.ts** — fixed migration to preserve `apiKey` on presets (was being silently dropped on every load/save cycle).
+- **App.tsx** — `availableTargets` useMemo derives picker list from enabled presets; `handlePresetsAdded` upserts presets by ID and auto-selects first new model; `continueWithModel` now tries preset lookup by label before the hardcoded switch (custom models work with "Continue →").
+
+### 67. [Previous session entries continue below]
 
 ### 64. Drift exploration bar redesigned (POLISH)
 - **Before:** Heavy multi-row card with border, drop-shadow, gradient top line, large "Back to source" pill button, and "from conversation:" subtitle that wrapped onto a second line on long chat names.
@@ -400,8 +410,8 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 20 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
-- [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
+- [ ] **TestFlight submission** — archive build 24 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths. Provider auto-detected from key prefix.
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response
 - [ ] **Message regeneration** — re-run the last AI response
