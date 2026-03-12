@@ -2700,7 +2700,7 @@ function App() {
                       transition-all duration-150 active:scale-90
                       ${message.trim() || voiceInput.isListening
                         ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20'
-                        : 'bg-dark-border/40 text-text-muted cursor-default'
+                        : 'text-text-muted cursor-default'
                       }
                     `}
                     title="Send message"
