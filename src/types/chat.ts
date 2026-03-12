@@ -61,6 +61,22 @@ export interface ChatSession {
   }
 }
 
+/** One step in the breadcrumb trail leading to the current drift. */
+export interface AncestryEntry {
+  /** Human-readable label (main chat title, or `"term"` for drifts). */
+  label: string
+  /** True only for the root main-chat entry. */
+  isMainChat?: boolean
+  /** The drifted term (empty string for the main-chat root). */
+  selectedText: string
+  /** Source message the drift was opened from (empty for root). */
+  sourceMessageId: string
+  /** Context messages passed to the drift when it was opened (empty for root). */
+  contextMessages: Message[]
+  /** Drift chat ID — undefined for the root main-chat entry. */
+  driftChatId?: string
+}
+
 export interface DriftContext {
   selectedText: string
   sourceMessageId: string
@@ -68,4 +84,6 @@ export interface DriftContext {
   highlightMessageId?: string
   driftChatId?: string
   existingMessages?: Message[]
+  /** Breadcrumb trail of ancestor contexts, from root (main chat) to parent drift. */
+  ancestry?: AncestryEntry[]
 }

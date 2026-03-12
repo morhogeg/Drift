@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown, Mic } from 'lucide-react'
+import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown, Mic, Home } from 'lucide-react'
+import type { AncestryEntry } from '../types/chat'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import { sendMessageToGemini, type ChatMessage as GeminiMessage } from '../services/gemini'
@@ -46,6 +47,10 @@ interface DriftPanelProps {
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
+  /** Breadcrumb trail from the root (main chat) up to (but not including) this drift. */
+  ancestry?: AncestryEntry[]
+  /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
+  onNavigateToBreadcrumb?: (index: number) => void
 }
 
 export default function DriftPanel({
@@ -68,7 +73,9 @@ export default function DriftPanel({
   onMessagesChange,
   selectedProvider,
   selectedTargets,
-  onExpandedChange
+  onExpandedChange,
+  ancestry,
+  onNavigateToBreadcrumb,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -86,6 +93,7 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
@@ -156,6 +164,13 @@ export default function DriftPanel({
       return () => clearTimeout(t)
     }
   }, [isOpen])
+
+  // Auto-scroll breadcrumb to the end (current item) whenever depth changes
+  useEffect(() => {
+    if (breadcrumbScrollRef.current) {
+      breadcrumbScrollRef.current.scrollLeft = breadcrumbScrollRef.current.scrollWidth
+    }
+  }, [ancestry?.length, isOpen])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -716,6 +731,44 @@ export default function DriftPanel({
             </button>
           </div>
 
+          {/* Breadcrumb trail */}
+          {ancestry && ancestry.length > 0 && (
+            <div
+              ref={breadcrumbScrollRef}
+              className="px-3 pb-1.5 overflow-x-auto"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+              <div className="flex items-center gap-0 whitespace-nowrap min-w-0">
+                {ancestry.map((entry, i) => (
+                  <span key={i} className="flex items-center gap-0 shrink-0">
+                    <button
+                      onClick={() => onNavigateToBreadcrumb?.(i)}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                        text-[10px] text-text-muted/45 hover:text-text-muted/80
+                        hover:bg-white/[0.04] active:bg-white/[0.07]
+                        transition-all duration-100 max-w-[120px]"
+                      title={entry.isMainChat ? entry.label : entry.selectedText}
+                    >
+                      {entry.isMainChat && (
+                        <Home className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                      )}
+                      <span className="truncate leading-none">
+                        {entry.label}
+                      </span>
+                    </button>
+                    {/* separator */}
+                    <span className="text-[10px] text-text-muted/20 mx-0.5 leading-none select-none">›</span>
+                  </span>
+                ))}
+                {/* Current drift — not tappable, slightly brighter */}
+                <span className="flex items-center px-1.5 py-0.5 text-[10px] italic leading-none
+                  text-text-muted/70 font-medium shrink-0">
+                  "{selectedText}"
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Action bar — only visible when there are messages to act on */}
           {driftOnlyMessages.filter(m => !m.text.startsWith('What would you')).length > 0 && (
             <div className="px-3 pb-2 flex items-center gap-1.5">
@@ -947,7 +1000,7 @@ export default function DriftPanel({
                     ${getRTLClassName(message)}
                   `}
                 />
-                <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                <div className="absolute right-2 top-0 bottom-0 flex items-center gap-1">
                   {/* Mic — only when no text, not listening, not typing */}
                   {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
                     <button

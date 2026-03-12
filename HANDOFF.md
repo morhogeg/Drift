@@ -1,13 +1,40 @@
 # Drift — Session Handoff
 
 **Date:** March 12, 2026
-**Branch:** `main`
-**Build:** 22
-**Status:** Drift persistence fixes (blank reopen, missing nested branches), UI polish (dividers, toggles, send button). Build 22 synced to Xcode.
+**Branch:** `feature/list-anchors-links`
+**Build:** 23
+**Status:** Drift breadcrumb navigation, exploration bar redesign, input button centering fix. Build 23 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 64. Drift exploration bar redesigned (POLISH)
+- **Before:** Heavy multi-row card with border, drop-shadow, gradient top line, large "Back to source" pill button, and "from conversation:" subtitle that wrapped onto a second line on long chat names.
+- **After:** Single compact row (~40px) — `[git icon] "UEFA" · Chat Title [← back]`. No border shadow, parent title truncates with `flex-1 truncate` (never wraps), back button is borderless and subtle (violet on hover).
+
+### 63. Dead code removed (CLEANUP)
+- Removed `AddModelSheet` JSX block (component doesn't exist — was always a dead render)
+- Removed `addModelSheetOpen` / `setAddModelSheetOpen` state
+- Removed `handlePresetsAdded` function
+- Wired `ModelPickerSheet.onOpenAddModel` to `uiStore.setSettingsOpen(true)` (opens Settings as fallback)
+- Wired `ModelPickerSheet.availableTargets` to the existing `availableTargets` useMemo (dynamic, preset-driven)
+
+### 62. Input buttons vertically centered (BUG FIX)
+- **Root cause:** Button container was `absolute right-2 bottom-2` — anchored to bottom edge of textarea, causing slight vertical misalignment when textarea height != expected.
+- **Fix:** Changed to `absolute right-2 top-0 bottom-0` + `items-center` in both `App.tsx` and `DriftPanel.tsx`. Container now spans the full textarea height and flex-centers buttons for all textarea sizes.
+
+### 61. Drift breadcrumb navigation (NEW FEATURE)
+- **DriftPanel header** now shows a subtle breadcrumb trail below the title bar: `🏠 Sports Chat › "UEFA" › "Champions League"`.
+- **Current drift** (last item) is shown italic and non-tappable.
+- **Ancestor items** are tappable: clicking the main-chat root closes the panel; clicking an intermediate drift reopens that drift (with correct context and existing messages).
+- **`AncestryEntry` type** added to `types/chat.ts` — stores label, selectedText, sourceMessageId, contextMessages, and driftChatId for each step.
+- **`ancestry` field** added to `DriftContext` — built automatically in all three `openDrift` call sites in `handleStartDrift`. For nested drifts, ancestry = parent's ancestry + parent entry. For main-chat drifts, ancestry = `[{ isMainChat: true, label: chatTitle }]`.
+- **`handleNavigateToBreadcrumb`** added to App.tsx — closes drift (index 0) or calls `driftStore.openDrift()` with the ancestor's stored context and `ancestry.slice(0, index)`.
+- Breadcrumb auto-scrolls to the end (current item) on open/depth change.
+- Temp messages already synced via `onMessagesChange` so no data loss when navigating.
+
+---
 
 ### 60. Send arrow — remove grey idle background (POLISH)
 - The send arrow button had `bg-dark-border/40` when no text was typed, creating a grey capsule in both dark and light mode.

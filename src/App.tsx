@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, cloneElement, isValidElement } from 'react'
+import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
 import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
@@ -20,6 +20,7 @@ import HeaderControls from './components/HeaderControls'
 import MultiModelCarousel from './components/MultiModelCarousel'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
+import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
@@ -68,6 +69,7 @@ function App() {
   // Mobile carousel + model picker state
   const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
 
   // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -113,6 +115,18 @@ function App() {
   const message = chatStore.inputText
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
+
+  // Targets derived from enabled presets — drives ModelPickerSheet dynamic list
+  const availableTargets = useMemo(() => {
+    const presetTargets = (aiSettings.modelPresets || [])
+      .filter((p) => p.enabled)
+      .map((p) => ({ provider: p.provider as import('@/types/chat').Target['provider'], key: p.id, label: p.label }))
+    // Always include Demo AI
+    const demoTarget = { provider: 'dummy' as const, key: 'dummy-lite', label: 'Demo AI' }
+    const hasDummy = presetTargets.some((t) => t.key === 'dummy-lite')
+    return hasDummy ? presetTargets : [...presetTargets, demoTarget]
+  }, [aiSettings.modelPresets])
+
 
   const theme = uiStore.theme
 
@@ -814,7 +828,11 @@ function App() {
       setActiveStrandId(messageId)
     }
     if (targetId) setContinueFromMessageId(targetId)
-    if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
+    // Try preset lookup first — handles any user-added model
+    const matchingPreset = (aiSettings.modelPresets || []).find((p) => p.label === modelTag && p.enabled)
+    if (matchingPreset) {
+      setSelectedTargetsPersist([{ provider: matchingPreset.provider, key: matchingPreset.id, label: matchingPreset.label }])
+    } else if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
     } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
@@ -846,6 +864,26 @@ function App() {
     setAiSettings(newSettings)
     settingsStorage.save(newSettings)
     modelStore.setUseOpenRouter(newSettings.useOpenRouter)
+  }
+
+  // ── handlePresetsAdded — called by AddModelSheet ─────────────────────────────
+  const handlePresetsAdded = (newPresets: import('./components/Settings').ModelPreset[]) => {
+    const existing = aiSettings.modelPresets || []
+    // Upsert: update by ID if exists, append if new
+    const merged = [...existing]
+    for (const p of newPresets) {
+      const idx = merged.findIndex((x) => x.id === p.id)
+      if (idx >= 0) merged[idx] = p
+      else merged.push(p)
+    }
+    handleSaveSettings({ ...aiSettings, modelPresets: merged })
+    // Auto-select first newly added preset (not already selected)
+    const firstNew = newPresets.find((p) => !selectedTargets.some((t) => t.key === p.id))
+    if (firstNew && selectedTargets.length < 3) {
+      setSelectedTargetsPersist(
+        [...selectedTargets, { provider: firstNew.provider, key: firstNew.id, label: firstNew.label }].slice(0, 3),
+      )
+    }
   }
 
   // ── Dates ───────────────────────────────────────────────────────────────────
@@ -937,6 +975,14 @@ function App() {
           const msgIdx = activeDriftMessages.findIndex(m => m.id === driftSourceMsg.id)
           const nestedContext = activeDriftMessages.slice(0, msgIdx + 1)
           const existingNestedMessages = reconstructedMessages || driftStore.getTempConversation(newDriftChatId) || []
+          // Build breadcrumb ancestry: inherit parent ancestry + add the parent drift as a new entry
+          const parentAncestry = parentCtx.ancestry ?? [{
+            isMainChat: true,
+            label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
+            selectedText: '',
+            sourceMessageId: '',
+            contextMessages: [],
+          }]
           driftStore.openDrift({
             selectedText,
             sourceMessageId: driftSourceMsg.id,
@@ -944,6 +990,16 @@ function App() {
             highlightMessageId: driftSourceMsg.id,
             driftChatId: newDriftChatId,
             existingMessages: existingNestedMessages,
+            ancestry: [
+              ...parentAncestry,
+              {
+                label: `"${parentCtx.selectedText}"`,
+                selectedText: parentCtx.selectedText,
+                sourceMessageId: parentCtx.sourceMessageId,
+                contextMessages: parentCtx.contextMessages,
+                driftChatId: activeDriftChatId,
+              },
+            ],
           })
           return
         }
@@ -969,7 +1025,14 @@ function App() {
       driftStore.openDrift({
         selectedText,
         sourceMessageId: messageId,
-        contextMessages: []
+        contextMessages: [],
+        ancestry: [{
+          isMainChat: true,
+          label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
+          selectedText: '',
+          sourceMessageId: '',
+          contextMessages: [],
+        }],
       })
       return
     }
@@ -1009,7 +1072,14 @@ function App() {
       contextMessages,
       highlightMessageId: actualMessage?.id,
       driftChatId: finalDriftChatId,
-      existingMessages: existingMessagesToUse
+      existingMessages: existingMessagesToUse,
+      ancestry: [{
+        isMainChat: true,
+        label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
+        selectedText: '',
+        sourceMessageId: '',
+        contextMessages: [],
+      }],
     })
   }
 
@@ -1041,6 +1111,36 @@ function App() {
       const chatContainer = document.querySelector('.chat-messages-container')
       if (chatContainer) chatContainer.scrollTop = mainScrollPosition.current
     }, 150)
+  }
+
+  // ── Breadcrumb navigation ────────────────────────────────────────────────────
+  const handleNavigateToBreadcrumb = (index: number) => {
+    const { ancestry } = driftStore.driftContext
+    if (!ancestry || index >= ancestry.length) return
+
+    if (index === 0) {
+      // Navigate to main chat — close the drift panel (temp messages already
+      // synced to driftStore via onMessagesChange, so no data loss)
+      driftStore.closeDrift()
+      return
+    }
+
+    // Navigate to an ancestor drift
+    const entry = ancestry[index]
+    if (!entry.driftChatId) return
+
+    const existingMsgs =
+      driftStore.getTempConversation(entry.driftChatId) ??
+      (chatHistory.find(c => c.id === entry.driftChatId)?.messages ?? [])
+
+    driftStore.openDrift({
+      selectedText: entry.selectedText,
+      sourceMessageId: entry.sourceMessageId,
+      contextMessages: entry.contextMessages,
+      driftChatId: entry.driftChatId,
+      existingMessages: existingMsgs,
+      ancestry: ancestry.slice(0, index),
+    })
   }
 
   // ── Message actions ─────────────────────────────────────────────────────────
@@ -1800,58 +1900,51 @@ function App() {
                 const parentChat = chatHistory.find(c => c.id === currentChat.metadata?.parentChatId)
                 const parentTitle = parentChat?.title || 'Previous conversation'
                 return (
-                  <div className="relative mb-4 px-4 py-3 rounded-xl border border-dark-border/60 bg-dark-elevated/60 backdrop-blur-sm max-w-5xl mx-auto overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-accent-violet/50 via-accent-pink/40 to-transparent opacity-60" />
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <GitBranch className="w-3.5 h-3.5 text-text-secondary" />
-                          <span className="text-sm text-text-primary font-medium">
-                            Drift exploration of "{currentChat.metadata?.selectedText}"
-                          </span>
-                        </div>
-                        <span className="text-xs text-text-muted ml-6">
-                          from conversation: <span className="text-text-secondary">{parentTitle}</span>
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (currentChat.metadata?.parentChatId) {
-                            switchChat(currentChat.metadata.parentChatId)
-                            setTimeout(() => {
-                              const sourceMessageId = currentChat.metadata?.sourceMessageId
-                              const selectedText = currentChat.metadata?.selectedText
-                              let sourceElement: Element | null = null
-                              if (sourceMessageId) {
-                                sourceElement = document.querySelector(`div[data-message-id="${sourceMessageId}"]`) ||
-                                              document.querySelector(`div[data-message-id="msg-${sourceMessageId}"]`)
-                              }
-                              if (!sourceElement && selectedText) {
-                                const allMessages = document.querySelectorAll('div[data-message-id]')
-                                for (const msg of allMessages) {
-                                  if (msg.textContent && msg.textContent.includes(selectedText)) {
-                                    sourceElement = msg
-                                    break
-                                  }
+                  <div className="flex items-center gap-2 px-3 py-2 mb-4 rounded-lg border border-dark-border/25 bg-dark-elevated/25 max-w-5xl mx-auto min-w-0">
+                    <GitBranch className="w-3 h-3 text-accent-violet/50 shrink-0" />
+                    <span className="text-[12px] italic text-text-secondary/80 font-medium shrink-0 leading-none">
+                      "{currentChat.metadata?.selectedText}"
+                    </span>
+                    <span className="text-text-muted/25 shrink-0 text-[11px] leading-none select-none">·</span>
+                    <span className="text-[11px] text-text-muted/55 truncate flex-1 min-w-0 leading-none">
+                      {parentTitle}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (currentChat.metadata?.parentChatId) {
+                          switchChat(currentChat.metadata.parentChatId)
+                          setTimeout(() => {
+                            const sourceMessageId = currentChat.metadata?.sourceMessageId
+                            const selectedText = currentChat.metadata?.selectedText
+                            let sourceElement: Element | null = null
+                            if (sourceMessageId) {
+                              sourceElement = document.querySelector(`div[data-message-id="${sourceMessageId}"]`) ||
+                                            document.querySelector(`div[data-message-id="msg-${sourceMessageId}"]`)
+                            }
+                            if (!sourceElement && selectedText) {
+                              const allMessages = document.querySelectorAll('div[data-message-id]')
+                              for (const msg of allMessages) {
+                                if (msg.textContent && msg.textContent.includes(selectedText)) {
+                                  sourceElement = msg
+                                  break
                                 }
                               }
-                              if (sourceElement) {
-                                sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                sourceElement.classList.add('highlight-message', 'pulse-twice')
-                                setTimeout(() => sourceElement!.classList.remove('pulse-twice'), 2000)
-                                setTimeout(() => sourceElement!.classList.remove('highlight-message'), 3000)
-                              }
-                            }, 150)
-                          }
-                        }}
-                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-transparent hover:bg-dark-elevated/70
-                                 border border-dark-border/60 hover:border-dark-border rounded-full
-                                 text-text-secondary hover:text-text-primary transition-colors duration-150 ml-4"
-                      >
-                        <ChevronLeft className="w-3 h-3" />
-                        Back to source
-                      </button>
-                    </div>
+                            }
+                            if (sourceElement) {
+                              sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                              sourceElement.classList.add('highlight-message', 'pulse-twice')
+                              setTimeout(() => sourceElement!.classList.remove('pulse-twice'), 2000)
+                              setTimeout(() => sourceElement!.classList.remove('highlight-message'), 3000)
+                            }
+                          }, 150)
+                        }
+                      }}
+                      className="flex items-center gap-0.5 text-[11px] text-text-muted/45
+                               hover:text-accent-violet/80 transition-colors duration-150 shrink-0 leading-none"
+                    >
+                      <ChevronLeft className="w-3 h-3" />
+                      back
+                    </button>
                   </div>
                 )
               })()}
@@ -2655,8 +2748,8 @@ function App() {
                 `}
               />
 
-              {/* Buttons container — absolutely positioned inside the textarea on the right */}
-              <div className="absolute right-2 bottom-2 flex items-center gap-1">
+              {/* Buttons container — spans full textarea height so items are always vertically centered */}
+              <div className="absolute right-2 top-0 bottom-0 flex items-center gap-1">
                 {/* Mic button — only when no text, not listening, and voice is supported */}
                 {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
                   <button
@@ -2760,6 +2853,8 @@ function App() {
           return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
+        ancestry={driftContext?.ancestry}
+        onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
       />
 
       {/* Settings Modal */}
@@ -2775,6 +2870,8 @@ function App() {
         isOpen={modelPickerOpen}
         onClose={() => setModelPickerOpen(false)}
         selectedTargets={selectedTargets}
+        availableTargets={availableTargets}
+        onOpenAddModel={() => setAddModelSheetOpen(true)}
         onToggleTarget={(target) => {
           const exists = selectedTargets.some(t => t.key === target.key)
           const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
@@ -2799,6 +2896,15 @@ function App() {
             }
           }
         }}
+      />
+
+      {/* Add Model Sheet */}
+      <AddModelSheet
+        isOpen={addModelSheetOpen}
+        onClose={() => setAddModelSheetOpen(false)}
+        currentPresets={aiSettings.modelPresets || []}
+        onPresetsAdded={handlePresetsAdded}
+        maxAdd={Math.max(0, 3 - selectedTargets.length)}
       />
 
       {/* Drift Map Panel */}

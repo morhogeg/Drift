@@ -1,18 +1,13 @@
 import type { Target } from '../types/chat'
-import { DUMMY_TARGET } from '../store/modelStore'
 
 interface ModelPickerSheetProps {
   isOpen: boolean
   onClose: () => void
   selectedTargets: Target[]
   onToggleTarget: (target: Target) => void
+  availableTargets: Target[]
+  onOpenAddModel: () => void
 }
-
-const ALL_MODELS: Target[] = [
-  { provider: 'gemini', key: 'gemini-flash-lite', label: 'Gemini Flash Lite' },
-  { provider: 'gemini', key: 'gemini-flash', label: 'Gemini Flash' },
-  DUMMY_TARGET,
-]
 
 const MODEL_DOT_COLORS: Record<string, string> = {
   gemini: 'bg-sky-400',
@@ -21,10 +16,18 @@ const MODEL_DOT_COLORS: Record<string, string> = {
   dummy: 'bg-purple-400',
 }
 
-export default function ModelPickerSheet({ isOpen, onClose, selectedTargets, onToggleTarget }: ModelPickerSheetProps) {
+export default function ModelPickerSheet({
+  isOpen,
+  onClose,
+  selectedTargets,
+  onToggleTarget,
+  availableTargets,
+  onOpenAddModel,
+}: ModelPickerSheetProps) {
   if (!isOpen) return null
 
-  const selectedKeys = new Set(selectedTargets.map(t => t.key))
+  const selectedKeys = new Set(selectedTargets.map((t) => t.key))
+  const atMax = selectedTargets.length >= 3
 
   return (
     <>
@@ -46,9 +49,9 @@ export default function ModelPickerSheet({ isOpen, onClose, selectedTargets, onT
         <p className="text-[12px] text-text-muted mb-5">Select up to 3 models to compare responses</p>
 
         <div className="space-y-2">
-          {ALL_MODELS.map((model) => {
+          {availableTargets.map((model) => {
             const isSelected = selectedKeys.has(model.key)
-            const isDisabled = !isSelected && selectedTargets.length >= 3
+            const isDisabled = !isSelected && atMax
 
             return (
               <button
@@ -65,20 +68,55 @@ export default function ModelPickerSheet({ isOpen, onClose, selectedTargets, onT
                     : 'bg-dark-elevated border border-dark-border/60 active:opacity-70'
                 }`}
               >
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[model.provider] ?? 'bg-text-muted/40'}`} />
-                <span className={`flex-1 text-[14px] font-medium ${isSelected ? 'text-text-primary' : 'text-text-secondary'}`}>
+                <div
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${MODEL_DOT_COLORS[model.provider] ?? 'bg-text-muted/40'}`}
+                />
+                <span
+                  className={`flex-1 text-[14px] font-medium ${isSelected ? 'text-text-primary' : 'text-text-secondary'}`}
+                >
                   {model.label}
                 </span>
                 {isSelected && (
                   <div className="w-5 h-5 rounded-full bg-accent-violet flex items-center justify-center flex-shrink-0">
                     <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                      <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path
+                        d="M1 4L3.5 6.5L9 1"
+                        stroke="white"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   </div>
                 )}
               </button>
             )
           })}
+
+          {/* Connect a model row */}
+          {!atMax && (
+            <button
+              onClick={onOpenAddModel}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-dark-border/50 text-text-muted hover:text-text-secondary hover:border-dark-border active:opacity-70 transition-all"
+            >
+              <div className="w-2 h-2 rounded-full border border-current flex-shrink-0" />
+              <span className="flex-1 text-[14px]">Connect a model...</span>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                className="flex-shrink-0"
+              >
+                <path
+                  d="M7 1v12M1 7h12"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
 
         <button

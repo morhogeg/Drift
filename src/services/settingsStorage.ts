@@ -51,6 +51,7 @@ export const settingsStorage = {
           model: p.model || (p.provider === 'ollama' ? (parsed.ollamaModel || 'llama2') : parsed.openRouterModel || OPENROUTER_MODELS.OSS),
           serverUrl: p.serverUrl || (p.provider === 'ollama' ? (parsed.ollamaUrl || 'http://localhost:11434') : undefined),
           enabled: typeof p.enabled === 'boolean' ? p.enabled : true,
+          ...(p.apiKey ? { apiKey: p.apiKey } : {}),
         }))
 
         // If no Gemini presets exist yet (old settings pre-Gemini), inject the defaults

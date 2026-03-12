@@ -16,28 +16,26 @@ export const DEFAULT_TARGET: Target = {
   label: 'Gemini Flash Lite',
 }
 
-// Allowed target keys — guards against corrupt/legacy localStorage values
-const ALLOWED_KEYS = new Set(['qwen3', 'oss', 'ollama', 'dummy-basic', 'dummy-lite', 'openrouter', 'gemini-flash-lite', 'gemini-flash', 'gemini-flash-25', 'gemini-flash-20'])
+const VALID_PROVIDERS = new Set<Target['provider']>(['openrouter', 'ollama', 'gemini', 'dummy'])
+
+function isValidTarget(t: unknown): t is Target {
+  if (typeof t !== 'object' || t === null) return false
+  const obj = t as Record<string, unknown>
+  return (
+    typeof obj.key === 'string' && obj.key.length > 0 &&
+    typeof obj.label === 'string' && obj.label.length > 0 &&
+    VALID_PROVIDERS.has(obj.provider as Target['provider'])
+  )
+}
 
 /** Normalise a target list, de-duplicating and migrating legacy keys. */
 function normaliseTargets(targets: Target[]): Target[] {
   const map = new Map<string, Target>()
   for (const t of targets) {
+    if (!isValidTarget(t)) continue
     // Migrate legacy keys
-    const key =
-      t.key === 'dummy-basic' ? 'qwen3' : t.key === 'openrouter' ? 'oss' : t.key
-    const provider: Target['provider'] =
-      t.provider === 'openrouter' || t.provider === 'ollama' || t.provider === 'gemini' || t.provider === 'dummy'
-        ? t.provider
-        : 'openrouter'
-    const label =
-      key === 'qwen3' ? 'Qwen3' :
-      key === 'oss' ? 'OpenAI OSS' :
-      key === 'gemini-flash-lite' ? 'Gemini Flash Lite' :
-      key === 'gemini-flash' ? 'Gemini Flash' :
-      key === 'dummy-lite' ? 'Demo AI' :
-      t.label
-    if (ALLOWED_KEYS.has(key)) map.set(key, { provider, key, label })
+    const key = t.key === 'dummy-basic' ? 'qwen3' : t.key === 'openrouter' ? 'oss' : t.key
+    map.set(key, { provider: t.provider, key, label: t.label })
   }
   return map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
 }
