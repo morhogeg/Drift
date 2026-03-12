@@ -2,12 +2,28 @@
 
 **Date:** March 12, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 25 (iOS Xcode) / 26 (web)
-**Status:** 4 major features: auto-persist drifts, drift templates, AI-suggested highlights, knowledge graph canvas. iOS build 25 synced to Xcode — ready to archive for TestFlight.
+**Build:** 26 (iOS Xcode) / 27 (web)
+**Status:** 3 UX fixes from screenshot feedback: knowledge graph converted to 340px side panel (current chat tree only), suggestion chips in blank drift panel, unexplored highlights preserved in hasDrift messages. Synced to Xcode — ready to archive.
 
 ---
 
 ## What Was Done This Session
+
+### 75. Knowledge Graph — side panel, current chat tree only (FIX)
+- **Before:** Full-screen overlay showing entire database of chats/drifts — covered message text.
+- **After:** 340px right-side panel (`fixed top-0 right-0 bottom-0`) that shows only the active chat + its drift descendants. Non-blocking — main content still visible.
+- **Tree filtering:** `findRootId()` walks up parent chain to the ultimate root; `collectTree()` BFS-collects all descendants. `buildTree()` uses BFS level layout (root at top, children stacked below at 160px intervals).
+- **Empty state:** If only 1 node (no drifts yet), shows a friendly "Select text → Drift to explore" hint. Removed MiniMap (too small in narrow panel).
+- Clicking a node now also closes the panel after switching.
+
+### 74. Suggestion chips in blank drift panel (NEW FEATURE)
+- **What:** When a drift panel opens fresh (no existing messages, no template), 2 tappable question suggestions appear above the input field.
+- **How:** `getDriftSuggestions(selectedText, contextSnippet, apiKey)` added to `gemini.ts` — 5s timeout, returns 2 short questions, silent failure. Fetched in the init `useEffect` of `DriftPanel.tsx` and stored in `driftSuggestions` state.
+- **UX:** Pills show under "Try asking" label. Tapping sends immediately and dismisses the chips. Hidden once the user has sent their first message, and not shown for template drifts (which auto-send).
+
+### 73. Preserve unexplored highlights in hasDrift messages (FIX)
+- **Before:** Once a message got a drift link (entered `hasDrift` branch), all AI-suggested dotted highlights disappeared.
+- **After:** In the hasDrift ReactMarkdown `components`, `unexploredHl` is computed as highlights NOT already in `driftInfos`. A combined `procWithBoth()` runs `processDriftText` first (solid violet drift links), then `processHighlightsText` on top (dotted unexplored suggestions). Explored = solid link; unexplored = dotted underline.
 
 ### 72. Drift Knowledge Graph — zoomable 2D canvas (NEW FEATURE)
 - **New component:** `src/components/DriftKnowledgeGraph.tsx` — full-screen overlay showing all chats and their drift relationships as a zoomable/pannable graph.

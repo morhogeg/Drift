@@ -2581,12 +2581,19 @@ function App() {
 
                                     return walkNode(children)
                                   }
+                                  // Unexplored suggestions: highlights not yet drifted on
+                                  const exploredTexts = new Set(msg.driftInfos!.map(d => d.selectedText))
+                                  const unexploredHl = (msg.suggestedHighlights ?? []).filter(h => !exploredTexts.has(h))
+                                  const procWithBoth = (children: any): React.ReactNode => {
+                                    const withDrifts = processDriftText(children)
+                                    return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl) : withDrifts
+                                  }
                                   return {
-                                    p: ({ children }) => <p className="mb-2">{processDriftText(children)}</p>,
-                                    td: ({ children }) => <td>{processDriftText(children)}</td>,
-                                    th: ({ children }) => <th>{processDriftText(children)}</th>,
+                                    p: ({ children }) => <p className="mb-2">{procWithBoth(children)}</p>,
+                                    td: ({ children }) => <td>{procWithBoth(children)}</td>,
+                                    th: ({ children }) => <th>{procWithBoth(children)}</th>,
                                     li: ({ children }) => {
-                                      const processed = processDriftText(children)
+                                      const processed = procWithBoth(children)
                                       const anchorId = getAnchorId(msg.id, liCounter++)
                                       return <li><span id={anchorId}>{processed}</span></li>
                                     }

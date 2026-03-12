@@ -158,6 +158,61 @@ export async function getSuggestedHighlights(
   }
 }
 
+// ── Drift panel suggestion chips ─────────────────────────────────────────────
+
+/**
+ * Generate 2 short question suggestions for the blank drift panel.
+ * Returns an empty array on any error — non-critical.
+ */
+export async function getDriftSuggestions(
+  selectedText: string,
+  contextSnippet: string,
+  apiKey: string,
+  model: string = GEMINI_MODELS.FLASH_LITE_PREVIEW,
+): Promise<string[]> {
+  if (!apiKey?.trim() || !selectedText?.trim()) return []
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+
+    const body = {
+      systemInstruction: {
+        parts: [{
+          text: 'Generate exactly 2 short, curiosity-sparking questions a user might ask to explore the given phrase. Each question must be under 9 words. Return ONLY a JSON array of 2 strings. No explanations. Example: ["Why does this matter today?", "What are real-world examples?"]',
+        }],
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: `Phrase: "${selectedText}"\nContext: ${contextSnippet.substring(0, 400)}` }],
+      }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 128 },
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+    if (!response.ok) return []
+
+    const json = await response.json()
+    let raw: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 2)
+  } catch {
+    return []
+  }
+}
+
 // ── Streaming ────────────────────────────────────────────────────────────────
 
 export async function sendMessageToGemini(

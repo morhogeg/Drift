@@ -3,7 +3,7 @@ import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2
 import type { AncestryEntry } from '../types/chat'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToGemini, type ChatMessage as GeminiMessage } from '../services/gemini'
+import { sendMessageToGemini, getDriftSuggestions, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -106,6 +106,7 @@ export default function DriftPanel({
   const [isComparing, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
+  const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
 
   // --------------------------------------------------------------------------
   // Template helpers
@@ -156,6 +157,20 @@ export default function DriftPanel({
 
         // Set drift-only messages (just the system message to start)
         setDriftOnlyMessages([systemMessage])
+      }
+
+      // Reset suggestions
+      setDriftSuggestions([])
+
+      // Fetch suggestion chips for fresh non-template drifts
+      if (!templateType && !(existingMessages && existingMessages.length > 0)) {
+        const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
+        if (geminiKey) {
+          const ctx = contextMessages.slice(-3).map(m => m.text).join(' ')
+          getDriftSuggestions(selectedText, ctx, geminiKey).then(s => {
+            setDriftSuggestions(s)
+          })
+        }
       }
 
       // Reset states when opening new drift
@@ -1026,7 +1041,28 @@ export default function DriftPanel({
           
           <div ref={messagesEndRef} />
         </div>
-        
+
+        {/* Suggestion chips — shown only when fresh (no user messages, no template) */}
+        {!templateType && driftSuggestions.length > 0 && !driftOnlyMessages.some(m => m.isUser) && (
+          <div className="px-3 pb-2 flex flex-col gap-1.5">
+            <p className="text-[10px] text-text-muted/50 uppercase tracking-wide">Try asking</p>
+            <div className="flex flex-col gap-1.5">
+              {driftSuggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setDriftSuggestions([]); sendMessage(s) }}
+                  className="text-left px-3 py-2 rounded-xl text-[12px] text-text-secondary
+                    border border-accent-violet/20 bg-accent-violet/[0.05]
+                    hover:border-accent-violet/40 hover:text-text-primary hover:bg-accent-violet/[0.10]
+                    transition-all duration-150"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 z-10">
           <div className="h-8 bg-gradient-to-t from-dark-bg to-transparent pointer-events-none" />
