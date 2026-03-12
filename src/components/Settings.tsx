@@ -6,6 +6,7 @@ import { checkOllamaConnection } from '../services/ollama'
 import type { GeminiModel } from '../services/gemini'
 import { checkGeminiConnection, GEMINI_MODELS } from '../services/gemini'
 import { useUIStore } from '../store/uiStore'
+import AddModelSheet from './AddModelSheet'
 
 interface SettingsProps {
   isOpen: boolean
@@ -326,6 +327,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected' | null>(null)
   const [availableOpenRouterModels, setAvailableOpenRouterModels] = useState<string[]>([])
   const [expandedPreset, setExpandedPreset] = useState<string | null>(null)
+  const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
 
   useEffect(() => {
     setSettings(currentSettings)
@@ -388,19 +390,6 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
     setHasChanges(false)
     setConnectionStatus(null)
     onClose()
-  }
-
-  const addPreset = () => {
-    const id = `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-    const next: ModelPreset = {
-      id,
-      provider: 'openrouter',
-      label: 'New Model',
-      model: settings.openRouterModel || OPENROUTER_MODELS.OSS,
-      enabled: true,
-    }
-    handleChange('modelPresets', [...(settings.modelPresets || []), next])
-    setExpandedPreset(id)
   }
 
   const removePreset = (id: string) => {
@@ -558,7 +547,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           <div className="mx-4 mt-2">
             <button
               type="button"
-              onClick={addPreset}
+              onClick={() => setAddModelSheetOpen(true)}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-dark-border/60 text-text-muted hover:text-accent-violet hover:border-accent-violet/40 transition-colors text-sm"
             >
               <Plus className="w-4 h-4" />
@@ -638,6 +627,26 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           </button>
         </div>
       </div>
+
+      <AddModelSheet
+        isOpen={addModelSheetOpen}
+        onClose={() => setAddModelSheetOpen(false)}
+        currentPresets={presets}
+        onPresetsAdded={(newPresets) => {
+          const merged = [...presets]
+          for (const p of newPresets) {
+            const idx = merged.findIndex(x => x.id === p.id)
+            if (idx >= 0) merged[idx] = p
+            else merged.push(p)
+          }
+          handleChange('modelPresets', merged)
+          const geminiPreset = newPresets.find(p => p.provider === 'gemini' && p.apiKey)
+          if (geminiPreset?.apiKey) {
+            handleChange('geminiApiKey', geminiPreset.apiKey)
+          }
+        }}
+        maxAdd={10}
+      />
     </div>
   )
 }

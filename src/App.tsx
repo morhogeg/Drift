@@ -5,7 +5,6 @@ import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaM
 import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights } from './services/gemini'
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
-import DriftMapPanel from './components/DriftMapPanel'
 import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
@@ -128,6 +127,30 @@ function App() {
     return hasDummy ? presetTargets : [...presetTargets, demoTarget]
   }, [aiSettings.modelPresets])
 
+  const totalDriftCount = useMemo(() => {
+    if (!activeChatId || !chatHistory.length) return 0
+    const findRoot = (id: string): string => {
+      const c = chatHistory.find(x => x.id === id)
+      if (!c?.metadata?.isDrift || !c.metadata.parentChatId) return id
+      return findRoot(c.metadata.parentChatId)
+    }
+    const rootId = findRoot(activeChatId)
+    let count = 0
+    const queue = [rootId]
+    const seen = new Set<string>()
+    while (queue.length) {
+      const id = queue.shift()!
+      if (seen.has(id)) continue
+      seen.add(id)
+      chatHistory.forEach(c => {
+        if (c.metadata?.parentChatId === id) {
+          count++
+          queue.push(c.id)
+        }
+      })
+    }
+    return count
+  }, [activeChatId, chatHistory])
 
   const theme = uiStore.theme
 
@@ -166,8 +189,6 @@ function App() {
 
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
-  const driftMapOpen = uiStore.driftMapOpen
-  const setDriftMapOpen = uiStore.setDriftMapOpen
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
@@ -430,10 +451,6 @@ function App() {
         e.preventDefault()
         createNewChat()
       }
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'm') {
-        e.preventDefault()
-        setDriftMapOpen(!driftMapOpen)
-      }
       if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
         e.preventDefault()
         setKnowledgeGraphOpen(!knowledgeGraphOpen)
@@ -441,7 +458,7 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chatHistory, activeChatId, messages, driftMapOpen, knowledgeGraphOpen])
+  }, [chatHistory, activeChatId, messages, knowledgeGraphOpen])
 
   // ── API connection check ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1030,6 +1047,11 @@ function App() {
           // Persist parent drift to IndexedDB before replacing context — ensures
           // it survives app restarts and appears correctly in the Drift Map.
           const parentCtx = driftStore.driftContext
+          // Determine the correct parent for the current (parent) drift:
+          // if it has an ancestor drift, use that; otherwise fall back to main chat.
+          const parentCtxAncestry = parentCtx.ancestry ?? []
+          const parentDriftAncestor = [...parentCtxAncestry].reverse().find(e => e.driftChatId)
+          const parentDriftParentId = parentDriftAncestor?.driftChatId ?? activeChatId
           chatStore.registerDriftSession({
             id: activeDriftChatId,
             title: `"${parentCtx.selectedText}"`,
@@ -1038,7 +1060,7 @@ function App() {
             createdAt: new Date(),
             metadata: {
               isDrift: true,
-              parentChatId: activeChatId,
+              parentChatId: parentDriftParentId,
               sourceMessageId: parentCtx.sourceMessageId,
               selectedText: parentCtx.selectedText,
             },
@@ -1159,13 +1181,20 @@ function App() {
 
   const handleCloseDrift = (driftMessages?: Message[]) => {
     // Read context before closing (driftContext is stable until next openDrift)
-    const { selectedText, sourceMessageId, driftChatId } = driftStore.driftContext
+    const { selectedText, sourceMessageId, driftChatId, ancestry } = driftStore.driftContext
 
     driftStore.closeDrift(driftMessages)
 
     // Auto-persist the drift conversation so it survives app restarts.
     // Creates a ghost ChatSession in chatHistory + IndexedDB if not already there.
     if (driftMessages && driftMessages.length > 0 && driftChatId) {
+      // Determine the correct parent: for nested drifts, the parent is the
+      // immediately preceding drift in the ancestry chain (the last entry with a
+      // driftChatId). For top-level drifts the parent is the main chat (activeChatId).
+      const parentAncestry = ancestry ?? []
+      const lastDriftAncestor = [...parentAncestry].reverse().find(e => e.driftChatId)
+      const correctParentChatId = lastDriftAncestor?.driftChatId ?? activeChatId
+
       chatStore.registerDriftSession({
         id: driftChatId,
         title: `"${selectedText}"`,
@@ -1174,7 +1203,7 @@ function App() {
         createdAt: new Date(),
         metadata: {
           isDrift: true,
-          parentChatId: activeChatId,
+          parentChatId: correctParentChatId,
           sourceMessageId,
           selectedText,
         },
@@ -1524,15 +1553,6 @@ function App() {
         setTimeout(() => element!.classList.remove('highlight-message'), 3000)
       }
     }, 150)
-  }
-
-  const handleDriftMapNavigate = (chatId: string, messageId?: string) => {
-    if (messageId) {
-      handleNavigateToSource(chatId, messageId)
-    } else {
-      switchChat(chatId)
-    }
-    setDriftMapOpen(false)
   }
 
   const handleGoToSource = (chatId: string) => {
@@ -1895,20 +1915,6 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Drift Map Button — shown when active chat has drifts */}
-              {messages.some(m => m.hasDrift) && (
-                <button
-                  onClick={() => setDriftMapOpen(true)}
-                  title="Drift map (⌘⌥M)"
-                  className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
-                    <circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M9 6h10a2 2 0 0 1 2 2v7"/>
-                  </svg>
-                </button>
-              )}
               {/* Knowledge Graph Button — shown when there are multiple chats */}
               {chatHistory.length > 1 && (
                 <button
@@ -1980,6 +1986,23 @@ function App() {
                     <ArrowDown className="w-4 h-4 text-text-muted group-hover:text-accent-violet transition-colors animate-gentle-pulse" />
                   </button>
                 </div>
+              )}
+
+              {/* Floating drift map pill */}
+              {totalDriftCount > 0 && !knowledgeGraphOpen && (
+                <button
+                  onClick={() => setKnowledgeGraphOpen(true)}
+                  className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] right-4 z-30
+                    flex items-center gap-1.5 px-3 py-1.5 rounded-full
+                    bg-dark-surface/90 backdrop-blur-md border border-accent-violet/25
+                    text-[11px] font-medium text-accent-violet/80
+                    shadow-[0_2px_12px_rgba(168,85,247,0.15)]
+                    hover:border-accent-violet/50 hover:bg-dark-elevated/90
+                    transition-all active:scale-95"
+                >
+                  <span className="text-[10px]">↗</span>
+                  {totalDriftCount} {totalDriftCount === 1 ? 'drift' : 'drifts'}
+                </button>
               )}
 
               {/* Show parent chat link if this is a saved drift */}
@@ -2242,14 +2265,14 @@ function App() {
                         <div className="text-[11px] text-text-secondary mb-1 mt-1">{msg.modelTag}</div>
                       )}
                       {/* Subtle drift origin tag — shown on every non-user pushed message */}
-                      {isDriftMessage && !msg.isUser && (isSinglePushMessage || isFirstDriftMessage) && (
+                      {isDriftMessage && !msg.isUser && (
                         <div className="flex items-center gap-1.5 mb-1.5 mt-0.5">
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md
                             bg-accent-violet/[0.08] border border-accent-violet/20
                             text-[9px] font-semibold text-accent-violet/80 tracking-wide uppercase">
                             ↗ drift
                           </span>
-                          {msg.driftPushMetadata?.selectedText && (
+                          {(isSinglePushMessage || isFirstDriftMessage) && msg.driftPushMetadata?.selectedText && (
                             <span className="text-[11px] text-text-muted italic truncate max-w-[260px]">
                               "{msg.driftPushMetadata.selectedText}"
                             </span>
@@ -2688,7 +2711,7 @@ function App() {
                                     e.stopPropagation()
                                     if (msg.driftInfos!.length > 1) {
                                       // Multiple drifts — open the map so user can pick
-                                      setDriftMapOpen(true)
+                                      setKnowledgeGraphOpen(true)
                                     } else {
                                       const d = msg.driftInfos![0]
                                       const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
@@ -2701,7 +2724,7 @@ function App() {
                                     e.preventDefault()
                                     e.stopPropagation()
                                     if (msg.driftInfos!.length > 1) {
-                                      setDriftMapOpen(true)
+                                      setKnowledgeGraphOpen(true)
                                     } else {
                                       const d = msg.driftInfos![0]
                                       const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
@@ -2956,7 +2979,12 @@ function App() {
             const hasUserMessage = msgs.some(m => m.isUser)
             const alreadyRegistered = chatStore.chatHistory.some(c => c.id === chatId)
             if (hasUserMessage && !alreadyRegistered) {
-              const { selectedText, sourceMessageId } = driftStore.driftContext
+              const { selectedText, sourceMessageId, ancestry } = driftStore.driftContext
+              // Determine the correct parent: use the last drift ancestor if available
+              // (for nested drifts), otherwise fall back to the main chat.
+              const currentAncestry = ancestry ?? []
+              const lastDriftAnc = [...currentAncestry].reverse().find(e => e.driftChatId)
+              const correctParent = lastDriftAnc?.driftChatId ?? activeChatId
               chatStore.registerDriftSession({
                 id: chatId,
                 title: `"${selectedText}"`,
@@ -2965,7 +2993,7 @@ function App() {
                 createdAt: new Date(),
                 metadata: {
                   isDrift: true,
-                  parentChatId: activeChatId,
+                  parentChatId: correctParent,
                   sourceMessageId,
                   selectedText,
                 },
@@ -3038,23 +3066,19 @@ function App() {
         maxAdd={Math.max(0, 3 - selectedTargets.length)}
       />
 
-      {/* Drift Map Panel */}
-      <DriftMapPanel
-        open={driftMapOpen}
-        onClose={() => setDriftMapOpen(false)}
-        messages={messages}
-        chatHistory={chatHistory}
-        onNavigate={handleDriftMapNavigate}
-        getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
-      />
-
       {/* Knowledge Graph */}
       {knowledgeGraphOpen && (
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
           onClose={() => setKnowledgeGraphOpen(false)}
-          onSwitchChat={(id) => { setKnowledgeGraphOpen(false); switchChat(id) }}
+          onSwitchChat={switchChat}
+          onScrollToMessage={(msgId) => {
+            const el = document.querySelector(`[data-message-id="${msgId}"]`)
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            setKnowledgeGraphOpen(false)
+          }}
+          getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
         />
       )}
 

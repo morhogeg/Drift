@@ -1,6 +1,6 @@
 /**
  * DriftKnowledgeGraph — right-side panel with full dark canvas showing the
- * active chat and all its drift descendants as a zoomable node graph.
+ * active chat and all its drift descendants as a zoomable radial mind map.
  * Filtered to the current conversation tree only (not entire database).
  */
 import { useEffect, useCallback } from 'react'
@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react'
 import type { Node, Edge, NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { ChatSession } from '@/types/chat'
+import type { ChatSession, Message } from '@/types/chat'
 import { X } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -28,6 +28,9 @@ interface ChatNodeData {
   isActive: boolean
   messageCount: number
   selectedText?: string
+  sourceMessageId?: string
+  sourceMsgPreview?: string
+  onScrollToSource?: () => void
   [key: string]: unknown
 }
 
@@ -36,6 +39,8 @@ interface Props {
   activeChatId: string | null
   onClose: () => void
   onSwitchChat: (chatId: string) => void
+  onScrollToMessage: (messageId: string) => void
+  getTempMessages?: (chatId: string) => Message[] | null
 }
 
 // ── Custom node component ────────────────────────────────────────────────────
@@ -45,37 +50,47 @@ function ChatNode({ data }: NodeProps) {
   return (
     <div
       className={`
-        rounded-xl border px-3 py-2 cursor-pointer select-none transition-all duration-150
+        rounded-2xl border px-3.5 py-2.5 cursor-pointer select-none transition-all duration-150
         ${d.isActive
-          ? 'border-accent-violet shadow-[0_0_0_2px_rgba(168,85,247,0.4)] bg-dark-elevated'
+          ? 'border-accent-violet shadow-[0_0_0_2px_rgba(168,85,247,0.35),0_0_20px_rgba(168,85,247,0.15)] bg-dark-elevated'
           : d.isDrift
-            ? 'border-accent-violet/30 bg-dark-surface border-l-2 border-l-accent-violet'
-            : 'border-dark-border/70 bg-dark-elevated hover:border-dark-border'
+            ? 'border-accent-violet/25 bg-dark-surface hover:border-accent-violet/50 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)]'
+            : 'border-dark-border/60 bg-dark-elevated hover:border-dark-border'
         }
       `}
-      style={{ minWidth: 140, maxWidth: 180 }}
+      style={{ minWidth: 150, maxWidth: 210 }}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
 
       {d.isDrift && (
-        <div className="text-[9px] font-medium text-accent-violet/70 uppercase tracking-wide mb-1">
-          drift
+        <div className="text-[8px] font-semibold text-accent-violet/60 uppercase tracking-widest mb-1.5">
+          ↗ drift
         </div>
       )}
 
-      <div className="text-[12px] font-semibold text-text-primary truncate leading-tight">
-        {d.label}
+      <div className={`text-[12px] font-semibold leading-snug ${d.isDrift ? 'text-accent-violet/90' : 'text-text-primary'}`}>
+        {d.selectedText || d.label}
       </div>
 
-      {d.isDrift && d.selectedText && (
-        <div className="text-[10px] text-text-muted italic truncate mt-0.5">
-          &ldquo;{d.selectedText}&rdquo;
+      {d.sourceMsgPreview && (
+        <div className="text-[10px] text-text-muted/70 italic mt-1 leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          &ldquo;{d.sourceMsgPreview}&rdquo;
         </div>
       )}
 
-      <div className="text-[9px] text-text-muted/60 mt-1">
-        {d.messageCount} {d.messageCount === 1 ? 'msg' : 'msgs'}
+      <div className="flex items-center justify-between mt-2 gap-1">
+        <span className="text-[9px] text-text-muted/50">
+          {d.messageCount} {d.messageCount === 1 ? 'msg' : 'msgs'}
+        </span>
+        {d.isDrift && d.sourceMessageId && d.onScrollToSource && (
+          <button
+            onClick={(e) => { e.stopPropagation(); (d.onScrollToSource as () => void)() }}
+            className="text-[9px] text-accent-violet/50 hover:text-accent-violet transition-colors px-1.5 py-0.5 rounded-md hover:bg-accent-violet/10"
+          >
+            ↑ source
+          </button>
+        )}
       </div>
     </div>
   )
@@ -91,110 +106,168 @@ function findRootId(chatId: string, allChats: ChatSession[]): string {
   return findRootId(chat.metadata.parentChatId, allChats)
 }
 
-function collectTree(rootId: string, allChats: ChatSession[]): ChatSession[] {
+function collectTree(
+  rootId: string,
+  allChats: ChatSession[],
+  getTempMessages?: (chatId: string) => Message[] | null,
+): ChatSession[] {
   const result: ChatSession[] = []
   const queue = [rootId]
   const seen = new Set<string>()
+
   while (queue.length) {
     const id = queue.shift()!
     if (seen.has(id)) continue
     seen.add(id)
-    const chat = allChats.find(c => c.id === id)
+
+    // Look in persisted history first, then fall back to temp conversations
+    let chat = allChats.find(c => c.id === id)
+    if (!chat && getTempMessages) {
+      const tempMsgs = getTempMessages(id)
+      if (tempMsgs) {
+        // Synthesise a minimal ChatSession for the temp drift so it renders in the graph.
+        const parentChat = allChats.find(c =>
+          c.messages.some(m => m.driftInfos?.some(d => d.driftChatId === id))
+        )
+        const parentTempId = parentChat?.id ?? [...seen].find(sid =>
+          getTempMessages(sid)?.some(m => m.driftInfos?.some(d => d.driftChatId === id))
+        )
+        const driftInfo = parentChat?.messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === id)
+          ?? getTempMessages(parentTempId ?? '')?.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === id)
+        chat = {
+          id,
+          title: driftInfo?.selectedText ? `"${driftInfo.selectedText}"` : 'Drift',
+          messages: tempMsgs,
+          lastMessage: tempMsgs[tempMsgs.length - 1]?.text?.slice(0, 100) ?? '',
+          createdAt: new Date(),
+          metadata: {
+            isDrift: true,
+            parentChatId: parentTempId ?? rootId,
+            selectedText: driftInfo?.selectedText,
+          },
+        }
+      }
+    }
+
     if (chat) {
       result.push(chat)
+      // Enqueue children from persisted history
       allChats.forEach(c => {
         if (c.metadata?.parentChatId === id && !seen.has(c.id)) queue.push(c.id)
       })
+      // Also enqueue children recorded in driftInfos within this chat's messages
+      const msgsToCheck = chat.messages
+      if (getTempMessages) {
+        for (const msg of msgsToCheck) {
+          if (msg.hasDrift && msg.driftInfos) {
+            for (const info of msg.driftInfos) {
+              if (!seen.has(info.driftChatId)) queue.push(info.driftChatId)
+            }
+          }
+        }
+      }
     }
   }
   return result
 }
 
-// ── Layout builder ────────────────────────────────────────────────────────────
+// ── Radial layout builder ─────────────────────────────────────────────────────
 
-function buildTree(chats: ChatSession[], rootId: string, activeChatId: string | null, isDark: boolean) {
+function buildRadialTree(
+  chats: ChatSession[],
+  rootId: string,
+  activeChatId: string | null,
+  allChats: ChatSession[],
+  onScrollToMessage: (id: string) => void,
+) {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  const LEVEL_H = 180
-  const SIBLING_W = 220
-
-  // BFS level assignment
-  const levelMap = new Map<string, number>()
-  const queue: string[] = [rootId]
-  levelMap.set(rootId, 0)
-
-  while (queue.length) {
-    const id = queue.shift()!
-    const children = chats.filter(c => c.metadata?.parentChatId === id)
-    for (const child of children) {
-      if (!levelMap.has(child.id)) {
-        levelMap.set(child.id, (levelMap.get(id) ?? 0) + 1)
-        queue.push(child.id)
-      }
+  const childrenMap = new Map<string, string[]>()
+  for (const chat of chats) {
+    if (chat.metadata?.parentChatId) {
+      const p = chat.metadata.parentChatId
+      if (!childrenMap.has(p)) childrenMap.set(p, [])
+      childrenMap.get(p)!.push(chat.id)
     }
   }
 
-  // Group by level
-  const byLevel = new Map<number, string[]>()
-  levelMap.forEach((lvl, id) => {
-    if (!byLevel.has(lvl)) byLevel.set(lvl, [])
-    byLevel.get(lvl)!.push(id)
-  })
+  const RADII = [0, 250, 450, 630]
+  const NODE_W = 180
+  const NODE_H = 80
 
-  const maxPerLevel = Math.max(...[...byLevel.values()].map(v => v.length))
-  const totalW = Math.max(maxPerLevel, 1) * SIBLING_W
+  function place(id: string, angleStart: number, angleEnd: number, level: number) {
+    const chat = chats.find(c => c.id === id)
+    if (!chat) return
 
-  byLevel.forEach((ids, lvl) => {
-    const count = ids.length
-    ids.forEach((id, i) => {
-      const x = (i - (count - 1) / 2) * SIBLING_W + totalW / 2
-      const y = lvl * LEVEL_H + 30
-      const chat = chats.find(c => c.id === id)!
-      nodes.push({
-        id,
-        type: 'chatNode',
-        position: { x, y },
-        data: {
-          label: chat.title || (chat.metadata?.isDrift ? (chat.metadata.selectedText ?? 'Drift') : 'Untitled'),
-          isDrift: !!chat.metadata?.isDrift,
-          isActive: id === activeChatId,
-          messageCount: chat.messages.length,
-          selectedText: chat.metadata?.selectedText ?? undefined,
-        } satisfies ChatNodeData,
-      })
+    const angle = (angleStart + angleEnd) / 2
+    const r = RADII[Math.min(level, RADII.length - 1)]
+    const x = Math.cos(angle) * r - NODE_W / 2
+    const y = Math.sin(angle) * r - NODE_H / 2
 
-      if (chat.metadata?.parentChatId) {
-        const edgeLabel = (chat.metadata.selectedText ?? '').substring(0, 28)
-        edges.push({
-          id: `e-${chat.metadata.parentChatId}-${id}`,
-          source: chat.metadata.parentChatId,
-          target: id,
-          type: 'smoothstep',
-          animated: true,
-          label: edgeLabel || undefined,
-          labelStyle: { fontSize: 9, fill: 'rgba(168,85,247,0.9)', fontStyle: 'italic' },
-          labelBgStyle: { fill: isDark ? 'rgba(13,13,18,0.9)' : 'rgba(248,248,252,0.92)', stroke: 'rgba(168,85,247,0.2)', strokeWidth: 1 },
-          labelBgPadding: [4, 2] as [number, number],
-          style: { stroke: 'rgba(168, 85, 247, 0.5)', strokeWidth: 1.5, strokeDasharray: '5,3' },
-        })
+    let sourceMsgPreview: string | undefined
+    if (chat.metadata?.parentChatId && chat.metadata?.sourceMessageId) {
+      const parentChat = allChats.find(c => c.id === chat.metadata!.parentChatId)
+      const srcMsg = parentChat?.messages.find(m => m.id === chat.metadata!.sourceMessageId)
+      if (srcMsg) {
+        const clean = srcMsg.text.replace(/[#*`[\]]/g, '').replace(/\n+/g, ' ').trim()
+        sourceMsgPreview = clean.length > 55 ? clean.slice(0, 55) + '…' : clean
       }
-    })
-  })
+    }
 
+    const sourceMessageId = chat.metadata?.sourceMessageId
+    nodes.push({
+      id,
+      type: 'chatNode',
+      position: { x, y },
+      data: {
+        label: chat.title || (chat.metadata?.isDrift ? (chat.metadata.selectedText ?? 'Drift') : 'Untitled'),
+        isDrift: !!chat.metadata?.isDrift,
+        isActive: id === activeChatId,
+        messageCount: chat.messages.length,
+        selectedText: chat.metadata?.selectedText,
+        sourceMessageId,
+        sourceMsgPreview,
+        onScrollToSource: sourceMessageId ? () => onScrollToMessage(sourceMessageId) : undefined,
+      } as ChatNodeData,
+    })
+
+    if (chat.metadata?.parentChatId) {
+      edges.push({
+        id: `e-${chat.metadata.parentChatId}-${id}`,
+        source: chat.metadata.parentChatId,
+        target: id,
+        type: 'smoothstep',
+        animated: true,
+        style: { stroke: 'rgba(168,85,247,0.45)', strokeWidth: 1.5, strokeDasharray: '4,3' },
+      })
+    }
+
+    const children = childrenMap.get(id) || []
+    if (!children.length) return
+
+    const totalArc = level === 0 ? Math.PI * 2 : Math.PI * 1.3
+    const midAngle = angle
+    const arcStart = level === 0 ? 0 : midAngle - totalArc / 2
+    const step = totalArc / children.length
+    children.forEach((childId, i) => {
+      place(childId, arcStart + i * step, arcStart + (i + 1) * step, level + 1)
+    })
+  }
+
+  place(rootId, 0, Math.PI * 2, 0)
   return { nodes, edges }
 }
 
 // ── Inner component ───────────────────────────────────────────────────────────
 
-function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat }: Props) {
+function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat, onScrollToMessage, getTempMessages }: Props) {
   const { fitView } = useReactFlow()
-  const isDark = document.documentElement.classList.contains('dark')
 
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
-  const treeChats = rootId ? collectTree(rootId, chatHistory) : []
+  const treeChats = rootId ? collectTree(rootId, chatHistory, getTempMessages) : []
   const { nodes: initNodes, edges: initEdges } = rootId && treeChats.length > 1
-    ? buildTree(treeChats, rootId, activeChatId, isDark)
+    ? buildRadialTree(treeChats, rootId, activeChatId, chatHistory, onScrollToMessage)
     : { nodes: [], edges: [] }
 
   const [nodes, , onNodesChange] = useNodesState(initNodes)
@@ -280,7 +353,7 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat 
                 variant={BackgroundVariant.Dots}
                 gap={20}
                 size={1}
-                color={isDark ? 'rgba(255,255,255,0.055)' : 'rgba(0,0,0,0.08)'}
+                color="rgba(255,255,255,0.055)"
               />
             </ReactFlow>
           )}

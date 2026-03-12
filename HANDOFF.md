@@ -1,13 +1,36 @@
 # Drift — Session Handoff
 
-**Date:** March 12, 2026
+**Date:** March 13, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 28 (iOS Xcode) / 29 (web)
-**Status:** Three UX fixes: knowledge graph light-mode aware, key-term dotted highlights in drift panel messages, styled ↗ drift tag on pushed messages: knowledge graph restored to full-canvas aesthetic in 520px side panel (no zoom controls), suggestion chips moved inside scroll area so they're always visible, drift map de-duplicated (no repeated titles) and cleaned up with recursive BranchItem component. Synced to Xcode — ready to archive.
+**Build:** 29 (iOS Xcode) / 29 (web)
+**Status:** Major drift visualization overhaul — unified DriftMapPanel + DriftKnowledgeGraph into a single radial mind map. Nested drift reliability fixed (wrong parentChatId on nested drifts, temp drifts now visible in graph). Phrase truncation removed. ↗ drift tag now shows on all pushed AI messages. Settings "Add Model" now uses polished AddModelSheet flow. Synced to Xcode — ready to archive.
 
 ---
 
 ## What Was Done This Session
+
+### 89. Unified radial mind map — replaced DriftMapPanel + DriftKnowledgeGraph (MAJOR REDESIGN)
+- **Removed** `DriftMapPanel` (the list-style panel) entirely — all references stripped from App.tsx and uiStore.
+- **Redesigned** `DriftKnowledgeGraph` into a true radial mind map: root chat at center, first-level drifts radiate at 250px, second level at 450px, third at 630px. Children fan outward in a 130° arc from their parent; root children spread full 360°.
+- **Richer nodes**: each drift node shows the `↗ drift` badge, the selected phrase as the violet primary title, a 2-line italic preview of the source message text, message count, and a `↑ source` button that scrolls the main chat to the triggering message and closes the graph.
+- **Clean edges**: no more text labels on connecting lines — the node content tells the full story. Animated dashed violet smoothstep curves only.
+- **Floating drift pill**: `↗ N drifts` pill floats above the input bar (bottom-right, fixed position), always visible when current chat has branches. Replaces the header-only icon as primary access point.
+
+### 88. Nested drift map reliability — critical bug fix (BUG FIX)
+- **Root cause**: all three `registerDriftSession` call sites used `activeChatId` (main chat) as `parentChatId` regardless of nesting depth. Drift B opened from Drift A was recorded as a child of the main chat, not of Drift A.
+- **Fix**: `handleCloseDrift`, nested branch of `handleStartDrift`, and `onMessagesChange` auto-persist all now walk the `ancestry` chain to find the correct parent chat ID.
+- **Knowledge graph temp drifts**: added `getTempMessages` prop to `DriftKnowledgeGraph`; `collectTree` now synthesises minimal `ChatSession` objects for unsaved temp drifts, and also enqueues children discovered via `driftInfos` (not just `parentChatId`). Full chains of 3+ drifts now render correctly.
+
+### 87. Phrase truncation removed (FIX)
+- `DriftKnowledgeGraph` edge labels: removed `substring(0, 28)` — full selected text shown.
+- `DriftMapPanel` (now removed): branch selectedText and title truncation removed.
+- Source message preview in drift map increased to 120 chars.
+
+### 86. ↗ drift tag on ALL pushed AI messages (FIX)
+- Previously the drift tag only showed on `isSinglePushMessage || isFirstDriftMessage`. Extended to all non-user `isDriftMessage` — every pushed AI message now carries the badge. Selected text excerpt still limited to the first message of a group.
+
+### 85. Settings "Add Model" → uses AddModelSheet (POLISH)
+- Replaced the raw inline `PresetForm` add flow in Settings with the polished `AddModelSheet` (API key validation → model picker). Editing existing presets still uses `PresetForm`.
 
 ### 81. Subtle ↗ drift tag on pushed messages (FIX/POLISH)
 - Replaced the old "Drift" label with a cleaner `↗ drift` badge using `bg-accent-violet/[0.08] border border-accent-violet/20` — subtle, theme-adaptive, visible in both light and dark mode.
@@ -486,8 +509,10 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 26 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions.
+- [ ] **TestFlight submission** — archive build 29 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions.
 - [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
+- [ ] **Radial mind map — polish pass** — consider adding a mini always-visible thumbnail (small collapsed graph in corner); animate node entrance; improve node sizing for very long selected phrases.
+- [x] **DriftMapPanel removed** — consolidated into radial Knowledge Graph.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Conversation forking** — fork the entire main chat at any message point ("what if I'd asked X instead?"). Extends the Drift metaphor to the main thread.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.

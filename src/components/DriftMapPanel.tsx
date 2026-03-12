@@ -81,15 +81,11 @@ function BranchItem({
         <span className={`${accentColor} text-[9px] mt-1 shrink-0 opacity-70`}>○</span>
         <div className="min-w-0 flex-1">
           <p className={`text-[12px] font-medium ${accentColor} leading-snug`}>
-            {branch.selectedText.length > 55
-              ? branch.selectedText.slice(0, 55) + '…'
-              : branch.selectedText}
+            {branch.selectedText}
           </p>
           {titleDiffersFromSelection && (
             <p className="text-[11px] text-text-muted truncate mt-0.5 leading-snug">
-              {branch.driftChat!.title.length > 48
-                ? branch.driftChat!.title.slice(0, 48) + '…'
-                : branch.driftChat!.title}
+              {branch.driftChat!.title}
             </p>
           )}
         </div>
@@ -202,8 +198,8 @@ export default function DriftMapPanel({
                   >
                     <span className="text-text-muted/50 text-[10px] mt-0.5 shrink-0">●</span>
                     <span className="text-[12px] text-text-secondary group-hover:text-text-primary transition-colors leading-snug">
-                      {node.message.text.length > 65
-                        ? node.message.text.slice(0, 65) + '…'
+                      {node.message.text.length > 120
+                        ? node.message.text.slice(0, 120) + '…'
                         : node.message.text}
                     </span>
                   </button>
