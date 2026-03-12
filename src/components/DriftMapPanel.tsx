@@ -7,6 +7,7 @@ interface DriftMapPanelProps {
   messages: Message[]
   chatHistory: ChatSession[]
   onNavigate: (chatId: string, messageId?: string) => void
+  getTempMessages?: (chatId: string) => Message[] | null
 }
 
 interface BranchNode {
@@ -25,16 +26,20 @@ function buildBranchNode(
   selectedText: string,
   driftChatId: string,
   chatHistory: ChatSession[],
+  getTempMessages: ((chatId: string) => Message[] | null) | undefined,
   depth: number
 ): BranchNode {
   const driftChat = chatHistory.find((s) => s.id === driftChatId)
   const children: BranchNode[] = []
 
-  if (depth < 3 && driftChat) {
-    for (const msg of driftChat.messages) {
+  // Look in chatHistory first, then fall back to in-memory temp conversations
+  const messagesToCheck = driftChat?.messages ?? getTempMessages?.(driftChatId) ?? []
+
+  if (depth < 3 && messagesToCheck.length > 0) {
+    for (const msg of messagesToCheck) {
       if (msg.hasDrift && msg.driftInfos) {
         for (const info of msg.driftInfos) {
-          children.push(buildBranchNode(info.selectedText, info.driftChatId, chatHistory, depth + 1))
+          children.push(buildBranchNode(info.selectedText, info.driftChatId, chatHistory, getTempMessages, depth + 1))
         }
       }
     }
@@ -49,6 +54,7 @@ export default function DriftMapPanel({
   messages,
   chatHistory,
   onNavigate,
+  getTempMessages,
 }: DriftMapPanelProps) {
   const tree = useMemo<MessageNode[]>(() => {
     return messages
@@ -56,7 +62,7 @@ export default function DriftMapPanel({
       .map((m) => ({
         message: m,
         branches: (m.driftInfos ?? []).map((info) =>
-          buildBranchNode(info.selectedText, info.driftChatId, chatHistory, 1)
+          buildBranchNode(info.selectedText, info.driftChatId, chatHistory, getTempMessages, 1)
         ),
       }))
   }, [messages, chatHistory])
@@ -88,14 +94,14 @@ export default function DriftMapPanel({
       {/* Panel */}
       <div
         className={`fixed top-0 right-0 h-full w-80 z-50 flex flex-col
-          bg-[#0d0d12] border-l border-white/[0.08]
+          bg-dark-bg border-l border-dark-border
           transition-transform duration-300
           ${open ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-[#0f0f15]/95 backdrop-blur-xl border-b border-white/[0.06] shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 bg-dark-surface/95 backdrop-blur-xl border-b border-dark-border/60 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white/90 tracking-tight">↗ Drift Map</span>
+            <span className="text-sm font-semibold text-text-primary tracking-tight">↗ Drift Map</span>
             {totalBranches > 0 && (
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent-violet/20 text-accent-violet border border-accent-violet/30">
                 {totalBranches} {totalBranches === 1 ? 'branch' : 'branches'}
@@ -104,7 +110,7 @@ export default function DriftMapPanel({
           </div>
           <button
             onClick={onClose}
-            className="text-white/40 hover:text-white/80 transition-colors text-lg leading-none"
+            className="text-text-muted hover:text-text-primary transition-colors text-lg leading-none"
             aria-label="Close drift map"
           >
             ✕
@@ -116,8 +122,8 @@ export default function DriftMapPanel({
           {tree.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
               <span className="text-2xl opacity-30">↗</span>
-              <p className="text-sm font-medium text-white/50">No drifts yet</p>
-              <p className="text-xs text-white/30 leading-relaxed">
+              <p className="text-sm font-medium text-text-secondary">No drifts yet</p>
+              <p className="text-xs text-text-muted leading-relaxed">
                 Select any text from an AI message to start exploring
               </p>
             </div>
@@ -127,11 +133,11 @@ export default function DriftMapPanel({
                 <div key={node.message.id}>
                   {/* Message node (spine) */}
                   <button
-                    className="w-full flex items-start gap-2 text-left py-1.5 px-1 rounded hover:bg-white/[0.04] transition-colors group"
+                    className="w-full flex items-start gap-2 text-left py-1.5 px-1 rounded hover:bg-dark-elevated/40 transition-colors group"
                     onClick={() => onNavigate('', node.message.id)}
                   >
                     <span className="text-text-muted text-[10px] mt-0.5 shrink-0">●</span>
-                    <span className="text-xs text-white/60 group-hover:text-white/80 transition-colors leading-relaxed truncate">
+                    <span className="text-xs text-text-secondary group-hover:text-text-primary transition-colors leading-relaxed truncate">
                       {node.message.text.slice(0, 60)}
                       {node.message.text.length > 60 ? '…' : ''}
                     </span>
@@ -139,7 +145,7 @@ export default function DriftMapPanel({
 
                   {/* Branch nodes */}
                   {node.branches.length > 0 && (
-                    <div className="ml-[7px] border-l-2 border-white/10">
+                    <div className="ml-[7px] border-l-2 border-dark-border/40">
                       {node.branches.map((branch) => (
                         <div key={branch.driftChatId} className="ml-6">
                           <button
@@ -153,7 +159,7 @@ export default function DriftMapPanel({
                                 {branch.selectedText.length > 60 ? '…' : ''}
                               </p>
                               {branch.driftChat && (
-                                <p className="text-[11px] text-white/35 truncate mt-0.5">
+                                <p className="text-[11px] text-text-muted truncate mt-0.5">
                                   {branch.driftChat.title.slice(0, 50)}
                                   {branch.driftChat.title.length > 50 ? '…' : ''}
                                 </p>
@@ -177,7 +183,7 @@ export default function DriftMapPanel({
                                         {sub.selectedText.length > 60 ? '…' : ''}
                                       </p>
                                       {sub.driftChat && (
-                                        <p className="text-[10px] text-white/30 truncate mt-0.5">
+                                        <p className="text-[10px] text-text-muted truncate mt-0.5">
                                           {sub.driftChat.title.slice(0, 50)}
                                           {sub.driftChat.title.length > 50 ? '…' : ''}
                                         </p>
@@ -195,7 +201,7 @@ export default function DriftMapPanel({
 
                   {/* Connector line between message nodes */}
                   {nodeIdx < tree.length - 1 && (
-                    <div className="ml-[7px] border-l-2 border-white/10 h-2" />
+                    <div className="ml-[7px] border-l-2 border-dark-border/40 h-2" />
                   )}
                 </div>
               ))}

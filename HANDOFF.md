@@ -2,12 +2,32 @@
 
 **Date:** March 12, 2026
 **Branch:** `main`
-**Build:** 18
-**Status:** 4 UX improvements — drift discoverability (coach mark + hover hint), new chat on every open, drift link restyle + per-message badges, Drift Map panel. Build 18 synced to Xcode.
+**Build:** 19
+**Status:** Drift map + badge fixes — badge moved to action row (no text overlap), unified drift-open logic (no new chat), light mode colors, nested temp drifts in map. Build 19 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 51. Drift map — nested temp drifts now visible (BUG FIX)
+- **Root cause:** `buildBranchNode` only looked up child drift chats in `chatHistory` (IndexedDB). Temp drifts (not yet saved as chats) live in `driftStore` memory, which `DriftMapPanel` had no access to.
+- **Fix:** Added `getTempMessages?: (chatId: string) => Message[] | null` prop to `DriftMapPanel`. `buildBranchNode` now falls back to `getTempMessages(driftChatId)` when `chatHistory` lookup returns undefined. App.tsx passes `driftStore.getTempConversation`. Nested drifts from unsaved conversations now appear as sub-branches.
+
+### 50. Drift badge / inline link — opens existing drift, not new one (BUG FIX)
+- **Root cause:** Clicking the `↗ N drifts` badge or an inline drift word called `switchChat(driftChatId)` for saved drifts (navigates main view away) and `handleStartDrift` with a stale/empty temp lookup for temp drifts. Both paths failed to re-open the correct existing drift side panel.
+- **Fix:** Unified lookup for both badge and inline drift links: `chatHistory.find(c => c.id === driftChatId)?.messages ?? driftStore.getTempConversation(driftChatId) ?? []`. Always calls `handleStartDrift` (opens side panel) — never `switchChat`. Works for saved and temp drifts.
+
+### 49. Drift badge — moved to action row, no text overlap (BUG FIX)
+- **Root cause:** Badge was `absolute top-2 right-2` inside the message bubble, overlapping the first line of message text.
+- **Fix:** Removed absolute positioning. Badge is now an inline flex item in the bottom action row (alongside copy/bookmark buttons), styled with `ml-1` to separate it slightly.
+
+### 48. Drift Map panel — light mode colors (BUG FIX)
+- **Root cause:** `DriftMapPanel.tsx` used hardcoded dark hex colors (`bg-[#0d0d12]`, `bg-[#0f0f15]`) and `text-white/*` opacity classes — invisible/wrong in light mode.
+- **Fix:** All colors replaced with theme-aware Tailwind custom properties: `bg-dark-bg`, `bg-dark-surface`, `text-text-primary`, `text-text-secondary`, `text-text-muted`, `border-dark-border`. Panel now adapts to both themes.
+
+---
+
+## Previous Session
 
 ### 47. Drift Map panel — bird's eye view of all drifts (NEW FEATURE)
 - **New component:** `src/components/DriftMapPanel.tsx` — slides in from the right (320px), shows the active chat as a vertical spine of messages with violet branches for each drift child. Sub-branches rendered for nested drifts (up to 3 levels). No graph library — pure CSS border-left connecting lines.
@@ -317,7 +337,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 18 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 19 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response

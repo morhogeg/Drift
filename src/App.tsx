@@ -2085,31 +2085,6 @@ function App() {
                           }}
                         >
 
-                          {/* Per-message drift count badge */}
-                          {!msg.isUser && msg.driftInfos && msg.driftInfos.length > 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                const firstDrift = msg.driftInfos![0]
-                                if (firstDrift.driftChatId.startsWith('drift-temp-')) {
-                                  const existingDriftMessages = driftStore.getTempConversation(firstDrift.driftChatId)
-                                  handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existingDriftMessages)
-                                } else {
-                                  switchChat(firstDrift.driftChatId)
-                                }
-                              }}
-                              className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5
-                                         rounded-full text-xs
-                                         text-accent-violet/70 hover:text-accent-violet
-                                         bg-accent-violet/5 hover:bg-accent-violet/15
-                                         border border-accent-violet/20 hover:border-accent-violet/40
-                                         transition-all duration-150"
-                            >
-                              <span>↗</span>
-                              <span>{msg.driftInfos.length} {msg.driftInfos.length === 1 ? 'drift' : 'drifts'}</span>
-                            </button>
-                          )}
 
                           {/* Strand bead */}
                           {msg.strandId && msg.strandId === activeStrandId && (
@@ -2301,22 +2276,18 @@ function App() {
                                             onClick={(e) => {
                                               e.preventDefault()
                                               e.stopPropagation()
-                                              if (m.drift.driftChatId.startsWith('drift-temp-')) {
-                                                const existingDriftMessages = driftStore.getTempConversation(m.drift.driftChatId)
-                                                handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existingDriftMessages)
-                                              } else {
-                                                switchChat(m.drift.driftChatId)
-                                              }
+                                              const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
+                                                ?? driftStore.getTempConversation(m.drift.driftChatId)
+                                                ?? []
+                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
                                             }}
                                             onTouchEnd={(e) => {
                                               e.preventDefault()
                                               e.stopPropagation()
-                                              if (m.drift.driftChatId.startsWith('drift-temp-')) {
-                                                const existingDriftMessages = driftStore.getTempConversation(m.drift.driftChatId)
-                                                handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existingDriftMessages)
-                                              } else {
-                                                switchChat(m.drift.driftChatId)
-                                              }
+                                              const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
+                                                ?? driftStore.getTempConversation(m.drift.driftChatId)
+                                                ?? []
+                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
                                             }}
                                             className="inline cursor-pointer
                                                      border-b border-accent-violet/50 hover:border-accent-violet
@@ -2429,6 +2400,37 @@ function App() {
                               >
                                 <Bookmark className={`w-4 h-4 ${savedMessageIds.has(msg.id) ? 'fill-cyan-400' : ''}`} />
                               </button>
+                              {msg.driftInfos && msg.driftInfos.length > 0 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const firstDrift = msg.driftInfos![0]
+                                    const existing = chatHistory.find(c => c.id === firstDrift.driftChatId)?.messages
+                                      ?? driftStore.getTempConversation(firstDrift.driftChatId)
+                                      ?? []
+                                    handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existing)
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    const firstDrift = msg.driftInfos![0]
+                                    const existing = chatHistory.find(c => c.id === firstDrift.driftChatId)?.messages
+                                      ?? driftStore.getTempConversation(firstDrift.driftChatId)
+                                      ?? []
+                                    handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existing)
+                                  }}
+                                  className="ml-1 flex items-center gap-1 px-2 py-0.5
+                                             rounded-full text-xs
+                                             text-accent-violet/70 hover:text-accent-violet
+                                             bg-accent-violet/5 hover:bg-accent-violet/15
+                                             border border-accent-violet/20 hover:border-accent-violet/40
+                                             transition-all duration-150"
+                                  title="Open drift"
+                                >
+                                  <span>↗</span>
+                                  <span>{msg.driftInfos.length} {msg.driftInfos.length === 1 ? 'drift' : 'drifts'}</span>
+                                </button>
+                              )}
                               {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}
@@ -2712,6 +2714,7 @@ function App() {
         messages={messages}
         chatHistory={chatHistory}
         onNavigate={handleDriftMapNavigate}
+        getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
       />
 
       {/* Snippet Gallery */}
