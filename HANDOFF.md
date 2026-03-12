@@ -2,12 +2,31 @@
 
 **Date:** March 12, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 26 (iOS Xcode) / 27 (web)
-**Status:** 3 UX fixes from screenshot feedback: knowledge graph converted to 340px side panel (current chat tree only), suggestion chips in blank drift panel, unexplored highlights preserved in hasDrift messages. Synced to Xcode — ready to archive.
+**Build:** 27 (iOS Xcode) / 28 (web)
+**Status:** Polish pass from screenshot feedback: knowledge graph restored to full-canvas aesthetic in 520px side panel (no zoom controls), suggestion chips moved inside scroll area so they're always visible, drift map de-duplicated (no repeated titles) and cleaned up with recursive BranchItem component. Synced to Xcode — ready to archive.
 
 ---
 
 ## What Was Done This Session
+
+### 78. Drift Map — remove duplicate titles, clean up layout (FIX)
+- **Duplicate issue:** Branch title showed same text as selectedText (both "distributed ledger technology" appeared twice). Fix: `normalise()` comparison skips title if it matches selectedText or starts with "Drift:" prefix.
+- **Component:** Extracted recursive `BranchItem` component — handles unlimited nesting depth cleanly with `depth` prop controlling accent color (violet → pink → …).
+- **Dedup guard:** Added `seenDriftIds` Set in tree builder to prevent same driftChatId appearing in multiple message nodes.
+- **Close button:** Replaced text ✕ with `<X>` lucide icon, consistent with rest of app.
+- **Spacing:** Tightened vertical rhythm, cleaner `border-l` connector lines.
+
+### 77. Knowledge Graph — full-canvas aesthetic, 520px panel, no controls (FIX)
+- **Restored** the dark canvas aesthetic: dotted grid background, violet animated edges, violet-glow active node — identical to the original design.
+- **Panel size:** 520px wide (was 340px) with semi-transparent backdrop on left. Still non-blocking.
+- **Removed** `<Controls>` component (zoom +/-/fit/lock buttons — looked dated).
+- **Empty state:** Friendly "tap Drift to start branching" hint when no drifts yet.
+- Node click closes panel after switching chat.
+
+### 76. Suggestion chips — moved inside scroll area (FIX)
+- **Before:** Chips were rendered outside the scroll container → pushed below viewport on desktop.
+- **After:** Chips now render inside `flex-1 overflow-y-auto` div, just before `messagesEndRef`. Always visible without scrolling.
+- Fixed missing `</div>` closing tag for the scroll container that was causing a build error.
 
 ### 75. Knowledge Graph — side panel, current chat tree only (FIX)
 - **Before:** Full-screen overlay showing entire database of chats/drifts — covered message text.

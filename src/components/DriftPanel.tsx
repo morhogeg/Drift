@@ -1038,21 +1038,17 @@ export default function DriftPanel({
               </div>
             </div>
           )}
-          
-          <div ref={messagesEndRef} />
-        </div>
 
-        {/* Suggestion chips — shown only when fresh (no user messages, no template) */}
-        {!templateType && driftSuggestions.length > 0 && !driftOnlyMessages.some(m => m.isUser) && (
-          <div className="px-3 pb-2 flex flex-col gap-1.5">
-            <p className="text-[10px] text-text-muted/50 uppercase tracking-wide">Try asking</p>
-            <div className="flex flex-col gap-1.5">
+          {/* Suggestion chips — inside scroll area, shown when fresh (no user messages, no template) */}
+          {!templateType && driftSuggestions.length > 0 && !driftOnlyMessages.some(m => m.isUser) && (
+            <div className="mt-2 mb-4 flex flex-col gap-1.5">
+              <p className="text-[10px] text-text-muted/50 uppercase tracking-wide px-1">Try asking</p>
               {driftSuggestions.map((s, i) => (
                 <button
                   key={i}
                   onClick={() => { setDriftSuggestions([]); sendMessage(s) }}
                   className="text-left px-3 py-2 rounded-xl text-[12px] text-text-secondary
-                    border border-accent-violet/20 bg-accent-violet/[0.05]
+                    border border-accent-violet/20 bg-accent-violet/[0.04]
                     hover:border-accent-violet/40 hover:text-text-primary hover:bg-accent-violet/[0.10]
                     transition-all duration-150"
                 >
@@ -1060,8 +1056,10 @@ export default function DriftPanel({
                 </button>
               ))}
             </div>
-          </div>
-        )}
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
 
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 z-10">
