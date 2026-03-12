@@ -402,3 +402,15 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
     min-height: 36px;
   }
 }
+
+/* AI-suggested drift highlights */
+.drift-suggestion {
+  border-bottom: 1.5px dotted rgba(168, 85, 247, 0.55);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  border-radius: 2px;
+}
+.drift-suggestion:hover {
+  border-bottom: 1.5px solid rgba(168, 85, 247, 0.9);
+  background: rgba(168, 85, 247, 0.08);
+}

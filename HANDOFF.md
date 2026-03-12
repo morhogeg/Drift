@@ -2,12 +2,36 @@
 
 **Date:** March 12, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 24
-**Status:** Frictionless model addition — AddModelSheet (Gemini), dynamic ModelPickerSheet, ALLOWED_KEYS removed, continueWithModel preset lookup. Build 24 synced to Xcode.
+**Build:** 25 (iOS Xcode) / 26 (web)
+**Status:** 4 major features: auto-persist drifts, drift templates, AI-suggested highlights, knowledge graph canvas. iOS build 25 synced to Xcode — ready to archive for TestFlight.
 
 ---
 
 ## What Was Done This Session
+
+### 72. Drift Knowledge Graph — zoomable 2D canvas (NEW FEATURE)
+- **New component:** `src/components/DriftKnowledgeGraph.tsx` — full-screen overlay showing all chats and their drift relationships as a zoomable/pannable graph.
+- **Tech:** `@xyflow/react` (React Flow v12, already in package.json) for canvas rendering. Custom dark-themed node component: regular chats show last message preview; drift chats show violet left-border accent + selected text quote. Active chat highlighted with violet glow ring. Animated dashed violet edges labeled with drift selected text.
+- **Layout:** Root chats arranged in a 3-column grid; drift chats positioned relative to their parent with offset per sibling index.
+- **Access:** Network icon button in chat header (shown when chatHistory.length > 1) + `⌘⌥G` keyboard shortcut.
+- **Interactions:** Click any node → navigate to that chat (panel closes). Escape to close. Built-in Controls (zoom/fit) + MiniMap with violet color coding.
+- **State:** `knowledgeGraphOpen` / `setKnowledgeGraphOpen` added to `uiStore.ts`.
+
+### 71. AI-Suggested Drift Highlights (NEW FEATURE)
+- **New:** After each Gemini response finishes streaming, a lightweight follow-up call (`getSuggestedHighlights` in `gemini.ts`) asks the model to identify 2–4 phrases worth exploring deeper.
+- **UX:** Phrases appear with a violet dotted underline (`.drift-suggestion` CSS class). Hovering brightens the underline and tints the background. Clicking immediately opens a drift on that phrase — zero friction.
+- **Implementation:** Non-streaming, 5s timeout, silent failure on any error. `suggestedHighlights?: string[]` added to `Message` type. Fire-and-forget async call in `sendMessage` path updates the message after response via `chatStore.updateMessage`. `processHighlightsText()` added to `App.tsx` renders highlights as a second pass on top of `processEntityText`.
+
+### 70. Drift Templates — one-tap workflows (NEW FEATURE)
+- **New:** 5 template quick-action buttons added to the selection tooltip (both mobile bottom bar and desktop floating): 🔥 Challenge, 📖 Simplify, 🔍 Research, 🤔 Devil's Advocate, ⚖️ Pros & Cons.
+- **How it works:** Each template pre-configures a specialized AI system prompt. When opened, an auto-send fires 400ms after the panel opens with a framing message ("Challenge this: [selectedText]") — user sees an AI response immediately without typing anything.
+- **Auto-send:** New `useEffect` in `DriftPanel.tsx` guards against double-fire via `autoSentRef`. `sendMessage` accepts optional `overrideText` to bypass the `message` state for the auto-send path.
+- **Types added:** `templateType` optional field on `DriftContext` in `types/chat.ts`.
+- **Components modified:** `SelectionTooltip.tsx` (template row + `TemplateType`), `DriftPanel.tsx` (system prompt injection, auto-send), `App.tsx` (`handleStartDrift` signature + propagation).
+
+### 69. Auto-persist all drifts (BUG FIX)
+- **Problem:** Temp drift conversations lived only in `driftStore.tempDriftConversations` (in-memory Map). Page refresh lost all unsaved drift work.
+- **Fix:** In the `onMessagesChange` callback passed to `DriftPanel`, when the first user message appears and the drift chat isn't yet in `chatHistory`, `chatStore.registerDriftSession` is called automatically → `chatDB.put()` → IndexedDB. Drifts are now persisted from the moment the first message is sent. Idempotent guard prevents double-registration.
 
 ### 68. Frictionless model addition — Gemini (NEW FEATURE)
 - **Problem:** ModelPickerSheet had a hardcoded list of 3 models; ALLOWED_KEYS whitelist in modelStore silently dropped custom preset targets; continueWithModel used a hardcoded label switch that broke for any user-added model.
@@ -410,14 +434,16 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 24 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
-- [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths. Provider auto-detected from key prefix.
-- [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
-- [ ] **Message editing** — click to edit a sent message, regenerate the AI response
-- [ ] **Message regeneration** — re-run the last AI response
+- [ ] **TestFlight submission** — archive build 26 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions.
+- [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
+- [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
+- [ ] **Conversation forking** — fork the entire main chat at any message point ("what if I'd asked X instead?"). Extends the Drift metaphor to the main thread.
+- [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
+- [ ] **Full-text search** — search across ALL message content in ALL chats (not just sidebar title filter).
+- [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF.
+- [ ] **Drift synthesis** — "Synthesize branches" button in Drift Map — merges all branch insights into one summary.
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
-- [ ] **Code block copy button** — syntax highlighted blocks lack a copy button
-- [ ] **Multi-level drift** — drift from inside a drift conversation (DriftMapPanel already supports rendering nested drifts)
-- [ ] **App.tsx refactor** — still ~2430+ lines, could extract more hooks
-- [ ] **Voice output** — TTS read-back of AI responses
+- [ ] **Light theme color polish** — some hardcoded dark hex colors remain (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Drift Map — clickable spine nodes** — message spine nodes currently pass empty chatId; wire them to scroll to the source message in the main chat
+- [ ] **App.tsx refactor** — ~2430+ lines, could extract more hooks
+- [ ] **Voice output** — TTS read-back of AI responses

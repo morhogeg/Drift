@@ -30,6 +30,7 @@ interface UIStore {
   settingsOpen: boolean
   galleryOpen: boolean
   driftMapOpen: boolean
+  knowledgeGraphOpen: boolean
 
   // ── User account UI ────────────────────────────────────────────────────────
   userMenuOpen: boolean
@@ -63,6 +64,7 @@ interface UIStore {
   setSettingsOpen: (open: boolean) => void
   setGalleryOpen: (open: boolean) => void
   setDriftMapOpen: (open: boolean) => void
+  setKnowledgeGraphOpen: (open: boolean) => void
   setUserMenuOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
 
@@ -98,6 +100,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   settingsOpen: false,
   galleryOpen: false,
   driftMapOpen: false,
+  knowledgeGraphOpen: false,
   userMenuOpen: false,
   profileOpen: false,
   hoveredMessageId: null,
@@ -123,6 +126,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setGalleryOpen: (open) => set({ galleryOpen: open }),
   setDriftMapOpen: (open) => set({ driftMapOpen: open }),
+  setKnowledgeGraphOpen: (open) => set({ knowledgeGraphOpen: open }),
   setUserMenuOpen: (open) => set({ userMenuOpen: open }),
   setProfileOpen: (open) => set({ profileOpen: open }),
 

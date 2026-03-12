@@ -45,6 +45,8 @@ export interface Message {
   isHiddenContext?: boolean
   /** Reference to original drift message id. */
   originalDriftId?: string
+  /** Phrases the AI suggests as worth exploring deeper (populated asynchronously after streaming). */
+  suggestedHighlights?: string[]
 }
 
 export interface ChatSession {
@@ -86,4 +88,6 @@ export interface DriftContext {
   existingMessages?: Message[]
   /** Breadcrumb trail of ancestor contexts, from root (main chat) to parent drift. */
   ancestry?: AncestryEntry[]
+  /** Optional template type for one-tap workflow drifts. */
+  templateType?: 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
 }

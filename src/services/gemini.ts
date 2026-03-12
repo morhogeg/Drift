@@ -99,6 +99,65 @@ export async function checkGeminiConnection(
   }
 }
 
+// ── Suggested highlights ──────────────────────────────────────────────────────
+
+/**
+ * Ask Gemini to identify 2–4 short phrases from a response that are worth
+ * exploring deeper. Returns an empty array on any error — this is non-critical.
+ */
+export async function getSuggestedHighlights(
+  responseText: string,
+  apiKey: string,
+  model: string = GEMINI_MODELS.FLASH_LITE_PREVIEW,
+): Promise<string[]> {
+  if (!apiKey?.trim() || !responseText?.trim()) return []
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+
+    const body = {
+      systemInstruction: {
+        parts: [{
+          text: 'You are a reading guide. Given a text, identify 2-4 short phrases (3-8 words each) that would be most interesting to explore further. Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]',
+        }],
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: `Identify the most exploration-worthy phrases in this text:\n\n${responseText.substring(0, 2000)}` }],
+      }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 256 },
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) return []
+
+    const json = await response.json()
+    let raw: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+
+    // Strip markdown code fences if present
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+
+    // Filter to strings only, cap at 4
+    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 4)
+  } catch {
+    return []
+  }
+}
+
 // ── Streaming ────────────────────────────────────────────────────────────────
 
 export async function sendMessageToGemini(

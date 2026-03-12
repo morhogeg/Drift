@@ -51,6 +51,8 @@ interface DriftPanelProps {
   ancestry?: AncestryEntry[]
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
   onNavigateToBreadcrumb?: (index: number) => void
+  /** Optional template type for one-tap workflow drifts. */
+  templateType?: 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
 }
 
 export default function DriftPanel({
@@ -76,6 +78,7 @@ export default function DriftPanel({
   onExpandedChange,
   ancestry,
   onNavigateToBreadcrumb,
+  templateType,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -101,31 +104,60 @@ export default function DriftPanel({
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
   const [isComparing, setIsComparing] = useState(false)
+  /** Tracks whether the auto-send for the current template drift has already fired. */
+  const autoSentRef = useRef(false)
+
+  // --------------------------------------------------------------------------
+  // Template helpers
+  // --------------------------------------------------------------------------
+
+  const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
+    'challenge': "You are a sharp critical thinker. Your job is to identify weaknesses, assumptions, and counterarguments in the selected text. Be constructive but direct. Challenge assumptions rigorously.",
+    'simplify': "You are an expert at making complex ideas simple. Explain the selected text as if to a curious 12-year-old. Use analogies, avoid jargon, and make it memorable.",
+    'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
+    'devils-advocate': "You are playing devil's advocate. Argue the OPPOSITE of what the selected text suggests or implies. Be persuasive and intellectually honest about the strongest counterposition.",
+    'pros-cons': "You are a balanced analyst. Provide a clear, comprehensive list of pros and cons for the topic or claim in the selected text. Be specific and concrete, not generic.",
+  }
+
+  const TEMPLATE_USER_PREFIXES: Record<string, string> = {
+    'challenge': 'Challenge this',
+    'simplify': 'Simplify this',
+    'research': 'Research this',
+    'devils-advocate': "Devil's advocate on this",
+    'pros-cons': 'Pros and cons of this',
+  }
 
   // Initialize Drift with existing messages or system message
   useEffect(() => {
     if (isOpen) {
+      // Reset auto-send guard for each new open
+      autoSentRef.current = false
+
       // Check if we have existing messages for this drift
       if (existingMessages && existingMessages.length > 0) {
-        // Restore the existing conversation
+        // Restore the existing conversation — template already fired for this drift
+        autoSentRef.current = true
         setMessages(existingMessages)
         setDriftOnlyMessages(existingMessages)
       } else {
         // Add system context message for new drift
+        const systemMessageText = templateType
+          ? `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Exploring'}: "${selectedText}"`
+          : `What would you like to know about "${selectedText}"?`
         const systemMessage: Message = {
           id: 'drift-system-' + Date.now(),
-          text: `What would you like to know about "${selectedText}"?`,
+          text: systemMessageText,
           isUser: false,
           timestamp: new Date()
         }
-        
+
         // Set only the system message - no context messages
         setMessages([systemMessage])
-        
+
         // Set drift-only messages (just the system message to start)
         setDriftOnlyMessages([systemMessage])
       }
-      
+
       // Reset states when opening new drift
       setPushedToMain(false)
       setSavedAsChat(false)
@@ -133,7 +165,7 @@ export default function DriftPanel({
       setPushedMessageCount(0)
       setLastPushSourceId(null)
       setPushedContentSignature(null)
-      
+
       // Load saved message IDs for this drift
       const allSnippets = snippetStorage.getAllSnippets()
       const savedIds = new Set<string>()
@@ -144,7 +176,28 @@ export default function DriftPanel({
       })
       setSavedMessageIds(savedIds)
     }
-  }, [isOpen, selectedText, existingMessages])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedText, existingMessages, templateType])
+
+  // Auto-send initial message for template drifts (fires once per open, 400ms after panel opens)
+  useEffect(() => {
+    if (!isOpen || !templateType || autoSentRef.current) return
+    // Only fire when the panel has exactly the system message (fresh drift, not restored)
+    if (messages.length !== 1 || !messages[0]?.id?.startsWith('drift-system-')) return
+
+    const prefix = TEMPLATE_USER_PREFIXES[templateType] ?? 'Explore this'
+    const autoText = `${prefix}: "${selectedText}"`
+
+    const timer = window.setTimeout(() => {
+      if (!autoSentRef.current) {
+        autoSentRef.current = true
+        sendMessage(autoText)
+      }
+    }, 400)
+
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, templateType, messages.length])
 
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
@@ -327,24 +380,25 @@ export default function DriftPanel({
     }
   }
 
-  const sendMessage = async () => {
-    if (message.trim()) {
+  const sendMessage = async (overrideText?: string) => {
+    const textToSend = (overrideText ?? message).trim()
+    if (textToSend) {
       const newMessage: Message = {
         id: 'drift-' + Date.now().toString(),
-        text: message,
+        text: textToSend,
         isUser: true,
         timestamp: new Date()
       }
-      
+
       setMessages(prev => [...prev, newMessage])
       setDriftOnlyMessages(prev => [...prev, newMessage])
-      setMessage('')
+      if (!overrideText) setMessage('')
       setIsTyping(true)
-      
+
       // Only use drift-specific messages, not the context messages
       // Filter out the system message and any context messages
       const driftConversation = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about') && msg.id !== newMessage.id
+        msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Challenge this') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Research this') && !msg.text.startsWith("Devil's advocate") && !msg.text.startsWith('Pros and cons') && msg.id !== newMessage.id
       )
       
       // Build context string from parent conversation (last ~6 messages)
@@ -352,9 +406,15 @@ export default function DriftPanel({
         `${msg.isUser ? 'User' : 'Assistant'}: ${msg.text}`
       ).join('\n')
 
-      const systemContent = parentContext
-        ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
-        : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+      // Use template system prompt if set, otherwise use default context-aware prompt
+      const baseSystemContent = templateType
+        ? TEMPLATE_SYSTEM_PROMPTS[templateType]
+        : (parentContext
+            ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
+            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`)
+      const systemContent = (templateType && parentContext)
+        ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
+        : baseSystemContent
 
       // Convert messages to API format with special Drift context
       const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
@@ -366,7 +426,7 @@ export default function DriftPanel({
           role: msg.isUser ? 'user' as const : 'assistant' as const,
           content: msg.text
         })),
-        { role: 'user' as const, content: message }
+        { role: 'user' as const, content: textToSend }
       ]
       
       const envGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
@@ -1034,7 +1094,7 @@ export default function DriftPanel({
                   {/* Send button */}
                   {!isTyping && (
                     <button
-                      onClick={sendMessage}
+                      onClick={() => sendMessage()}
                       disabled={!message.trim() && !voiceInput.isListening}
                       className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-150 active:scale-90 ${message.trim() || voiceInput.isListening ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20' : 'text-text-muted cursor-default'}`}
                     >

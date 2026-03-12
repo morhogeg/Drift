@@ -2,8 +2,10 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { Bookmark, GitBranch } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
+type TemplateType = 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
+
 interface SelectionTooltipProps {
-  onStartDrift: (text: string, messageId: string) => void
+  onStartDrift: (text: string, messageId: string, templateType?: TemplateType) => void
   currentChatId?: string
   currentChatTitle?: string
   onSnippetSaved?: () => void
@@ -407,7 +409,7 @@ export default function SelectionTooltip({
   // Action handlers
   // --------------------------------------------------------------------------
 
-  const handleDrift = () => {
+  const handleDrift = (templateType?: TemplateType) => {
     if (tooltip?.isUserMessage) return
 
     const data =
@@ -415,11 +417,19 @@ export default function SelectionTooltip({
       (tooltip ? { text: tooltip.text, messageId: tooltip.messageId } : null)
 
     if (data) {
-      onStartDrift(data.text, data.messageId)
+      onStartDrift(data.text, data.messageId, templateType)
       dismissTooltip()
       window.getSelection()?.removeAllRanges()
     }
   }
+
+  const TEMPLATES: Array<{ type: TemplateType; label: string; emoji: string }> = [
+    { type: 'challenge', label: 'Challenge', emoji: '🔥' },
+    { type: 'simplify', label: 'Simplify', emoji: '📖' },
+    { type: 'research', label: 'Research', emoji: '🔍' },
+    { type: 'devils-advocate', label: "Devil's Advocate", emoji: '🤔' },
+    { type: 'pros-cons', label: 'Pros & Cons', emoji: '⚖️' },
+  ]
 
   const handleSave = () => {
     const data =
@@ -462,36 +472,56 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border/70 shadow-[0_8px_32px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.10)]">
+        <div className="flex flex-col gap-2 px-3.5 py-2.5 rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border/70 shadow-[0_8px_32px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.10)]">
 
-          {/* Gradient accent bar + selected text preview */}
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <div className="w-[3px] h-7 rounded-full bg-gradient-to-b from-accent-pink to-accent-violet flex-shrink-0" />
-            <span className="text-[12px] text-text-muted italic truncate">
-              &ldquo;{preview}&rdquo;
-            </span>
-          </div>
+          {/* Row 1: accent bar + preview + action buttons */}
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <div className="w-[3px] h-7 rounded-full bg-gradient-to-b from-accent-pink to-accent-violet flex-shrink-0" />
+              <span className="text-[12px] text-text-muted italic truncate">
+                &ldquo;{preview}&rdquo;
+              </span>
+            </div>
 
-          {/* Save button */}
-          <button
-            type="button"
-            className="px-3.5 py-1.5 rounded-xl text-[13px] font-medium text-text-secondary bg-dark-elevated border border-dark-border/80 active:scale-95 active:opacity-70 transition-all flex-shrink-0"
-            onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
-            onClick={handleSave}
-          >
-            Save
-          </button>
-
-          {/* Drift button */}
-          {!tooltip.isUserMessage && (
+            {/* Save button */}
             <button
               type="button"
-              className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet shadow-[0_4px_14px_rgba(168,85,247,0.35)] active:scale-95 active:opacity-80 transition-all flex-shrink-0"
-              onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
-              onClick={handleDrift}
+              className="px-3.5 py-1.5 rounded-xl text-[13px] font-medium text-text-secondary bg-dark-elevated border border-dark-border/80 active:scale-95 active:opacity-70 transition-all flex-shrink-0"
+              onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
+              onClick={handleSave}
             >
-              Drift
+              Save
             </button>
+
+            {/* Drift button */}
+            {!tooltip.isUserMessage && (
+              <button
+                type="button"
+                className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet shadow-[0_4px_14px_rgba(168,85,247,0.35)] active:scale-95 active:opacity-80 transition-all flex-shrink-0"
+                onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
+                onClick={() => handleDrift()}
+              >
+                Drift
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: template quick-action buttons */}
+          {!tooltip.isUserMessage && (
+            <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+              {TEMPLATES.map(t => (
+                <button
+                  key={t.type}
+                  type="button"
+                  className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-text-muted bg-dark-elevated/80 border border-dark-border/60 active:scale-95 active:border-accent-violet/50 transition-all whitespace-nowrap"
+                  onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
+                  onClick={() => handleDrift(t.type)}
+                >
+                  <span>{t.emoji}</span>
+                  <span>{t.label}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -514,41 +544,66 @@ export default function SelectionTooltip({
         e.stopPropagation()
       }}
     >
-      <div className="flex gap-1.5 bg-dark-surface/95 backdrop-blur-xl rounded-2xl p-1.5 border border-dark-border/70 shadow-[0_8px_24px_rgba(0,0,0,0.15),0_2px_6px_rgba(0,0,0,0.08)]">
-        {!tooltip.isUserMessage && (
+      <div className="flex flex-col gap-1 bg-dark-surface/95 backdrop-blur-xl rounded-2xl p-1.5 border border-dark-border/70 shadow-[0_8px_24px_rgba(0,0,0,0.15),0_2px_6px_rgba(0,0,0,0.08)]">
+        {/* Main action row */}
+        <div className="flex gap-1.5">
+          {!tooltip.isUserMessage && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+              onTouchStart={(e) => { e.stopPropagation() }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
+              title="Drift on selected text (D)"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                         text-white bg-gradient-to-r from-accent-pink to-accent-violet
+                         shadow-[0_2px_8px_rgba(168,85,247,0.3)]
+                         hover:opacity-90 active:scale-95
+                         transition-all duration-150 cursor-pointer text-[12px] font-semibold"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              Drift
+            </button>
+          )}
+
           <button
             type="button"
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
             onTouchStart={(e) => { e.stopPropagation() }}
-            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift() }}
-            title="Drift on selected text (D)"
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
+            title="Save selection to snippets (S)"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
-                       text-white bg-gradient-to-r from-accent-pink to-accent-violet
-                       shadow-[0_2px_8px_rgba(168,85,247,0.3)]
-                       hover:opacity-90 active:scale-95
-                       transition-all duration-150 cursor-pointer text-[12px] font-semibold"
+                       bg-dark-elevated border border-dark-border/70 text-text-secondary
+                       hover:border-accent-violet/40 hover:text-text-primary active:scale-95
+                       transition-all duration-150 cursor-pointer text-[12px] font-medium"
           >
-            <GitBranch className="w-3.5 h-3.5" />
-            Drift
+            <Bookmark className="w-3.5 h-3.5" />
+            Save
           </button>
-        )}
+        </div>
 
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onTouchStart={(e) => { e.stopPropagation() }}
-          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
-          title="Save selection to snippets (S)"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
-                     bg-dark-elevated border border-dark-border/70 text-text-secondary
-                     hover:border-accent-violet/40 hover:text-text-primary active:scale-95
-                     transition-all duration-150 cursor-pointer text-[12px] font-medium"
-        >
-          <Bookmark className="w-3.5 h-3.5" />
-          Save
-        </button>
+        {/* Template quick-action row */}
+        {!tooltip.isUserMessage && (
+          <div className="flex gap-1">
+            {TEMPLATES.map(t => (
+              <button
+                key={t.type}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift(t.type) }}
+                title={`${t.label} drift`}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-text-muted
+                           bg-dark-elevated/60 border border-dark-border/50
+                           hover:border-accent-violet/40 hover:text-text-secondary active:scale-95
+                           transition-all duration-150 cursor-pointer whitespace-nowrap"
+              >
+                <span>{t.emoji}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Downward arrow */}

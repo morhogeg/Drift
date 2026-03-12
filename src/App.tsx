@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } fr
 import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic } from 'lucide-react'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToGemini, checkGeminiConnection } from './services/gemini'
+import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights } from './services/gemini'
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import DriftMapPanel from './components/DriftMapPanel'
+import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
@@ -28,7 +29,7 @@ import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
 import { useUIStore } from '@/store/uiStore'
-import type { Message, ChatSession } from '@/types/chat'
+import type { Message, ChatSession, DriftContext } from '@/types/chat'
 import { toast } from '@/hooks/useToast'
 import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
@@ -167,6 +168,8 @@ function App() {
   const settingsOpen = uiStore.settingsOpen
   const driftMapOpen = uiStore.driftMapOpen
   const setDriftMapOpen = uiStore.setDriftMapOpen
+  const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
+  const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
   // ── Swipe gesture: left → open sidebar, right → close sidebar ───────────────
   const swipeHandlers = useSwipeGesture(
@@ -341,6 +344,58 @@ function App() {
     return walk(children)
   }
 
+  // ── Suggested highlights rendering ─────────────────────────────────────────
+  /**
+   * Wraps AI-suggested drift highlight phrases in a clickable span with violet
+   * dotted underline. Runs as a second pass after processEntityText.
+   */
+  const processHighlightsText = (children: React.ReactNode, messageId: string, highlights: string[]): React.ReactNode => {
+    if (!highlights.length) return children
+
+    const injectHighlight = (text: string): React.ReactNode => {
+      const matches: Array<{ start: number; end: number; phrase: string }> = []
+      highlights.forEach(phrase => {
+        const pos = text.indexOf(phrase)
+        if (pos !== -1) matches.push({ start: pos, end: pos + phrase.length, phrase })
+      })
+      if (!matches.length) return text
+      matches.sort((a, b) => a.start - b.start)
+      const out: React.ReactNode[] = []
+      let cursor = 0
+      for (const m of matches) {
+        if (m.start < cursor) continue
+        if (m.start > cursor) out.push(text.slice(cursor, m.start))
+        out.push(
+          <span
+            key={`hl-${m.start}`}
+            className="drift-suggestion"
+            title="Explore ↗"
+            onClick={() => handleStartDrift(m.phrase, messageId)}
+          >
+            {m.phrase}
+          </span>
+        )
+        cursor = m.end
+      }
+      if (cursor < text.length) out.push(text.slice(cursor))
+      return out
+    }
+
+    const walk = (node: React.ReactNode): React.ReactNode => {
+      if (typeof node === 'string') return injectHighlight(node)
+      if (typeof node === 'number' || node == null || node === false) return node
+      if (Array.isArray(node)) return node.map((n, i) => <span key={`hl-n-${i}`}>{walk(n)}</span>)
+      if (isValidElement(node)) {
+        const props: any = (node as any).props || {}
+        if ('children' in props) return cloneElement(node as any, { ...props, children: walk(props.children) })
+        return node
+      }
+      return null
+    }
+
+    return walk(children)
+  }
+
   // ── Scroll helpers ──────────────────────────────────────────────────────────
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -379,10 +434,14 @@ function App() {
         e.preventDefault()
         setDriftMapOpen(!driftMapOpen)
       }
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
+        e.preventDefault()
+        setKnowledgeGraphOpen(!knowledgeGraphOpen)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chatHistory, activeChatId, messages, driftMapOpen])
+  }, [chatHistory, activeChatId, messages, driftMapOpen, knowledgeGraphOpen])
 
   // ── API connection check ────────────────────────────────────────────────────
   useEffect(() => {
@@ -681,6 +740,7 @@ function App() {
           )
           // update lastMessage preview
           chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(acc).slice(0, 100) })
+          return { id: aiResponseId, text: acc }
         }
 
         // Read selectedTargets from the store directly at send-time to avoid
@@ -695,7 +755,7 @@ function App() {
           const broadcastGroupId = 'bg-' + Date.now()
           setActiveBroadcastGroupId(broadcastGroupId)
           setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
-          const tasks: Promise<void>[] = []
+          const tasks: Promise<unknown>[] = []
           for (const t of targets) {
             if (t.provider === 'gemini') {
               const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
@@ -745,9 +805,20 @@ function App() {
             const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
             if (!apiKey) throw new Error('No Gemini API key found.')
             const model = (preset?.model || aiSettings.geminiModel) as any
-            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
+            const result = await streamIntoNewMessage(async (msgs, onChunk, signal) =>
               sendMessageToGemini(msgs, onChunk, apiKey, signal, model)
             , t.label, undefined, activeStrandId || undefined, undefined)
+            // Fire-and-forget: enrich message with AI-suggested drift highlights
+            if (result && result.text && apiKey) {
+              const capturedChatId = activeChatId
+              getSuggestedHighlights(result.text, apiKey, model)
+                .then(highlights => {
+                  if (highlights.length > 0) {
+                    chatStore.updateMessage(capturedChatId, result.id, { suggestedHighlights: highlights })
+                  }
+                })
+                .catch(() => {})
+            }
           } else if (t.provider === 'openrouter') {
             const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
             const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
@@ -927,7 +998,7 @@ function App() {
   }
 
   // ── Drift handlers ──────────────────────────────────────────────────────────
-  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[]) => {
+  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType']) => {
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
 
@@ -990,6 +1061,7 @@ function App() {
             highlightMessageId: driftSourceMsg.id,
             driftChatId: newDriftChatId,
             existingMessages: existingNestedMessages,
+            templateType,
             ancestry: [
               ...parentAncestry,
               {
@@ -1026,6 +1098,7 @@ function App() {
         selectedText,
         sourceMessageId: messageId,
         contextMessages: [],
+        templateType,
         ancestry: [{
           isMainChat: true,
           label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -1073,6 +1146,7 @@ function App() {
       highlightMessageId: actualMessage?.id,
       driftChatId: finalDriftChatId,
       existingMessages: existingMessagesToUse,
+      templateType,
       ancestry: [{
         isMainChat: true,
         label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -1835,6 +1909,21 @@ function App() {
                   </svg>
                 </button>
               )}
+              {/* Knowledge Graph Button — shown when there are multiple chats */}
+              {chatHistory.length > 1 && (
+                <button
+                  onClick={() => setKnowledgeGraphOpen(true)}
+                  title="Knowledge graph (⌘⌥G)"
+                  className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+                    <path d="M12 7v4"/><path d="M6.5 17.5l4-4.5"/><path d="M17.5 17.5l-4-4.5"/>
+                    <path d="M7 19h10"/>
+                  </svg>
+                </button>
+              )}
               {/* New Chat Button */}
               <button
                 onClick={createNewChat}
@@ -2531,14 +2620,19 @@ function App() {
                                 remarkPlugins={[remarkGfm]}
                                 components={(() => {
                                   let liCounter = 0
+                                  const hl = msg.suggestedHighlights ?? []
+                                  const proc = (children: any) => {
+                                    const base = processEntityText(children, msg.id)
+                                    return hl.length ? processHighlightsText(base, msg.id, hl) : base
+                                  }
                                   return {
-                                    p: ({ children }: any) => <p className="mb-2">{processEntityText(children, msg.id)}</p>,
+                                    p: ({ children }: any) => <p className="mb-2">{proc(children)}</p>,
                                     li: ({ children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li><span id={anchorId}>{processEntityText(children, msg.id)}</span></li>
+                                      return <li><span id={anchorId}>{proc(children)}</span></li>
                                     },
-                                    th: ({ children }: any) => <th>{processEntityText(children, msg.id)}</th>,
-                                    td: ({ children }: any) => <td>{processEntityText(children, msg.id)}</td>,
+                                    th: ({ children }: any) => <th>{proc(children)}</th>,
+                                    td: ({ children }: any) => <td>{proc(children)}</td>,
                                     br: () => <br />,
                                     table: ({ children }: any) => (
                                       <div className="overflow-x-auto my-4">
@@ -2841,7 +2935,29 @@ function App() {
         driftChatId={driftContext?.driftChatId}
         onMessagesChange={(msgs) => {
           const chatId = driftContext?.driftChatId
-          if (chatId) driftStore.saveTempConversation(chatId, msgs as Message[])
+          if (chatId) {
+            driftStore.saveTempConversation(chatId, msgs as Message[])
+            // Auto-persist the first time a user message appears and the drift
+            // isn't yet registered in chatHistory (i.e., first message sent).
+            const hasUserMessage = msgs.some(m => m.isUser)
+            const alreadyRegistered = chatStore.chatHistory.some(c => c.id === chatId)
+            if (hasUserMessage && !alreadyRegistered) {
+              const { selectedText, sourceMessageId } = driftStore.driftContext
+              chatStore.registerDriftSession({
+                id: chatId,
+                title: `"${selectedText}"`,
+                messages: msgs as Message[],
+                lastMessage: msgs[msgs.length - 1]?.text?.slice(0, 100),
+                createdAt: new Date(),
+                metadata: {
+                  isDrift: true,
+                  parentChatId: activeChatId,
+                  sourceMessageId,
+                  selectedText,
+                },
+              })
+            }
+          }
         }}
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
@@ -2855,6 +2971,7 @@ function App() {
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
+        templateType={driftContext?.templateType}
       />
 
       {/* Settings Modal */}
@@ -2916,6 +3033,16 @@ function App() {
         onNavigate={handleDriftMapNavigate}
         getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
       />
+
+      {/* Knowledge Graph */}
+      {knowledgeGraphOpen && (
+        <DriftKnowledgeGraph
+          chatHistory={chatHistory}
+          activeChatId={activeChatId}
+          onClose={() => setKnowledgeGraphOpen(false)}
+          onSwitchChat={(id) => { setKnowledgeGraphOpen(false); switchChat(id) }}
+        />
+      )}
 
       {/* Snippet Gallery */}
       <SnippetGallery
