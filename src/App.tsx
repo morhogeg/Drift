@@ -1839,7 +1839,7 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-center px-8 pb-32">
+                <div className="flex flex-col items-center text-center px-8 pt-[22vh] pb-16">
                   <div className="mb-6">
                     <svg width="52" height="52" viewBox="0 0 24 24" fill="none" className="mx-auto mb-5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
