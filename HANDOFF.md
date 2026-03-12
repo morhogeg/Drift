@@ -2,12 +2,28 @@
 
 **Date:** March 12, 2026
 **Branch:** `main`
-**Build:** 21
-**Status:** App logo refresh (drift map icon), welcome screen keyboard fix. Build 21 synced to Xcode.
+**Build:** 22
+**Status:** Drift persistence fixes (blank reopen, missing nested branches), UI polish (dividers, toggles, send button). Build 22 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 60. Send arrow — remove grey idle background (POLISH)
+- The send arrow button had `bg-dark-border/40` when no text was typed, creating a grey capsule in both dark and light mode.
+- Removed the background entirely for the idle state — arrow now floats as a plain muted icon, matching the mic button style. Gradient still appears when there's text to send.
+
+### 59. Sidebar dividers invisible in dark mode (BUG FIX)
+- `divide-dark-border/[0.12]` (12% opacity) was invisible on near-black background. Bumped to `divide-dark-border/30`.
+
+### 58. Settings toggles resized to Apple UISwitch proportions (POLISH)
+- Old size: `h-6 w-11` (24×44px) — too large/fat.
+- New size: `h-[30px] w-[50px]` with `h-[26px] w-[26px]` knob and 2px gutters — matches Apple's 31×51pt UISwitch ratio.
+
+### 57. Drift reopens blank + missing nested Drift Map branches (BUG FIX)
+- **Root cause:** DriftPanel messages lived only in local React state. When a nested drift opened (e.g. Europe from within UEFA), `getTempConversation` returned `undefined` — nested-drift check failed. UEFA was never persisted because `handleCloseDrift` was never called when the context switched.
+- **Fix 1:** `DriftPanel` now has `onMessagesChange` prop that fires on every `driftOnlyMessages` change, keeping `tempDriftConversations` always current during a live session.
+- **Fix 2:** In the nested drift path, `registerDriftSession` is now called for the parent drift before opening the child — persists parent to IndexedDB so it survives restarts and Drift Map sub-branches are visible.
 
 ### 55. Welcome screen cut off when keyboard opens (BUG FIX)
 - **Problem:** Empty state used `h-full flex justify-center` — when iOS keyboard opened, the viewport shrank and the vertically-centered content ended up above the scroll origin (can't scroll up past the top). Icon and heading were clipped.
