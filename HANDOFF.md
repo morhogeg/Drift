@@ -2,12 +2,16 @@
 
 **Date:** March 12, 2026
 **Branch:** `main`
-**Build:** 20
-**Status:** Sidebar redesign — flat divider-line layout, less visual noise. "AI Settings" renamed to "Settings" throughout. Build 20 synced to Xcode.
+**Build:** 21
+**Status:** App logo refresh (drift map icon), welcome screen keyboard fix. Build 21 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 55. Welcome screen cut off when keyboard opens (BUG FIX)
+- **Problem:** Empty state used `h-full flex justify-center` — when iOS keyboard opened, the viewport shrank and the vertically-centered content ended up above the scroll origin (can't scroll up past the top). Icon and heading were clipped.
+- **Fix:** Replaced `h-full justify-center` with `pt-[22vh]` top padding. Content is now anchored from the top of the scroll container and always visible regardless of keyboard state.
 
 ### 54. "AI Settings" → "Settings" (POLISH)
 - Renamed label in sidebar button, user menu dropdown, and Settings panel header (`Settings.tsx`).
