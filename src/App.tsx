@@ -1552,7 +1552,7 @@ function App() {
         </div>
 
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-dark-border/[0.12]">
+        <div className="flex-1 overflow-y-auto divide-y divide-dark-border/30">
           {sortedChats.map((chat) => (
             <div
               key={chat.id}
