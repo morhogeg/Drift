@@ -907,14 +907,33 @@ function App() {
         if (driftSourceMsg) {
           const existingNested = driftSourceMsg.driftInfos?.find(d => d.selectedText === selectedText)
           const newDriftChatId = existingNested?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
+          // Get the messages to persist for the parent drift (with updated driftInfos)
+          const msgsToSave = existingNested
+            ? activeDriftMessages
+            : activeDriftMessages.map(m =>
+                m.id === driftSourceMsg.id
+                  ? { ...m, hasDrift: true, driftInfos: [...(m.driftInfos || []), { selectedText, driftChatId: newDriftChatId }] }
+                  : m
+              )
           if (!existingNested) {
-            const updatedDriftMsgs = activeDriftMessages.map(m =>
-              m.id === driftSourceMsg.id
-                ? { ...m, hasDrift: true, driftInfos: [...(m.driftInfos || []), { selectedText, driftChatId: newDriftChatId }] }
-                : m
-            )
-            driftStore.saveTempConversation(activeDriftChatId, updatedDriftMsgs)
+            driftStore.saveTempConversation(activeDriftChatId, msgsToSave)
           }
+          // Persist parent drift to IndexedDB before replacing context — ensures
+          // it survives app restarts and appears correctly in the Drift Map.
+          const parentCtx = driftStore.driftContext
+          chatStore.registerDriftSession({
+            id: activeDriftChatId,
+            title: `"${parentCtx.selectedText}"`,
+            messages: msgsToSave as Message[],
+            lastMessage: msgsToSave[msgsToSave.length - 1]?.text?.slice(0, 100),
+            createdAt: new Date(),
+            metadata: {
+              isDrift: true,
+              parentChatId: activeChatId,
+              sourceMessageId: parentCtx.sourceMessageId,
+              selectedText: parentCtx.selectedText,
+            },
+          })
           const msgIdx = activeDriftMessages.findIndex(m => m.id === driftSourceMsg.id)
           const nestedContext = activeDriftMessages.slice(0, msgIdx + 1)
           const existingNestedMessages = reconstructedMessages || driftStore.getTempConversation(newDriftChatId) || []
@@ -2727,6 +2746,10 @@ function App() {
         aiSettings={aiSettings}
         existingMessages={driftContext?.existingMessages}
         driftChatId={driftContext?.driftChatId}
+        onMessagesChange={(msgs) => {
+          const chatId = driftContext?.driftChatId
+          if (chatId) driftStore.saveTempConversation(chatId, msgs as Message[])
+        }}
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]

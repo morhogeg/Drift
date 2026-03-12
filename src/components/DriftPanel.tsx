@@ -39,6 +39,8 @@ interface DriftPanelProps {
   aiSettings: AISettings
   existingMessages?: Message[]
   driftChatId?: string
+  /** Called whenever the drift conversation messages change — used to keep the temp store in sync. */
+  onMessagesChange?: (messages: Message[]) => void
   // If provided, Drift will follow the main chat model chips
   selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
   // Optional: allow running compare against multiple targets from main
@@ -63,6 +65,7 @@ export default function DriftPanel({
   aiSettings,
   existingMessages,
   driftChatId,
+  onMessagesChange,
   selectedProvider,
   selectedTargets,
   onExpandedChange
@@ -134,6 +137,15 @@ export default function DriftPanel({
       setSavedMessageIds(savedIds)
     }
   }, [isOpen, selectedText, existingMessages])
+
+  // Sync driftOnlyMessages to the temp store so nested-drift detection
+  // in handleStartDrift can always see the current conversation.
+  useEffect(() => {
+    if (driftChatId && driftOnlyMessages.length > 0) {
+      onMessagesChange?.(driftOnlyMessages)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driftOnlyMessages])
 
   // Autofocus input when the drift panel opens
   useEffect(() => {
