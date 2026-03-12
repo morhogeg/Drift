@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
 import { Save, ArrowUp, Square, ArrowLeft, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronDown, Mic, Home } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToGemini, getDriftSuggestions, type ChatMessage as GeminiMessage } from '../services/gemini'
+import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -107,6 +107,8 @@ export default function DriftPanel({
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
+  /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
+  const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
 
   // --------------------------------------------------------------------------
   // Template helpers
@@ -159,8 +161,9 @@ export default function DriftPanel({
         setDriftOnlyMessages([systemMessage])
       }
 
-      // Reset suggestions
+      // Reset suggestions and per-message highlights
       setDriftSuggestions([])
+      setMsgHighlights(new Map())
 
       // Fetch suggestion chips for fresh non-template drifts
       if (!templateType && !(existingMessages && existingMessages.length > 0)) {
@@ -504,7 +507,22 @@ export default function DriftPanel({
             aiSettings.ollamaModel
           )
         }
-      } catch (error) {
+      // Fire-and-forget: fetch key-term highlights for this AI response
+      const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
+      if (geminiKeyForHL && accumulatedResponse.length > 80) {
+        const capturedId = aiResponseId
+        const capturedText = accumulatedResponse
+        getSuggestedHighlights(capturedText, geminiKeyForHL).then(hl => {
+          if (hl.length > 0) {
+            setMsgHighlights(prev => {
+              const next = new Map(prev)
+              next.set(capturedId, hl)
+              return next
+            })
+          }
+        })
+      }
+    } catch (error) {
         console.error('Drift panel error:', error)
         const errorMessage = error instanceof Error ? error.message : "Failed to get response. Please check your connection."
         const aiResponse: Message = {
@@ -998,7 +1016,60 @@ export default function DriftPanel({
                       )}
                       <div className="px-1 pb-1">
                         <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
-                          <ReactMarkdown className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20" remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <p className="mb-2">{children}</p>, br: () => <br />, table: ({children}) => (<div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>) }}>
+                          <ReactMarkdown
+                            className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20"
+                            remarkPlugins={[remarkGfm]}
+                            components={(() => {
+                              const hl = msgHighlights.get(msg.id) ?? []
+                              const injectHL = (text: string): React.ReactNode => {
+                                if (!hl.length) return text
+                                const matches: Array<{ start: number; end: number; phrase: string }> = []
+                                hl.forEach(phrase => {
+                                  const pos = text.indexOf(phrase)
+                                  if (pos !== -1) matches.push({ start: pos, end: pos + phrase.length, phrase })
+                                })
+                                if (!matches.length) return text
+                                matches.sort((a, b) => a.start - b.start)
+                                const out: React.ReactNode[] = []
+                                let cursor = 0
+                                for (const m of matches) {
+                                  if (m.start < cursor) continue
+                                  if (m.start > cursor) out.push(text.slice(cursor, m.start))
+                                  out.push(
+                                    <span
+                                      key={`hl-${m.start}`}
+                                      className="drift-suggestion"
+                                      title="Ask about this ↗"
+                                      onClick={() => sendMessage(m.phrase)}
+                                    >
+                                      {m.phrase}
+                                    </span>
+                                  )
+                                  cursor = m.end
+                                }
+                                if (cursor < text.length) out.push(text.slice(cursor))
+                                return out
+                              }
+                              const walkHL = (node: React.ReactNode): React.ReactNode => {
+                                if (typeof node === 'string') return injectHL(node)
+                                if (typeof node === 'number' || node == null || node === false) return node
+                                if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkHL(n)}</span>)
+                                if (isValidElement(node)) {
+                                  const props: any = (node as any).props || {}
+                                  if ('children' in props) return cloneElement(node as any, { ...props, children: walkHL(props.children) })
+                                  return node
+                                }
+                                return null
+                              }
+                              const proc = (children: any) => hl.length ? walkHL(children) : children
+                              return {
+                                p: ({ children }: any) => <p className="mb-2">{proc(children)}</p>,
+                                li: ({ children }: any) => <li>{proc(children)}</li>,
+                                br: () => <br />,
+                                table: ({ children }: any) => <div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>,
+                              }
+                            })()}
+                          >
                             {msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
                           </ReactMarkdown>
                         </div>

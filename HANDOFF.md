@@ -2,12 +2,29 @@
 
 **Date:** March 12, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 27 (iOS Xcode) / 28 (web)
-**Status:** Polish pass from screenshot feedback: knowledge graph restored to full-canvas aesthetic in 520px side panel (no zoom controls), suggestion chips moved inside scroll area so they're always visible, drift map de-duplicated (no repeated titles) and cleaned up with recursive BranchItem component. Synced to Xcode — ready to archive.
+**Build:** 28 (iOS Xcode) / 29 (web)
+**Status:** Three UX fixes: knowledge graph light-mode aware, key-term dotted highlights in drift panel messages, styled ↗ drift tag on pushed messages: knowledge graph restored to full-canvas aesthetic in 520px side panel (no zoom controls), suggestion chips moved inside scroll area so they're always visible, drift map de-duplicated (no repeated titles) and cleaned up with recursive BranchItem component. Synced to Xcode — ready to archive.
 
 ---
 
 ## What Was Done This Session
+
+### 81. Subtle ↗ drift tag on pushed messages (FIX/POLISH)
+- Replaced the old "Drift" label with a cleaner `↗ drift` badge using `bg-accent-violet/[0.08] border border-accent-violet/20` — subtle, theme-adaptive, visible in both light and dark mode.
+- Shows uppercase tracking-wide `↗ DRIFT` pill + selected text excerpt on single push and first message of multi-push groups.
+- Works correctly with light theme (uses opacity-based colors, not hardcoded dark values).
+
+### 80. Key-term highlights inside drift panel messages (NEW FEATURE)
+- After each AI response streams in `DriftPanel`, calls `getSuggestedHighlights()` fire-and-forget.
+- Results stored in `msgHighlights` Map (keyed by message ID).
+- ReactMarkdown components for each AI message now walk the node tree and inject `<span className="drift-suggestion">` for highlighted phrases — same dotted violet underline treatment as the main chat.
+- Clicking a highlighted term in the drift panel sends that phrase as the next message in the drift (deepening the exploration).
+- Resets on panel close/re-open.
+
+### 79. Knowledge Graph — light mode support (FIX)
+- Replaced hardcoded `bg-[#0a0a0f]` and `bg-[#0d0d12]/80` panel backgrounds with `bg-dark-bg` and `bg-dark-surface/80` — both use CSS variables that switch with the theme.
+- Background dots: `color` prop now conditional — white dots in dark mode, subtle dark dots in light mode.
+- Edge label background: switches between near-black (dark) and near-white (light).
 
 ### 78. Drift Map — remove duplicate titles, clean up layout (FIX)
 - **Duplicate issue:** Branch title showed same text as selectedText (both "distributed ledger technology" appeared twice). Fix: `normalise()` comparison skips title if it matches selectedText or starts with "Drift:" prefix.

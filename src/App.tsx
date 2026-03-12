@@ -2241,11 +2241,18 @@ function App() {
                       {isPlainAI && msg.modelTag && (
                         <div className="text-[11px] text-text-secondary mb-1 mt-1">{msg.modelTag}</div>
                       )}
-                      {(isSinglePushMessage || (isDriftMessage && !msg.isUser && isFirstDriftMessage)) && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-text-muted mb-1 mt-1">
-                          <span className="px-1.5 py-0.5 rounded bg-accent-violet/10 border border-accent-violet/20 text-accent-violet/80 text-[10px] font-medium">Drift</span>
+                      {/* Subtle drift origin tag — shown on every non-user pushed message */}
+                      {isDriftMessage && !msg.isUser && (isSinglePushMessage || isFirstDriftMessage) && (
+                        <div className="flex items-center gap-1.5 mb-1.5 mt-0.5">
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md
+                            bg-accent-violet/[0.08] border border-accent-violet/20
+                            text-[9px] font-semibold text-accent-violet/80 tracking-wide uppercase">
+                            ↗ drift
+                          </span>
                           {msg.driftPushMetadata?.selectedText && (
-                            <span className="italic truncate">"{msg.driftPushMetadata.selectedText}"</span>
+                            <span className="text-[11px] text-text-muted italic truncate max-w-[260px]">
+                              "{msg.driftPushMetadata.selectedText}"
+                            </span>
                           )}
                         </div>
                       )}

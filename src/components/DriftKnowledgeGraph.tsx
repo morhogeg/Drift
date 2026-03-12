@@ -112,7 +112,7 @@ function collectTree(rootId: string, allChats: ChatSession[]): ChatSession[] {
 
 // ── Layout builder ────────────────────────────────────────────────────────────
 
-function buildTree(chats: ChatSession[], rootId: string, activeChatId: string | null) {
+function buildTree(chats: ChatSession[], rootId: string, activeChatId: string | null, isDark: boolean) {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -173,8 +173,8 @@ function buildTree(chats: ChatSession[], rootId: string, activeChatId: string | 
           type: 'smoothstep',
           animated: true,
           label: edgeLabel || undefined,
-          labelStyle: { fontSize: 9, fill: 'rgba(168,85,247,0.8)', fontStyle: 'italic' },
-          labelBgStyle: { fill: 'rgba(13,13,18,0.9)', stroke: 'rgba(168,85,247,0.2)', strokeWidth: 1 },
+          labelStyle: { fontSize: 9, fill: 'rgba(168,85,247,0.9)', fontStyle: 'italic' },
+          labelBgStyle: { fill: isDark ? 'rgba(13,13,18,0.9)' : 'rgba(248,248,252,0.92)', stroke: 'rgba(168,85,247,0.2)', strokeWidth: 1 },
           labelBgPadding: [4, 2] as [number, number],
           style: { stroke: 'rgba(168, 85, 247, 0.5)', strokeWidth: 1.5, strokeDasharray: '5,3' },
         })
@@ -189,11 +189,12 @@ function buildTree(chats: ChatSession[], rootId: string, activeChatId: string | 
 
 function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat }: Props) {
   const { fitView } = useReactFlow()
+  const isDark = document.documentElement.classList.contains('dark')
 
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
   const treeChats = rootId ? collectTree(rootId, chatHistory) : []
   const { nodes: initNodes, edges: initEdges } = rootId && treeChats.length > 1
-    ? buildTree(treeChats, rootId, activeChatId)
+    ? buildTree(treeChats, rootId, activeChatId, isDark)
     : { nodes: [], edges: [] }
 
   const [nodes, , onNodesChange] = useNodesState(initNodes)
@@ -227,9 +228,9 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat 
       />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 bottom-0 z-40 flex flex-col w-[520px] bg-[#0a0a0f] border-l border-dark-border/50 shadow-2xl">
+      <div className="fixed top-0 right-0 bottom-0 z-40 flex flex-col w-[520px] bg-dark-bg border-l border-dark-border/50 shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border/40 flex-shrink-0 bg-[#0d0d12]/80 backdrop-blur-sm">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border/40 flex-shrink-0 bg-dark-surface/80 backdrop-blur-sm">
           <div className="min-w-0">
             <h2 className="text-[13px] font-semibold text-text-primary truncate">
               {rootChat?.title || 'Drift Map'}
@@ -279,7 +280,7 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat 
                 variant={BackgroundVariant.Dots}
                 gap={20}
                 size={1}
-                color="rgba(255,255,255,0.055)"
+                color={isDark ? 'rgba(255,255,255,0.055)' : 'rgba(0,0,0,0.08)'}
               />
             </ReactFlow>
           )}
