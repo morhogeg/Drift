@@ -893,6 +893,44 @@ function App() {
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
 
+    // ── Nested drift: selection came from within an open drift panel ──────────
+    // If the panel is open, look for the source message in the active drift's
+    // temp conversation first. If found, record driftInfos THERE (not on the
+    // main chat message) so the tree is correctly nested in DriftMapPanel.
+    const activeDriftChatId = driftStore.driftContext?.driftChatId
+    if (driftStore.driftOpen && activeDriftChatId) {
+      const activeDriftMessages = driftStore.getTempConversation(activeDriftChatId)
+      if (activeDriftMessages) {
+        const driftSourceMsg =
+          activeDriftMessages.find(m => m.id === messageId) ??
+          activeDriftMessages.find(m => !m.isUser && m.text?.includes(selectedText))
+        if (driftSourceMsg) {
+          const existingNested = driftSourceMsg.driftInfos?.find(d => d.selectedText === selectedText)
+          const newDriftChatId = existingNested?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
+          if (!existingNested) {
+            const updatedDriftMsgs = activeDriftMessages.map(m =>
+              m.id === driftSourceMsg.id
+                ? { ...m, hasDrift: true, driftInfos: [...(m.driftInfos || []), { selectedText, driftChatId: newDriftChatId }] }
+                : m
+            )
+            driftStore.saveTempConversation(activeDriftChatId, updatedDriftMsgs)
+          }
+          const msgIdx = activeDriftMessages.findIndex(m => m.id === driftSourceMsg.id)
+          const nestedContext = activeDriftMessages.slice(0, msgIdx + 1)
+          const existingNestedMessages = reconstructedMessages || driftStore.getTempConversation(newDriftChatId) || []
+          driftStore.openDrift({
+            selectedText,
+            sourceMessageId: driftSourceMsg.id,
+            contextMessages: nestedContext,
+            highlightMessageId: driftSourceMsg.id,
+            driftChatId: newDriftChatId,
+            existingMessages: existingNestedMessages,
+          })
+          return
+        }
+      }
+    }
+
     const currentChat = chatHistory.find(c => c.id === activeChatId)
     let currentMessages = currentChat?.messages || messages
     if (currentMessages.length === 0) currentMessages = messages
@@ -942,7 +980,9 @@ function App() {
     const finalSourceMessageId = actualMessage?.id || messageId
     const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
     const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-    const existingMessagesToUse = reconstructedMessages || driftStore.getTempConversation(finalDriftChatId) || []
+    const existingMessagesToUse = (reconstructedMessages?.length ? reconstructedMessages : null)
+      ?? driftStore.getTempConversation(finalDriftChatId)
+      ?? []
 
     driftStore.openDrift({
       selectedText,
@@ -955,7 +995,29 @@ function App() {
   }
 
   const handleCloseDrift = (driftMessages?: Message[]) => {
+    // Read context before closing (driftContext is stable until next openDrift)
+    const { selectedText, sourceMessageId, driftChatId } = driftStore.driftContext
+
     driftStore.closeDrift(driftMessages)
+
+    // Auto-persist the drift conversation so it survives app restarts.
+    // Creates a ghost ChatSession in chatHistory + IndexedDB if not already there.
+    if (driftMessages && driftMessages.length > 0 && driftChatId) {
+      chatStore.registerDriftSession({
+        id: driftChatId,
+        title: `"${selectedText}"`,
+        messages: driftMessages as Message[],
+        lastMessage: driftMessages[driftMessages.length - 1]?.text?.slice(0, 100),
+        createdAt: new Date(),
+        metadata: {
+          isDrift: true,
+          parentChatId: activeChatId,
+          sourceMessageId,
+          selectedText,
+        },
+      })
+    }
+
     setTimeout(() => {
       const chatContainer = document.querySelector('.chat-messages-container')
       if (chatContainer) chatContainer.scrollTop = mainScrollPosition.current
@@ -1471,18 +1533,18 @@ function App() {
         </div>
 
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div className="flex-1 overflow-y-auto divide-y divide-dark-border/[0.12]">
           {sortedChats.map((chat) => (
             <div
               key={chat.id}
               onClick={() => { switchChat(chat.id); uiStore.setSidebarOpen(false) }}
               onContextMenu={(e) => handleContextMenu(e, chat.id)}
               className={`
-                group relative rounded-lg p-2.5 cursor-pointer
+                group relative px-3 py-2.5 cursor-pointer
                 transition-all duration-100 ease-in-out
                 ${activeChatId === chat.id
-                  ? 'bg-dark-elevated border-l-2 border-dark-border/60 shadow-lg'
-                  : 'bg-dark-elevated/30 hover:bg-dark-elevated/50'
+                  ? 'bg-dark-elevated/60'
+                  : 'hover:bg-dark-elevated/40'
                 }
               `}
             >
@@ -1532,9 +1594,6 @@ function App() {
                   </p>
                 </div>
               </div>
-              {activeChatId === chat.id && (
-                <div className="absolute inset-0 rounded-xl bg-white/5 pointer-events-none" />
-              )}
             </div>
           ))}
         </div>
@@ -1546,7 +1605,7 @@ function App() {
             className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
           >
             <SettingsIcon className="w-4 h-4 text-text-muted" />
-            AI Settings
+            Settings
           </button>
         </div>
 
@@ -1580,7 +1639,7 @@ function App() {
                 onClick={() => { uiStore.setSettingsOpen(true); uiStore.setUserMenuOpen(false) }}
               >
                 <SettingsIcon className="w-4 h-4 text-text-muted" />
-                AI settings
+                Settings
               </button>
               <div className="h-px bg-dark-border/60" />
               <button
@@ -1782,15 +1841,18 @@ function App() {
               {messages.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center text-center px-8 pb-32">
                   <div className="mb-6">
-                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="mx-auto mb-5 opacity-80">
-                      <circle cx="20" cy="20" r="18" stroke="url(#dg)" strokeWidth="1.5" fill="none"/>
-                      <path d="M13 20 Q20 12 27 20 Q20 28 13 20Z" fill="url(#dg)" opacity="0.9"/>
+                    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" className="mx-auto mb-5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
-                        <linearGradient id="dg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                        <linearGradient id="dg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                           <stop stopColor="#ff006e"/>
                           <stop offset="1" stopColor="#a855f7"/>
                         </linearGradient>
                       </defs>
+                      <circle cx="18" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <circle cx="6" cy="6" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <circle cx="6" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
                     </svg>
                     <h2 className="text-text-primary font-semibold text-[22px] leading-snug mb-2">What's on your mind?</h2>
                     <p className="text-text-muted text-[14px] leading-relaxed max-w-[260px] mx-auto">Ask anything. Highlight any response to <span className="text-accent-violet">drift</span> into a focused side chat.</p>
@@ -2278,7 +2340,7 @@ function App() {
                                               e.stopPropagation()
                                               const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
                                                 ?? driftStore.getTempConversation(m.drift.driftChatId)
-                                                ?? []
+                                                ?? undefined
                                               handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
                                             }}
                                             onTouchEnd={(e) => {
@@ -2286,7 +2348,7 @@ function App() {
                                               e.stopPropagation()
                                               const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
                                                 ?? driftStore.getTempConversation(m.drift.driftChatId)
-                                                ?? []
+                                                ?? undefined
                                               handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
                                             }}
                                             className="inline cursor-pointer
@@ -2404,20 +2466,29 @@ function App() {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    const firstDrift = msg.driftInfos![0]
-                                    const existing = chatHistory.find(c => c.id === firstDrift.driftChatId)?.messages
-                                      ?? driftStore.getTempConversation(firstDrift.driftChatId)
-                                      ?? []
-                                    handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existing)
+                                    if (msg.driftInfos!.length > 1) {
+                                      // Multiple drifts — open the map so user can pick
+                                      setDriftMapOpen(true)
+                                    } else {
+                                      const d = msg.driftInfos![0]
+                                      const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
+                                        ?? driftStore.getTempConversation(d.driftChatId)
+                                        ?? undefined
+                                      handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                    }
                                   }}
                                   onTouchEnd={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
-                                    const firstDrift = msg.driftInfos![0]
-                                    const existing = chatHistory.find(c => c.id === firstDrift.driftChatId)?.messages
-                                      ?? driftStore.getTempConversation(firstDrift.driftChatId)
-                                      ?? []
-                                    handleStartDrift(firstDrift.selectedText, msg.id, firstDrift.driftChatId, existing)
+                                    if (msg.driftInfos!.length > 1) {
+                                      setDriftMapOpen(true)
+                                    } else {
+                                      const d = msg.driftInfos![0]
+                                      const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
+                                        ?? driftStore.getTempConversation(d.driftChatId)
+                                        ?? undefined
+                                      handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                    }
                                   }}
                                   className="ml-1 flex items-center gap-1 px-2 py-0.5
                                              rounded-full text-xs
@@ -2425,7 +2496,7 @@ function App() {
                                              bg-accent-violet/5 hover:bg-accent-violet/15
                                              border border-accent-violet/20 hover:border-accent-violet/40
                                              transition-all duration-150"
-                                  title="Open drift"
+                                  title={msg.driftInfos.length > 1 ? 'View all drifts' : 'Open drift'}
                                 >
                                   <span>↗</span>
                                   <span>{msg.driftInfos.length} {msg.driftInfos.length === 1 ? 'drift' : 'drifts'}</span>

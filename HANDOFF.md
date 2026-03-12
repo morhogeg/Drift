@@ -9,6 +9,11 @@
 
 ## What Was Done This Session
 
+### 52. App logo — drift map network icon as brand identity (NEW)
+- **Empty state logo:** Replaced the old gradient circle/diamond SVG with a 52×52px version of the drift map network icon (3 nodes + connecting paths), using the same pink→violet gradient. Cleaner and on-brand.
+- **Favicon:** New `public/favicon.svg` — 32×32 dark background (`#0a0a0a`, rounded corners) with the gradient network icon. Referenced in `index.html`.
+- **iOS app icon:** Regenerated `AppIcon-512@2x.png` (1024×1024) using Node + sharp: dark background + scaled gradient network icon. Replaces the old placeholder.
+
 ### 51. Drift map — nested temp drifts now visible (BUG FIX)
 - **Root cause:** `buildBranchNode` only looked up child drift chats in `chatHistory` (IndexedDB). Temp drifts (not yet saved as chats) live in `driftStore` memory, which `DriftMapPanel` had no access to.
 - **Fix:** Added `getTempMessages?: (chatId: string) => Message[] | null` prop to `DriftMapPanel`. `buildBranchNode` now falls back to `getTempMessages(driftChatId)` when `chatHistory` lookup returns undefined. App.tsx passes `driftStore.getTempConversation`. Nested drifts from unsaved conversations now appear as sub-branches.
