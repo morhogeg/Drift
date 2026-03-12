@@ -99,6 +99,13 @@ interface ChatStore {
 
   /** Import demo/external chats (e.g., first-run seed), persisting each one. */
   importDemoChats: (chats: ChatSession[]) => Promise<void>
+
+  /**
+   * Insert a drift chat session if it doesn't already exist in chatHistory.
+   * Called when a drift panel closes with messages, so conversations survive restarts.
+   * Idempotent: skipped silently if the id is already tracked.
+   */
+  registerDriftSession: (chat: ChatSession) => void
 }
 
 // ── Internal persist helper ───────────────────────────────────────────────────
@@ -337,6 +344,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setSearchQuery(text: string) {
     set({ searchQuery: text })
+  },
+
+  // ── registerDriftSession ───────────────────────────────────────────────────
+  registerDriftSession(chat: ChatSession) {
+    const { chatHistory } = get()
+    if (chatHistory.some((c) => c.id === chat.id)) {
+      // Already tracked — update messages in place (conversation may have grown)
+      const updated = chatHistory.map((c) => (c.id === chat.id ? { ...c, messages: chat.messages, lastMessage: chat.lastMessage } : c))
+      set({ chatHistory: updated })
+      persistChat({ ...chat })
+      return
+    }
+    // New drift session — insert at front of history and persist
+    set({ chatHistory: [chat, ...chatHistory] })
+    persistChat(chat)
   },
 
   // ── flushCurrentMessages ───────────────────────────────────────────────────

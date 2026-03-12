@@ -2,12 +2,23 @@
 
 **Date:** March 12, 2026
 **Branch:** `main`
-**Build:** 19
-**Status:** Drift map + badge fixes — badge moved to action row (no text overlap), unified drift-open logic (no new chat), light mode colors, nested temp drifts in map. Build 19 synced to Xcode.
+**Build:** 20
+**Status:** Sidebar redesign — flat divider-line layout, less visual noise. "AI Settings" renamed to "Settings" throughout. Build 20 synced to Xcode.
 
 ---
 
 ## What Was Done This Session
+
+### 54. "AI Settings" → "Settings" (POLISH)
+- Renamed label in sidebar button, user menu dropdown, and Settings panel header (`Settings.tsx`).
+
+### 53. Sidebar chat list — flat divider layout (UX)
+- **Before:** Each chat row had its own card background (`bg-dark-elevated/30`), rounded corners, and `space-y-1` gaps — felt visually busy.
+- **After:** Rows are transparent by default with `divide-y divide-dark-border/[0.12]` hairline dividers between them. Hover and active states use background tints only. Removed redundant `bg-white/5` active overlay.
+
+---
+
+## Previous Session
 
 ### 52. App logo — drift map network icon as brand identity (NEW)
 - **Empty state logo:** Replaced the old gradient circle/diamond SVG with a 52×52px version of the drift map network icon (3 nodes + connecting paths), using the same pink→violet gradient. Cleaner and on-brand.
@@ -342,7 +353,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 19 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
+- [ ] **TestFlight submission** — archive build 20 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions — user must allow both for voice to work.
 - [ ] **Real model for multi-model** — add more real models to ModelPickerSheet's ALL_MODELS list (Gemini Flash 2.5, etc.)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain in App.tsx/DriftPanel.tsx (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
 - [ ] **Message editing** — click to edit a sent message, regenerate the AI response

@@ -473,7 +473,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
             >
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-[17px] font-semibold text-text-primary tracking-tight">AI Settings</h2>
+            <h2 className="text-[17px] font-semibold text-text-primary tracking-tight">Settings</h2>
           </div>
           {connectionStatus && (
             <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
