@@ -2,108 +2,57 @@
 
 **Date:** March 13, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 29 (iOS Xcode) / 29 (web)
-**Status:** Major drift visualization overhaul — unified DriftMapPanel + DriftKnowledgeGraph into a single radial mind map. Nested drift reliability fixed (wrong parentChatId on nested drifts, temp drifts now visible in graph). Phrase truncation removed. ↗ drift tag now shows on all pushed AI messages. Settings "Add Model" now uses polished AddModelSheet flow. Synced to Xcode — ready to archive.
+**Build:** 30 (iOS Xcode) / 30 (web)
+**Status:** Knowledge graph overhaul (direction-aware edges, depth styling, live updates, node click stays open), "↗ N drifts" button now correctly reopens existing drift conversations instead of creating blank ones.
 
 ---
 
 ## What Was Done This Session
 
+### 94. "↗ 1 drift" button — correctly reopens existing drift conversation (BUG FIX)
+- **Root cause 1:** Early-return path in `handleStartDrift` (when source message text search fails) stripped both `driftChatId` and `existingMessages` entirely → drift opened fresh every time.
+- **Root cause 2:** Even on the normal path, routing through `handleStartDrift` could produce mismatched chat IDs.
+- **Fix:** Click handler now checks if an existing drift has messages (from `chatHistory` or `driftStore.getTempConversation`). If yes, calls `driftStore.openDrift` directly with the known `driftChatId` and full existing messages — bypasses `handleStartDrift` re-creation logic entirely. Only genuinely new drifts fall through to `handleStartDrift`.
+- **Also fixed:** Early-return path now passes `driftChatId: existingDriftChatId` and `existingMessages` so even that fallback path preserves context.
+
+### 93. Knowledge graph — edge labels show selected phrase (POLISH)
+- Each edge now displays the selected text that spawned the child drift as a small label on the line. Makes the hierarchy readable as a sentence: "root → 'immutable history of information' → child node."
+- Nested drift edges (depth ≥ 2) are slightly thicker and more saturated to visually distinguish depth level.
+
+### 92. Knowledge graph — depth hierarchy visible via node styling (NEW)
+- Nodes at depth ≥ 2 (drift-from-drift) now styled distinctly: more saturated purple background, `↗↗ nested drift` badge, slightly smaller (130px min-width vs 150px), more opaque edge.
+- Depth tracked in node data and passed through `buildRadialTree`.
+
+### 91. Knowledge graph — direction-aware edge handles (BUG FIX)
+- **Root cause:** Handles were fixed to `Position.Top` (target) and `Position.Bottom` (source) only. In a radial layout where children can be in any direction, `smoothstep` edges routed as right-angle rectangles — visually appeared as empty "ghost boxes" around each node.
+- **Fix:** Each node now has 8 invisible handles (all 4 sides, both source + target). `directionHandles(angle)` computes which side the child is on and sets `sourceHandle`/`targetHandle` per edge. Edge type changed from `smoothstep` to `default` (bezier) with arrowhead markers.
+
+### 90. Knowledge graph — live updates + node click keeps panel open (BUG FIX)
+- **Stale state:** `useNodesState(initNodes)` only used initial value — graph never updated while open. New drifts, chat switches, and `isActive` highlight were all frozen at open-time. Fixed with `useEffect` on `[chatHistory, activeChatId]` that calls `setNodes`/`setEdges` and re-runs `fitView`.
+- **Node click closed panel:** `onNodeClick` was calling `onClose()` — clicking any node dismissed the graph. Removed `onClose()` from `onNodeClick` so the graph stays open while navigating the drift tree.
+- **fitView:** Now also re-runs after node updates, not only on mount.
+
 ### 89. Unified radial mind map — replaced DriftMapPanel + DriftKnowledgeGraph (MAJOR REDESIGN)
-- **Removed** `DriftMapPanel` (the list-style panel) entirely — all references stripped from App.tsx and uiStore.
-- **Redesigned** `DriftKnowledgeGraph` into a true radial mind map: root chat at center, first-level drifts radiate at 250px, second level at 450px, third at 630px. Children fan outward in a 130° arc from their parent; root children spread full 360°.
-- **Richer nodes**: each drift node shows the `↗ drift` badge, the selected phrase as the violet primary title, a 2-line italic preview of the source message text, message count, and a `↑ source` button that scrolls the main chat to the triggering message and closes the graph.
-- **Clean edges**: no more text labels on connecting lines — the node content tells the full story. Animated dashed violet smoothstep curves only.
-- **Floating drift pill**: `↗ N drifts` pill floats above the input bar (bottom-right, fixed position), always visible when current chat has branches. Replaces the header-only icon as primary access point.
+- **Removed** `DriftMapPanel` entirely. **Redesigned** `DriftKnowledgeGraph` into a true radial mind map.
+- Floating `↗ N drifts` pill replaces header-only icon. Richer nodes with source preview + `↑ source` button.
 
 ### 88. Nested drift map reliability — critical bug fix (BUG FIX)
-- **Root cause**: all three `registerDriftSession` call sites used `activeChatId` (main chat) as `parentChatId` regardless of nesting depth. Drift B opened from Drift A was recorded as a child of the main chat, not of Drift A.
-- **Fix**: `handleCloseDrift`, nested branch of `handleStartDrift`, and `onMessagesChange` auto-persist all now walk the `ancestry` chain to find the correct parent chat ID.
-- **Knowledge graph temp drifts**: added `getTempMessages` prop to `DriftKnowledgeGraph`; `collectTree` now synthesises minimal `ChatSession` objects for unsaved temp drifts, and also enqueues children discovered via `driftInfos` (not just `parentChatId`). Full chains of 3+ drifts now render correctly.
+- All three `registerDriftSession` call sites now walk the `ancestry` chain to find the correct parent chat ID. Full chains of 3+ drifts render correctly.
 
-### 87. Phrase truncation removed (FIX)
-- `DriftKnowledgeGraph` edge labels: removed `substring(0, 28)` — full selected text shown.
-- `DriftMapPanel` (now removed): branch selectedText and title truncation removed.
-- Source message preview in drift map increased to 120 chars.
-
-### 86. ↗ drift tag on ALL pushed AI messages (FIX)
-- Previously the drift tag only showed on `isSinglePushMessage || isFirstDriftMessage`. Extended to all non-user `isDriftMessage` — every pushed AI message now carries the badge. Selected text excerpt still limited to the first message of a group.
-
-### 85. Settings "Add Model" → uses AddModelSheet (POLISH)
-- Replaced the raw inline `PresetForm` add flow in Settings with the polished `AddModelSheet` (API key validation → model picker). Editing existing presets still uses `PresetForm`.
+### 87. Phrase truncation removed / 86. ↗ drift tag on all pushed messages / 85. AddModelSheet in Settings (FIX/POLISH)
 
 ### 81. Subtle ↗ drift tag on pushed messages (FIX/POLISH)
-- Replaced the old "Drift" label with a cleaner `↗ drift` badge using `bg-accent-violet/[0.08] border border-accent-violet/20` — subtle, theme-adaptive, visible in both light and dark mode.
-- Shows uppercase tracking-wide `↗ DRIFT` pill + selected text excerpt on single push and first message of multi-push groups.
-- Works correctly with light theme (uses opacity-based colors, not hardcoded dark values).
-
 ### 80. Key-term highlights inside drift panel messages (NEW FEATURE)
-- After each AI response streams in `DriftPanel`, calls `getSuggestedHighlights()` fire-and-forget.
-- Results stored in `msgHighlights` Map (keyed by message ID).
-- ReactMarkdown components for each AI message now walk the node tree and inject `<span className="drift-suggestion">` for highlighted phrases — same dotted violet underline treatment as the main chat.
-- Clicking a highlighted term in the drift panel sends that phrase as the next message in the drift (deepening the exploration).
-- Resets on panel close/re-open.
-
 ### 79. Knowledge Graph — light mode support (FIX)
-- Replaced hardcoded `bg-[#0a0a0f]` and `bg-[#0d0d12]/80` panel backgrounds with `bg-dark-bg` and `bg-dark-surface/80` — both use CSS variables that switch with the theme.
-- Background dots: `color` prop now conditional — white dots in dark mode, subtle dark dots in light mode.
-- Edge label background: switches between near-black (dark) and near-white (light).
-
 ### 78. Drift Map — remove duplicate titles, clean up layout (FIX)
-- **Duplicate issue:** Branch title showed same text as selectedText (both "distributed ledger technology" appeared twice). Fix: `normalise()` comparison skips title if it matches selectedText or starts with "Drift:" prefix.
-- **Component:** Extracted recursive `BranchItem` component — handles unlimited nesting depth cleanly with `depth` prop controlling accent color (violet → pink → …).
-- **Dedup guard:** Added `seenDriftIds` Set in tree builder to prevent same driftChatId appearing in multiple message nodes.
-- **Close button:** Replaced text ✕ with `<X>` lucide icon, consistent with rest of app.
-- **Spacing:** Tightened vertical rhythm, cleaner `border-l` connector lines.
-
 ### 77. Knowledge Graph — full-canvas aesthetic, 520px panel, no controls (FIX)
-- **Restored** the dark canvas aesthetic: dotted grid background, violet animated edges, violet-glow active node — identical to the original design.
-- **Panel size:** 520px wide (was 340px) with semi-transparent backdrop on left. Still non-blocking.
-- **Removed** `<Controls>` component (zoom +/-/fit/lock buttons — looked dated).
-- **Empty state:** Friendly "tap Drift to start branching" hint when no drifts yet.
-- Node click closes panel after switching chat.
-
 ### 76. Suggestion chips — moved inside scroll area (FIX)
-- **Before:** Chips were rendered outside the scroll container → pushed below viewport on desktop.
-- **After:** Chips now render inside `flex-1 overflow-y-auto` div, just before `messagesEndRef`. Always visible without scrolling.
-- Fixed missing `</div>` closing tag for the scroll container that was causing a build error.
-
 ### 75. Knowledge Graph — side panel, current chat tree only (FIX)
-- **Before:** Full-screen overlay showing entire database of chats/drifts — covered message text.
-- **After:** 340px right-side panel (`fixed top-0 right-0 bottom-0`) that shows only the active chat + its drift descendants. Non-blocking — main content still visible.
-- **Tree filtering:** `findRootId()` walks up parent chain to the ultimate root; `collectTree()` BFS-collects all descendants. `buildTree()` uses BFS level layout (root at top, children stacked below at 160px intervals).
-- **Empty state:** If only 1 node (no drifts yet), shows a friendly "Select text → Drift to explore" hint. Removed MiniMap (too small in narrow panel).
-- Clicking a node now also closes the panel after switching.
-
 ### 74. Suggestion chips in blank drift panel (NEW FEATURE)
-- **What:** When a drift panel opens fresh (no existing messages, no template), 2 tappable question suggestions appear above the input field.
-- **How:** `getDriftSuggestions(selectedText, contextSnippet, apiKey)` added to `gemini.ts` — 5s timeout, returns 2 short questions, silent failure. Fetched in the init `useEffect` of `DriftPanel.tsx` and stored in `driftSuggestions` state.
-- **UX:** Pills show under "Try asking" label. Tapping sends immediately and dismisses the chips. Hidden once the user has sent their first message, and not shown for template drifts (which auto-send).
-
 ### 73. Preserve unexplored highlights in hasDrift messages (FIX)
-- **Before:** Once a message got a drift link (entered `hasDrift` branch), all AI-suggested dotted highlights disappeared.
-- **After:** In the hasDrift ReactMarkdown `components`, `unexploredHl` is computed as highlights NOT already in `driftInfos`. A combined `procWithBoth()` runs `processDriftText` first (solid violet drift links), then `processHighlightsText` on top (dotted unexplored suggestions). Explored = solid link; unexplored = dotted underline.
-
 ### 72. Drift Knowledge Graph — zoomable 2D canvas (NEW FEATURE)
-- **New component:** `src/components/DriftKnowledgeGraph.tsx` — full-screen overlay showing all chats and their drift relationships as a zoomable/pannable graph.
-- **Tech:** `@xyflow/react` (React Flow v12, already in package.json) for canvas rendering. Custom dark-themed node component: regular chats show last message preview; drift chats show violet left-border accent + selected text quote. Active chat highlighted with violet glow ring. Animated dashed violet edges labeled with drift selected text.
-- **Layout:** Root chats arranged in a 3-column grid; drift chats positioned relative to their parent with offset per sibling index.
-- **Access:** Network icon button in chat header (shown when chatHistory.length > 1) + `⌘⌥G` keyboard shortcut.
-- **Interactions:** Click any node → navigate to that chat (panel closes). Escape to close. Built-in Controls (zoom/fit) + MiniMap with violet color coding.
-- **State:** `knowledgeGraphOpen` / `setKnowledgeGraphOpen` added to `uiStore.ts`.
-
 ### 71. AI-Suggested Drift Highlights (NEW FEATURE)
-- **New:** After each Gemini response finishes streaming, a lightweight follow-up call (`getSuggestedHighlights` in `gemini.ts`) asks the model to identify 2–4 phrases worth exploring deeper.
-- **UX:** Phrases appear with a violet dotted underline (`.drift-suggestion` CSS class). Hovering brightens the underline and tints the background. Clicking immediately opens a drift on that phrase — zero friction.
-- **Implementation:** Non-streaming, 5s timeout, silent failure on any error. `suggestedHighlights?: string[]` added to `Message` type. Fire-and-forget async call in `sendMessage` path updates the message after response via `chatStore.updateMessage`. `processHighlightsText()` added to `App.tsx` renders highlights as a second pass on top of `processEntityText`.
-
 ### 70. Drift Templates — one-tap workflows (NEW FEATURE)
-- **New:** 5 template quick-action buttons added to the selection tooltip (both mobile bottom bar and desktop floating): 🔥 Challenge, 📖 Simplify, 🔍 Research, 🤔 Devil's Advocate, ⚖️ Pros & Cons.
-- **How it works:** Each template pre-configures a specialized AI system prompt. When opened, an auto-send fires 400ms after the panel opens with a framing message ("Challenge this: [selectedText]") — user sees an AI response immediately without typing anything.
-- **Auto-send:** New `useEffect` in `DriftPanel.tsx` guards against double-fire via `autoSentRef`. `sendMessage` accepts optional `overrideText` to bypass the `message` state for the auto-send path.
-- **Types added:** `templateType` optional field on `DriftContext` in `types/chat.ts`.
-- **Components modified:** `SelectionTooltip.tsx` (template row + `TemplateType`), `DriftPanel.tsx` (system prompt injection, auto-send), `App.tsx` (`handleStartDrift` signature + propagation).
-
 ### 69. Auto-persist all drifts — drifts persist to IndexedDB on first message (BUG FIX)
 ### 68. AddModelSheet — 3-phase Gemini model add flow with key validation (NEW FEATURE)
 
@@ -179,7 +128,7 @@
 
 ```
 src/
-  App.tsx                    ~2430 lines
+  App.tsx                    ~3000 lines
   hooks/
     useVoiceInput.ts         tap-to-speak, fresh-instance restart, 3-tier fallback
     useAutoScroll.ts
@@ -197,8 +146,8 @@ src/
     db.ts                    IndexedDB (idb)
     settingsStorage.ts       localStorage settings
   components/
-    DriftPanel.tsx           side panel (keyboard-aware input)
-    DriftMapPanel.tsx        bird's eye drift map (timeline + branches, ⌘⌥M)
+    DriftPanel.tsx           ~1000 lines — side panel (keyboard-aware input)
+    DriftKnowledgeGraph.tsx  radial mind map — @xyflow/react, direction-aware edges, depth styling
     SelectionTooltip.tsx     iOS: persistent bottom bar; desktop: floating tooltip
     MultiModelCarousel.tsx   mobile swipeable card carousel for broadcast
     ModelPillRow.tsx         model selection chips above input (mobile, light+dark)
@@ -229,18 +178,16 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 29 in Xcode → upload to App Store Connect. ⚠️ First launch after install will prompt for mic + speech recognition permissions.
+- [ ] **TestFlight submission** — archive build 30 in Xcode → upload to App Store Connect.
 - [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
-- [ ] **Radial mind map — polish pass** — consider adding a mini always-visible thumbnail (small collapsed graph in corner); animate node entrance; improve node sizing for very long selected phrases.
-- [x] **DriftMapPanel removed** — consolidated into radial Knowledge Graph.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
+- [ ] **Radial mind map — polish pass** — mini always-visible thumbnail (small collapsed graph in corner); animate node entrance; improve node sizing for very long selected phrases.
 - [ ] **Conversation forking** — fork the entire main chat at any message point ("what if I'd asked X instead?"). Extends the Drift metaphor to the main thread.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
 - [ ] **Full-text search** — search across ALL message content in ALL chats (not just sidebar title filter).
 - [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF.
 - [ ] **Drift synthesis** — "Synthesize branches" button in Drift Map — merges all branch insights into one summary.
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
-- [ ] **Light theme color polish** — some hardcoded dark hex colors remain (e.g. `bg-[#0d0d12]`, `bg-[#0a0a0a]`)
-- [ ] **Drift Map — clickable spine nodes** — message spine nodes currently pass empty chatId; wire them to scroll to the source message in the main chat
-- [ ] **App.tsx refactor** — ~2430+ lines, could extract more hooks
+- [ ] **Light theme color polish** — some hardcoded dark hex colors remain
+- [ ] **App.tsx refactor** — ~3000 lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses

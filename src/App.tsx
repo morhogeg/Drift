@@ -1116,10 +1116,16 @@ function App() {
     }
 
     if (messageIndex === -1) {
+      // Preserve existing drift data even if the source message text can't be found
+      const fallbackExisting = (reconstructedMessages?.length ? reconstructedMessages : null)
+        ?? (existingDriftChatId ? driftStore.getTempConversation(existingDriftChatId) : undefined)
+        ?? []
       driftStore.openDrift({
         selectedText,
         sourceMessageId: messageId,
         contextMessages: [],
+        driftChatId: existingDriftChatId,
+        existingMessages: fallbackExisting,
         templateType,
         ancestry: [{
           isMainChat: true,
@@ -2717,7 +2723,23 @@ function App() {
                                       const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
                                         ?? driftStore.getTempConversation(d.driftChatId)
                                         ?? undefined
-                                      handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                      if (existing && existing.length > 0) {
+                                        // Navigate directly to existing drift — no re-creation
+                                        const chatContainer = document.querySelector('.chat-messages-container')
+                                        if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
+                                        const msgIdx = messages.findIndex(m => m.id === msg.id)
+                                        driftStore.openDrift({
+                                          selectedText: d.selectedText,
+                                          sourceMessageId: msg.id,
+                                          contextMessages: msgIdx >= 0 ? messages.slice(0, msgIdx + 1) : [],
+                                          highlightMessageId: msg.id,
+                                          driftChatId: d.driftChatId,
+                                          existingMessages: existing,
+                                          ancestry: [{ isMainChat: true, label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat', selectedText: '', sourceMessageId: '', contextMessages: [] }],
+                                        })
+                                      } else {
+                                        handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                      }
                                     }
                                   }}
                                   onTouchEnd={(e) => {
@@ -2730,7 +2752,22 @@ function App() {
                                       const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
                                         ?? driftStore.getTempConversation(d.driftChatId)
                                         ?? undefined
-                                      handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                      if (existing && existing.length > 0) {
+                                        const chatContainer = document.querySelector('.chat-messages-container')
+                                        if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
+                                        const msgIdx = messages.findIndex(m => m.id === msg.id)
+                                        driftStore.openDrift({
+                                          selectedText: d.selectedText,
+                                          sourceMessageId: msg.id,
+                                          contextMessages: msgIdx >= 0 ? messages.slice(0, msgIdx + 1) : [],
+                                          highlightMessageId: msg.id,
+                                          driftChatId: d.driftChatId,
+                                          existingMessages: existing,
+                                          ancestry: [{ isMainChat: true, label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat', selectedText: '', sourceMessageId: '', contextMessages: [] }],
+                                        })
+                                      } else {
+                                        handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
+                                      }
                                     }
                                   }}
                                   className="ml-1 flex items-center gap-1 px-2 py-0.5

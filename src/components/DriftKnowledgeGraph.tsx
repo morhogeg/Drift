@@ -27,6 +27,7 @@ interface ChatNodeData {
   isDrift: boolean
   isActive: boolean
   messageCount: number
+  depth: number
   selectedText?: string
   sourceMessageId?: string
   sourceMsgPreview?: string
@@ -45,31 +46,45 @@ interface Props {
 
 // ── Custom node component ────────────────────────────────────────────────────
 
+// Invisible handles on all 4 sides so edges exit/enter from the nearest side
+const HANDLE_STYLE = { opacity: 0, width: 6, height: 6 }
+
 function ChatNode({ data }: NodeProps) {
   const d = data as ChatNodeData
+  const isNestedDrift = d.isDrift && d.depth >= 2
+
   return (
     <div
       className={`
-        rounded-2xl border px-3.5 py-2.5 cursor-pointer select-none transition-all duration-150
+        rounded-2xl border cursor-pointer select-none transition-all duration-150
         ${d.isActive
-          ? 'border-accent-violet shadow-[0_0_0_2px_rgba(168,85,247,0.35),0_0_20px_rgba(168,85,247,0.15)] bg-dark-elevated'
-          : d.isDrift
-            ? 'border-accent-violet/25 bg-dark-surface hover:border-accent-violet/50 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)]'
-            : 'border-dark-border/60 bg-dark-elevated hover:border-dark-border'
+          ? 'border-accent-violet shadow-[0_0_0_2px_rgba(168,85,247,0.35),0_0_20px_rgba(168,85,247,0.15)] bg-dark-elevated px-3.5 py-2.5'
+          : isNestedDrift
+            ? 'border-accent-violet/40 bg-[rgba(168,85,247,0.07)] hover:border-accent-violet/70 hover:bg-[rgba(168,85,247,0.12)] px-3 py-2'
+            : d.isDrift
+              ? 'border-accent-violet/25 bg-dark-surface hover:border-accent-violet/50 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)] px-3.5 py-2.5'
+              : 'border-dark-border/60 bg-dark-elevated hover:border-dark-border px-3.5 py-2.5'
         }
       `}
-      style={{ minWidth: 150, maxWidth: 210 }}
+      style={{ minWidth: isNestedDrift ? 130 : 150, maxWidth: isNestedDrift ? 190 : 210 }}
     >
-      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      {/* Handles on all 4 sides — edge routing picks nearest exit point */}
+      <Handle type="source" position={Position.Top}    id="src-top"    style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Right}  id="src-right"  style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} id="src-bottom" style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Left}   id="src-left"   style={HANDLE_STYLE} />
+      <Handle type="target" position={Position.Top}    id="tgt-top"    style={HANDLE_STYLE} />
+      <Handle type="target" position={Position.Right}  id="tgt-right"  style={HANDLE_STYLE} />
+      <Handle type="target" position={Position.Bottom} id="tgt-bottom" style={HANDLE_STYLE} />
+      <Handle type="target" position={Position.Left}   id="tgt-left"   style={HANDLE_STYLE} />
 
       {d.isDrift && (
         <div className="text-[8px] font-semibold text-accent-violet/60 uppercase tracking-widest mb-1.5">
-          ↗ drift
+          {isNestedDrift ? '↗↗ nested drift' : '↗ drift'}
         </div>
       )}
 
-      <div className={`text-[12px] font-semibold leading-snug ${d.isDrift ? 'text-accent-violet/90' : 'text-text-primary'}`}>
+      <div className={`font-semibold leading-snug ${isNestedDrift ? 'text-[11px] text-accent-violet/75' : `text-[12px] ${d.isDrift ? 'text-accent-violet/90' : 'text-text-primary'}`}`}>
         {d.selectedText || d.label}
       </div>
 
@@ -173,6 +188,15 @@ function collectTree(
 
 // ── Radial layout builder ─────────────────────────────────────────────────────
 
+/** Pick which handle side to exit/enter based on the child's angle from parent center */
+function directionHandles(angle: number): { sourceHandle: string; targetHandle: string } {
+  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
+  if (a < Math.PI * 0.25 || a >= Math.PI * 1.75) return { sourceHandle: 'src-right', targetHandle: 'tgt-left' }
+  if (a < Math.PI * 0.75) return { sourceHandle: 'src-bottom', targetHandle: 'tgt-top' }
+  if (a < Math.PI * 1.25) return { sourceHandle: 'src-left', targetHandle: 'tgt-right' }
+  return { sourceHandle: 'src-top', targetHandle: 'tgt-bottom' }
+}
+
 function buildRadialTree(
   chats: ChatSession[],
   rootId: string,
@@ -192,15 +216,20 @@ function buildRadialTree(
     }
   }
 
-  const RADII = [0, 250, 450, 630]
+  const RADII = [0, 260, 470, 660]
   const NODE_W = 180
   const NODE_H = 80
+
+  // Track each node's angle so edges know which side to connect from
+  const nodeAngle = new Map<string, number>()
 
   function place(id: string, angleStart: number, angleEnd: number, level: number) {
     const chat = chats.find(c => c.id === id)
     if (!chat) return
 
-    const angle = (angleStart + angleEnd) / 2
+    const angle = level === 0 ? 0 : (angleStart + angleEnd) / 2
+    nodeAngle.set(id, angle)
+
     const r = RADII[Math.min(level, RADII.length - 1)]
     const x = Math.cos(angle) * r - NODE_W / 2
     const y = Math.sin(angle) * r - NODE_H / 2
@@ -225,6 +254,7 @@ function buildRadialTree(
         isDrift: !!chat.metadata?.isDrift,
         isActive: id === activeChatId,
         messageCount: chat.messages.length,
+        depth: level,
         selectedText: chat.metadata?.selectedText,
         sourceMessageId,
         sourceMsgPreview,
@@ -233,20 +263,36 @@ function buildRadialTree(
     })
 
     if (chat.metadata?.parentChatId) {
+      // Edge exits the parent from the side closest to this child
+      const { sourceHandle, targetHandle } = directionHandles(angle)
+      const isNestedEdge = level >= 2
+      // Show the selected phrase on the edge so hierarchy is immediately clear
+      const edgeLabel = chat.metadata?.selectedText
+        ? (chat.metadata.selectedText.length > 28 ? chat.metadata.selectedText.slice(0, 28) + '…' : chat.metadata.selectedText)
+        : undefined
       edges.push({
         id: `e-${chat.metadata.parentChatId}-${id}`,
         source: chat.metadata.parentChatId,
         target: id,
-        type: 'smoothstep',
-        animated: true,
-        style: { stroke: 'rgba(168,85,247,0.45)', strokeWidth: 1.5, strokeDasharray: '4,3' },
+        sourceHandle,
+        targetHandle,
+        type: 'default',
+        label: edgeLabel,
+        labelStyle: { fill: 'rgba(168,85,247,0.7)', fontSize: 9, fontWeight: 500 },
+        labelBgStyle: { fill: 'rgba(10,10,10,0.75)' },
+        labelBgPadding: [4, 3] as [number, number],
+        style: {
+          stroke: isNestedEdge ? 'rgba(168,85,247,0.75)' : 'rgba(168,85,247,0.4)',
+          strokeWidth: isNestedEdge ? 2 : 1.5,
+        },
+        markerEnd: { type: 'arrowclosed' as const, color: isNestedEdge ? 'rgba(168,85,247,0.8)' : 'rgba(168,85,247,0.45)', width: 12, height: 12 },
       })
     }
 
     const children = childrenMap.get(id) || []
     if (!children.length) return
 
-    const totalArc = level === 0 ? Math.PI * 2 : Math.PI * 1.3
+    const totalArc = level === 0 ? Math.PI * 2 : Math.PI * 1.2
     const midAngle = angle
     const arcStart = level === 0 ? 0 : midAngle - totalArc / 2
     const step = totalArc / children.length
@@ -266,13 +312,31 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat,
 
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
   const treeChats = rootId ? collectTree(rootId, chatHistory, getTempMessages) : []
-  const { nodes: initNodes, edges: initEdges } = rootId && treeChats.length > 1
-    ? buildRadialTree(treeChats, rootId, activeChatId, chatHistory, onScrollToMessage)
+  const hasTree = !!(rootId && treeChats.length > 1)
+
+  const { nodes: initNodes, edges: initEdges } = hasTree
+    ? buildRadialTree(treeChats, rootId!, activeChatId, chatHistory, onScrollToMessage)
     : { nodes: [], edges: [] }
 
-  const [nodes, , onNodesChange] = useNodesState(initNodes)
-  const [edges, , onEdgesChange] = useEdgesState(initEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges)
 
+  // Rebuild graph whenever chat tree or active chat changes (fixes stale state bug)
+  useEffect(() => {
+    const rId = activeChatId ? findRootId(activeChatId, chatHistory) : null
+    const tree = rId ? collectTree(rId, chatHistory, getTempMessages) : []
+    if (rId && tree.length > 1) {
+      const { nodes: n, edges: e } = buildRadialTree(tree, rId, activeChatId, chatHistory, onScrollToMessage)
+      setNodes(n)
+      setEdges(e)
+      setTimeout(() => fitView({ padding: 0.18, duration: 350 }), 60)
+    } else {
+      setNodes([])
+      setEdges([])
+    }
+  }, [chatHistory, activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initial fitView on mount
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.18, duration: 450 }), 60)
     return () => clearTimeout(t)
@@ -284,10 +348,10 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat,
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Keep graph open when switching chats — lets users navigate the tree visually
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     onSwitchChat(node.id)
-    onClose()
-  }, [onSwitchChat, onClose])
+  }, [onSwitchChat])
 
   const rootChat = rootId ? chatHistory.find(c => c.id === rootId) : null
   const driftCount = treeChats.filter(c => !!c.metadata?.isDrift).length
