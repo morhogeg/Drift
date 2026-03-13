@@ -1,39 +1,13 @@
 /**
- * DriftKnowledgeGraph — right-side panel with full dark canvas showing the
- * active chat and all its drift descendants as a zoomable radial mind map.
- * Filtered to the current conversation tree only (not entire database).
+ * DriftKnowledgeGraph — bird's-eye view of all drifts in a conversation.
+ * Features: topics overview, timestamps, collapsible branches.
+ * Light/dark theme aware via CSS custom properties.
  */
-import { useEffect, useCallback } from 'react'
-import {
-  ReactFlow,
-  Background,
-  useNodesState,
-  useEdgesState,
-  useReactFlow,
-  BackgroundVariant,
-  ReactFlowProvider,
-  Handle,
-  Position,
-} from '@xyflow/react'
-import type { Node, Edge, NodeProps } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import { useEffect, useState, useCallback } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X } from 'lucide-react'
+import { X, ChevronRight } from 'lucide-react'
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface ChatNodeData {
-  label: string
-  isDrift: boolean
-  isActive: boolean
-  messageCount: number
-  depth: number
-  selectedText?: string
-  sourceMessageId?: string
-  sourceMsgPreview?: string
-  onScrollToSource?: () => void
-  [key: string]: unknown
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   chatHistory: ChatSession[]
@@ -44,76 +18,13 @@ interface Props {
   getTempMessages?: (chatId: string) => Message[] | null
 }
 
-// ── Custom node component ────────────────────────────────────────────────────
-
-// Invisible handles on all 4 sides so edges exit/enter from the nearest side
-const HANDLE_STYLE = { opacity: 0, width: 6, height: 6 }
-
-function ChatNode({ data }: NodeProps) {
-  const d = data as ChatNodeData
-  const isNestedDrift = d.isDrift && d.depth >= 2
-
-  return (
-    <div
-      className={`
-        rounded-2xl border cursor-pointer select-none transition-all duration-150
-        ${d.isActive
-          ? 'border-accent-violet shadow-[0_0_0_2px_rgba(168,85,247,0.35),0_0_20px_rgba(168,85,247,0.15)] bg-dark-elevated px-3.5 py-2.5'
-          : isNestedDrift
-            ? 'border-accent-violet/40 bg-[rgba(168,85,247,0.07)] hover:border-accent-violet/70 hover:bg-[rgba(168,85,247,0.12)] px-3 py-2'
-            : d.isDrift
-              ? 'border-accent-violet/25 bg-dark-surface hover:border-accent-violet/50 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)] px-3.5 py-2.5'
-              : 'border-dark-border/60 bg-dark-elevated hover:border-dark-border px-3.5 py-2.5'
-        }
-      `}
-      style={{ minWidth: isNestedDrift ? 130 : 150, maxWidth: isNestedDrift ? 190 : 210 }}
-    >
-      {/* Handles on all 4 sides — edge routing picks nearest exit point */}
-      <Handle type="source" position={Position.Top}    id="src-top"    style={HANDLE_STYLE} />
-      <Handle type="source" position={Position.Right}  id="src-right"  style={HANDLE_STYLE} />
-      <Handle type="source" position={Position.Bottom} id="src-bottom" style={HANDLE_STYLE} />
-      <Handle type="source" position={Position.Left}   id="src-left"   style={HANDLE_STYLE} />
-      <Handle type="target" position={Position.Top}    id="tgt-top"    style={HANDLE_STYLE} />
-      <Handle type="target" position={Position.Right}  id="tgt-right"  style={HANDLE_STYLE} />
-      <Handle type="target" position={Position.Bottom} id="tgt-bottom" style={HANDLE_STYLE} />
-      <Handle type="target" position={Position.Left}   id="tgt-left"   style={HANDLE_STYLE} />
-
-      {d.isDrift && (
-        <div className="text-[8px] font-semibold text-accent-violet/60 uppercase tracking-widest mb-1.5">
-          {isNestedDrift ? '↗↗ nested drift' : '↗ drift'}
-        </div>
-      )}
-
-      <div className={`font-semibold leading-snug ${isNestedDrift ? 'text-[11px] text-accent-violet/75' : `text-[12px] ${d.isDrift ? 'text-accent-violet/90' : 'text-text-primary'}`}`}>
-        {d.selectedText || d.label}
-      </div>
-
-      {d.sourceMsgPreview && (
-        <div className="text-[10px] text-text-muted/70 italic mt-1 leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-          &ldquo;{d.sourceMsgPreview}&rdquo;
-        </div>
-      )}
-
-      <div className="flex items-center justify-between mt-2 gap-1">
-        <span className="text-[9px] text-text-muted/50">
-          {d.messageCount} {d.messageCount === 1 ? 'msg' : 'msgs'}
-        </span>
-        {d.isDrift && d.sourceMessageId && d.onScrollToSource && (
-          <button
-            onClick={(e) => { e.stopPropagation(); (d.onScrollToSource as () => void)() }}
-            className="text-[9px] text-accent-violet/50 hover:text-accent-violet transition-colors px-1.5 py-0.5 rounded-md hover:bg-accent-violet/10"
-          >
-            ↑ source
-          </button>
-        )}
-      </div>
-    </div>
-  )
+interface TreeNode {
+  chat: ChatSession
+  phrase: string | undefined
+  children: TreeNode[]
 }
 
-const nodeTypes = { chatNode: ChatNode }
-
-// ── Tree helpers ─────────────────────────────────────────────────────────────
+// ── Data helpers ──────────────────────────────────────────────────────────────
 
 function findRootId(chatId: string, allChats: ChatSession[]): string {
   const chat = allChats.find(c => c.id === chatId)
@@ -135,212 +46,342 @@ function collectTree(
     if (seen.has(id)) continue
     seen.add(id)
 
-    // Look in persisted history first, then fall back to temp conversations
     let chat = allChats.find(c => c.id === id)
-    if (!chat && getTempMessages) {
+
+    if (getTempMessages) {
       const tempMsgs = getTempMessages(id)
       if (tempMsgs) {
-        // Synthesise a minimal ChatSession for the temp drift so it renders in the graph.
-        const parentChat = allChats.find(c =>
-          c.messages.some(m => m.driftInfos?.some(d => d.driftChatId === id))
-        )
-        const parentTempId = parentChat?.id ?? [...seen].find(sid =>
-          getTempMessages(sid)?.some(m => m.driftInfos?.some(d => d.driftChatId === id))
-        )
-        const driftInfo = parentChat?.messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === id)
-          ?? getTempMessages(parentTempId ?? '')?.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === id)
-        chat = {
-          id,
-          title: driftInfo?.selectedText ? `"${driftInfo.selectedText}"` : 'Drift',
-          messages: tempMsgs,
-          lastMessage: tempMsgs[tempMsgs.length - 1]?.text?.slice(0, 100) ?? '',
-          createdAt: new Date(),
-          metadata: {
-            isDrift: true,
-            parentChatId: parentTempId ?? rootId,
-            selectedText: driftInfo?.selectedText,
-          },
+        if (chat) {
+          chat = { ...chat, messages: tempMsgs }
+        } else {
+          const parentChat = allChats.find(c =>
+            c.messages.some(m => m.driftInfos?.some(d => d.driftChatId === id))
+          )
+          const driftInfo = parentChat?.messages
+            .flatMap(m => m.driftInfos ?? [])
+            .find(d => d.driftChatId === id)
+          chat = {
+            id, title: driftInfo?.selectedText ?? 'Drift',
+            messages: tempMsgs,
+            lastMessage: tempMsgs[tempMsgs.length - 1]?.text?.slice(0, 100) ?? '',
+            createdAt: new Date(),
+            metadata: { isDrift: true, parentChatId: parentChat?.id ?? rootId, selectedText: driftInfo?.selectedText },
+          } as ChatSession
         }
       }
     }
 
     if (chat) {
       result.push(chat)
-      // Enqueue children from persisted history
-      allChats.forEach(c => {
-        if (c.metadata?.parentChatId === id && !seen.has(c.id)) queue.push(c.id)
-      })
-      // Also enqueue children recorded in driftInfos within this chat's messages
-      const msgsToCheck = chat.messages
+      const childIds = new Set<string>()
+      allChats.forEach(c => { if (c.metadata?.parentChatId === id) childIds.add(c.id) })
       if (getTempMessages) {
-        for (const msg of msgsToCheck) {
-          if (msg.hasDrift && msg.driftInfos) {
-            for (const info of msg.driftInfos) {
-              if (!seen.has(info.driftChatId)) queue.push(info.driftChatId)
-            }
-          }
-        }
+        for (const msg of chat.messages)
+          if (msg.hasDrift && msg.driftInfos)
+            for (const info of msg.driftInfos) childIds.add(info.driftChatId)
       }
+      for (const cid of childIds) if (!seen.has(cid)) queue.push(cid)
     }
   }
   return result
 }
 
-// ── Radial layout builder ─────────────────────────────────────────────────────
-
-/** Pick which handle side to exit/enter based on the child's angle from parent center */
-function directionHandles(angle: number): { sourceHandle: string; targetHandle: string } {
-  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
-  if (a < Math.PI * 0.25 || a >= Math.PI * 1.75) return { sourceHandle: 'src-right', targetHandle: 'tgt-left' }
-  if (a < Math.PI * 0.75) return { sourceHandle: 'src-bottom', targetHandle: 'tgt-top' }
-  if (a < Math.PI * 1.25) return { sourceHandle: 'src-left', targetHandle: 'tgt-right' }
-  return { sourceHandle: 'src-top', targetHandle: 'tgt-bottom' }
-}
-
-function buildRadialTree(
-  chats: ChatSession[],
-  rootId: string,
-  activeChatId: string | null,
-  allChats: ChatSession[],
-  onScrollToMessage: (id: string) => void,
-) {
-  const nodes: Node[] = []
-  const edges: Edge[] = []
-
-  const childrenMap = new Map<string, string[]>()
+function buildTree(chats: ChatSession[], rootId: string): TreeNode | null {
+  const chatMap = new Map(chats.map(c => [c.id, c]))
+  const childrenMap = new Map<string, ChatSession[]>()
   for (const chat of chats) {
-    if (chat.metadata?.parentChatId) {
-      const p = chat.metadata.parentChatId
-      if (!childrenMap.has(p)) childrenMap.set(p, [])
-      childrenMap.get(p)!.push(chat.id)
+    const pid = chat.metadata?.parentChatId
+    if (pid && chatMap.has(pid)) {
+      if (!childrenMap.has(pid)) childrenMap.set(pid, [])
+      childrenMap.get(pid)!.push(chat)
     }
   }
-
-  const RADII = [0, 260, 470, 660]
-  const NODE_W = 180
-  const NODE_H = 80
-
-  // Track each node's angle so edges know which side to connect from
-  const nodeAngle = new Map<string, number>()
-
-  function place(id: string, angleStart: number, angleEnd: number, level: number) {
-    const chat = chats.find(c => c.id === id)
-    if (!chat) return
-
-    const angle = level === 0 ? 0 : (angleStart + angleEnd) / 2
-    nodeAngle.set(id, angle)
-
-    const r = RADII[Math.min(level, RADII.length - 1)]
-    const x = Math.cos(angle) * r - NODE_W / 2
-    const y = Math.sin(angle) * r - NODE_H / 2
-
-    let sourceMsgPreview: string | undefined
-    if (chat.metadata?.parentChatId && chat.metadata?.sourceMessageId) {
-      const parentChat = allChats.find(c => c.id === chat.metadata!.parentChatId)
-      const srcMsg = parentChat?.messages.find(m => m.id === chat.metadata!.sourceMessageId)
-      if (srcMsg) {
-        const clean = srcMsg.text.replace(/[#*`[\]]/g, '').replace(/\n+/g, ' ').trim()
-        sourceMsgPreview = clean.length > 55 ? clean.slice(0, 55) + '…' : clean
-      }
-    }
-
-    const sourceMessageId = chat.metadata?.sourceMessageId
-    nodes.push({
-      id,
-      type: 'chatNode',
-      position: { x, y },
-      data: {
-        label: chat.title || (chat.metadata?.isDrift ? (chat.metadata.selectedText ?? 'Drift') : 'Untitled'),
-        isDrift: !!chat.metadata?.isDrift,
-        isActive: id === activeChatId,
-        messageCount: chat.messages.length,
-        depth: level,
-        selectedText: chat.metadata?.selectedText,
-        sourceMessageId,
-        sourceMsgPreview,
-        onScrollToSource: sourceMessageId ? () => onScrollToMessage(sourceMessageId) : undefined,
-      } as ChatNodeData,
-    })
-
-    if (chat.metadata?.parentChatId) {
-      // Edge exits the parent from the side closest to this child
-      const { sourceHandle, targetHandle } = directionHandles(angle)
-      const isNestedEdge = level >= 2
-      // Show the selected phrase on the edge so hierarchy is immediately clear
-      const edgeLabel = chat.metadata?.selectedText
-        ? (chat.metadata.selectedText.length > 28 ? chat.metadata.selectedText.slice(0, 28) + '…' : chat.metadata.selectedText)
-        : undefined
-      edges.push({
-        id: `e-${chat.metadata.parentChatId}-${id}`,
-        source: chat.metadata.parentChatId,
-        target: id,
-        sourceHandle,
-        targetHandle,
-        type: 'default',
-        label: edgeLabel,
-        labelStyle: { fill: 'rgba(168,85,247,0.7)', fontSize: 9, fontWeight: 500 },
-        labelBgStyle: { fill: 'rgba(10,10,10,0.75)' },
-        labelBgPadding: [4, 3] as [number, number],
-        style: {
-          stroke: isNestedEdge ? 'rgba(168,85,247,0.75)' : 'rgba(168,85,247,0.4)',
-          strokeWidth: isNestedEdge ? 2 : 1.5,
-        },
-        markerEnd: { type: 'arrowclosed' as const, color: isNestedEdge ? 'rgba(168,85,247,0.8)' : 'rgba(168,85,247,0.45)', width: 12, height: 12 },
-      })
-    }
-
-    const children = childrenMap.get(id) || []
-    if (!children.length) return
-
-    const totalArc = level === 0 ? Math.PI * 2 : Math.PI * 1.2
-    const midAngle = angle
-    const arcStart = level === 0 ? 0 : midAngle - totalArc / 2
-    const step = totalArc / children.length
-    children.forEach((childId, i) => {
-      place(childId, arcStart + i * step, arcStart + (i + 1) * step, level + 1)
-    })
+  function build(id: string, phrase: string | undefined): TreeNode | null {
+    const chat = chatMap.get(id)
+    if (!chat) return null
+    return { chat, phrase, children: (childrenMap.get(id) ?? []).map(c => build(c.id, c.metadata?.selectedText)).filter(Boolean) as TreeNode[] }
   }
-
-  place(rootId, 0, Math.PI * 2, 0)
-  return { nodes, edges }
+  return build(rootId, undefined)
 }
 
-// ── Inner component ───────────────────────────────────────────────────────────
+function lastAiPreview(chat: ChatSession): string | undefined {
+  const last = [...chat.messages].reverse().find(m => !m.isUser)
+  if (!last?.text) return undefined
+  const clean = last.text.replace(/[#*`[\]\n]/g, ' ').replace(/\s+/g, ' ').trim()
+  return clean.length > 120 ? clean.slice(0, 120) + '…' : clean
+}
 
-function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat, onScrollToMessage, getTempMessages }: Props) {
-  const { fitView } = useReactFlow()
+function totalMessages(node: TreeNode): number {
+  return node.chat.messages.length + node.children.reduce((s, c) => s + totalMessages(c), 0)
+}
 
+/** Collect every { phrase, chatId } in DFS order (skips root which has no phrase). */
+function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
+  const here = node.phrase ? [{ phrase: node.phrase, chatId: node.chat.id }] : []
+  return [...here, ...node.children.flatMap(collectTopics)]
+}
+
+function timeAgo(date: Date): string {
+  const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+  if (s < 10) return 'just now'
+  if (s < 60) return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// ── Depth palette ─────────────────────────────────────────────────────────────
+
+const PALETTE = [
+  { accent: '#a855f7', bg: 'rgba(168,85,247,{a})', line: 'rgba(168,85,247,0.22)' },
+  { accent: '#6366f1', bg: 'rgba(99,102,241,{a})',  line: 'rgba(99,102,241,0.22)'  },
+  { accent: '#3b82f6', bg: 'rgba(59,130,246,{a})',  line: 'rgba(59,130,246,0.22)'  },
+]
+function palette(depth: number) { return PALETTE[Math.min(depth - 1, PALETTE.length - 1)] }
+function withAlpha(t: string, a: number) { return t.replace('{a}', String(a)) }
+
+const INDENT = 24
+
+// ── Tree row ──────────────────────────────────────────────────────────────────
+
+function TreeRow({
+  node, depth, isLast, ancestorLines, activeChatId, onSwitchChat,
+  collapsed, onToggleCollapse,
+}: {
+  node: TreeNode; depth: number; isLast: boolean; ancestorLines: boolean[]
+  activeChatId: string | null; onSwitchChat: (id: string) => void
+  collapsed: Set<string>; onToggleCollapse: (id: string) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const isActive = node.chat.id === activeChatId
+  const isCollapsed = collapsed.has(node.chat.id)
+  const isDrift = depth > 0
+  const p = isDrift ? palette(depth) : null
+  const hasChildren = node.children.length > 0
+
+  const title = node.chat.metadata?.selectedText || node.chat.title || 'Untitled'
+  const msgCount = node.chat.messages.length
+  const preview = lastAiPreview(node.chat)
+  const ts = node.chat.createdAt ? timeAgo(node.chat.createdAt) : null
+
+  const cardBg = isActive
+    ? withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.09)
+    : 'rgb(var(--color-elevated))'
+  const cardBorder = isActive
+    ? (p?.accent ?? '#a855f7') + '80'
+    : isDrift
+      ? (p?.accent ?? '#a855f7') + '28'
+      : 'rgb(var(--color-border))'
+  const titleColor = isDrift ? (p?.accent ?? '#a855f7') : 'rgb(var(--color-text-primary))'
+
+  return (
+    <div>
+      {/* Connector */}
+      {isDrift && (
+        <div className="flex" style={{ height: 30 }}>
+          {Array.from({ length: depth }).map((_, i) => {
+            const isThisLevel = i === depth - 1
+            const drawLine = isThisLevel ? true : ancestorLines[i]
+            return (
+              <div key={i} className="flex-shrink-0 relative" style={{ width: INDENT }}>
+                {drawLine && (
+                  <div className="absolute" style={{ left: INDENT / 2 - 0.5, top: 0, bottom: isThisLevel ? '50%' : 0, width: 1, background: p?.line }} />
+                )}
+                {isThisLevel && (
+                  <div className="absolute" style={{ left: INDENT / 2, right: 0, top: '50%', height: 1, background: p?.line }} />
+                )}
+              </div>
+            )
+          })}
+          {node.phrase && (
+            <div className="flex items-end pb-1 flex-1 min-w-0">
+              <span
+                className="text-[9px] font-medium rounded-md px-1.5 py-0.5 truncate"
+                style={{ color: p ? p.accent + 'bb' : 'rgba(168,85,247,0.73)', background: withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.1), maxWidth: 270 }}
+              >
+                &ldquo;{node.phrase.length > 40 ? node.phrase.slice(0, 40) + '…' : node.phrase}&rdquo;
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Card row */}
+      <div className="flex">
+        {Array.from({ length: depth }).map((_, i) => {
+          const drawLine = i === depth - 1 ? !isLast || (hasChildren && !isCollapsed) : ancestorLines[i]
+          return (
+            <div key={i} className="flex-shrink-0 relative" style={{ width: INDENT }}>
+              {drawLine && <div className="absolute" style={{ left: INDENT / 2 - 0.5, top: 0, bottom: 0, width: 1, background: p?.line }} />}
+            </div>
+          )
+        })}
+
+        <button
+          onClick={() => onSwitchChat(node.chat.id)}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className="flex-1 min-w-0 text-left rounded-xl px-4 py-3 mb-1.5 transition-all duration-150"
+          style={{
+            background: cardBg,
+            border: `1px solid ${cardBorder}`,
+            borderLeftWidth: isDrift ? 3 : 1,
+            borderLeftColor: isDrift ? (p?.accent ?? '#a855f7') + (isActive ? 'cc' : '55') : undefined,
+            boxShadow: isActive ? `0 0 0 3px ${p?.accent ?? '#a855f7'}1a` : hovered ? '0 1px 6px rgba(0,0,0,0.06)' : 'none',
+          }}
+        >
+          {/* Top row */}
+          <div className="flex items-center justify-between mb-1.5 gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isDrift ? (
+                <span className="text-[8.5px] font-semibold uppercase tracking-widest flex-shrink-0" style={{ color: p ? p.accent + '88' : 'rgba(168,85,247,0.53)' }}>
+                  ↗ drift
+                </span>
+              ) : (
+                <span className="text-[8.5px] font-semibold uppercase tracking-widest flex-shrink-0" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                  main chat
+                </span>
+              )}
+              {/* Timestamp */}
+              {ts && (
+                <span className="text-[9px]" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.6 }}>
+                  · {ts}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[10px] tabular-nums" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                {msgCount} {msgCount === 1 ? 'msg' : 'msgs'}
+              </span>
+              {/* Collapse toggle */}
+              {hasChildren && (
+                <button
+                  onClick={e => { e.stopPropagation(); onToggleCollapse(node.chat.id) }}
+                  className="flex items-center justify-center rounded-md transition-all duration-200 flex-shrink-0"
+                  style={{
+                    width: 18, height: 18,
+                    background: hovered ? withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.12) : 'transparent',
+                    color: p?.accent ?? '#a855f7',
+                    opacity: 0.7,
+                  }}
+                  title={isCollapsed ? 'Expand branches' : 'Collapse branches'}
+                >
+                  <ChevronRight
+                    className="w-3 h-3 transition-transform duration-200"
+                    style={{ transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}
+                  />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Title */}
+          <div
+            className="font-semibold text-[13px] leading-snug mb-1.5"
+            style={{
+              color: titleColor,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            } as React.CSSProperties}
+          >
+            {title}
+          </div>
+
+          {/* Preview */}
+          {preview && (
+            <div
+              className="text-[11px] leading-relaxed"
+              style={{
+                color: 'rgb(var(--color-text-muted))',
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              } as React.CSSProperties}
+            >
+              {preview}
+            </div>
+          )}
+
+          {/* Collapsed summary */}
+          {isCollapsed && hasChildren && (
+            <div className="mt-2 text-[9px] font-medium" style={{ color: (p?.accent ?? '#a855f7') + '99' }}>
+              {node.children.length} hidden branch{node.children.length !== 1 ? 'es' : ''}
+            </div>
+          )}
+        </button>
+      </div>
+
+      {/* Children (unless collapsed) */}
+      {!isCollapsed && node.children.map((child, i) => (
+        <TreeRow
+          key={child.chat.id}
+          node={child}
+          depth={depth + 1}
+          isLast={i === node.children.length - 1}
+          ancestorLines={[...ancestorLines, !isLast]}
+          activeChatId={activeChatId}
+          onSwitchChat={onSwitchChat}
+          collapsed={collapsed}
+          onToggleCollapse={onToggleCollapse}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── Topics strip ──────────────────────────────────────────────────────────────
+
+function TopicsStrip({ topics, onJump }: { topics: { phrase: string; chatId: string }[]; onJump: (id: string) => void }) {
+  if (!topics.length) return null
+  return (
+    <div
+      className="px-4 py-2.5 flex-shrink-0 flex flex-wrap gap-1.5"
+      style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
+    >
+      <span className="text-[9px] font-semibold uppercase tracking-widest self-center mr-0.5" style={{ color: 'rgb(var(--color-text-muted))' }}>
+        Explored
+      </span>
+      {topics.map(({ phrase, chatId }, i) => {
+        const p = palette((i % PALETTE.length) + 1)
+        return (
+          <button
+            key={chatId}
+            onClick={() => onJump(chatId)}
+            className="text-[10px] font-medium rounded-full px-2.5 py-0.5 transition-all duration-150 hover:opacity-90 active:scale-95"
+            style={{
+              background: withAlpha(p.bg, 0.12),
+              border: `1px solid ${p.accent}33`,
+              color: p.accent + 'cc',
+            }}
+          >
+            {phrase.length > 22 ? phrase.slice(0, 22) + '…' : phrase}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function DriftKnowledgeGraph({
+  chatHistory, activeChatId, onClose, onSwitchChat, getTempMessages,
+}: Props) {
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
   const treeChats = rootId ? collectTree(rootId, chatHistory, getTempMessages) : []
-  const hasTree = !!(rootId && treeChats.length > 1)
+  const tree = rootId && treeChats.length > 1 ? buildTree(treeChats, rootId) : null
 
-  const { nodes: initNodes, edges: initEdges } = hasTree
-    ? buildRadialTree(treeChats, rootId!, activeChatId, chatHistory, onScrollToMessage)
-    : { nodes: [], edges: [] }
+  const rootChat = rootId ? chatHistory.find(c => c.id === rootId) : null
+  const driftCount = treeChats.filter(c => !!c.metadata?.isDrift).length
+  const msgTotal = tree ? totalMessages(tree) : 0
+  const topics = tree ? collectTopics(tree) : []
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges)
-
-  // Rebuild graph whenever chat tree or active chat changes (fixes stale state bug)
-  useEffect(() => {
-    const rId = activeChatId ? findRootId(activeChatId, chatHistory) : null
-    const tree = rId ? collectTree(rId, chatHistory, getTempMessages) : []
-    if (rId && tree.length > 1) {
-      const { nodes: n, edges: e } = buildRadialTree(tree, rId, activeChatId, chatHistory, onScrollToMessage)
-      setNodes(n)
-      setEdges(e)
-      setTimeout(() => fitView({ padding: 0.18, duration: 350 }), 60)
-    } else {
-      setNodes([])
-      setEdges([])
-    }
-  }, [chatHistory, activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Initial fitView on mount
-  useEffect(() => {
-    const t = setTimeout(() => fitView({ padding: 0.18, duration: 450 }), 60)
-    return () => clearTimeout(t)
-  }, [fitView])
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const onToggleCollapse = useCallback((id: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -348,91 +389,83 @@ function KnowledgeGraphInner({ chatHistory, activeChatId, onClose, onSwitchChat,
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Keep graph open when switching chats — lets users navigate the tree visually
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    onSwitchChat(node.id)
-  }, [onSwitchChat])
-
-  const rootChat = rootId ? chatHistory.find(c => c.id === rootId) : null
-  const driftCount = treeChats.filter(c => !!c.metadata?.isDrift).length
-
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-39 bg-black/20"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-39 bg-black/[0.15]" onClick={onClose} />
 
-      {/* Panel */}
-      <div className="fixed top-0 right-0 bottom-0 z-40 flex flex-col w-[520px] bg-dark-bg border-l border-dark-border/50 shadow-2xl">
+      <div
+        className="fixed top-0 right-0 bottom-0 z-40 flex flex-col shadow-2xl"
+        style={{ width: 'min(560px, 44vw)', background: 'rgb(var(--color-surface))', borderLeft: '1px solid rgb(var(--color-border))' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border/40 flex-shrink-0 bg-dark-surface/80 backdrop-blur-sm">
-          <div className="min-w-0">
-            <h2 className="text-[13px] font-semibold text-text-primary truncate">
-              {rootChat?.title || 'Drift Map'}
-            </h2>
-            <p className="text-[10px] text-text-muted mt-0.5">
-              {driftCount === 0
-                ? 'No drifts yet'
-                : `${driftCount} drift${driftCount !== 1 ? 's' : ''}`}
-            </p>
+        <div className="px-5 pt-4 pb-3.5 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(168,85,247,0.6)' }}>
+                Drift Tree
+              </div>
+              <h2
+                className="text-[14px] font-semibold leading-snug"
+                style={{ color: 'rgb(var(--color-text-primary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+              >
+                {rootChat?.title || 'Untitled'}
+              </h2>
+              {driftCount > 0 && (
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium rounded-full px-2 py-0.5"
+                    style={{ background: 'rgba(168,85,247,0.1)', color: 'rgba(168,85,247,0.8)' }}
+                  >
+                    ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
+                  </span>
+                  <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                    · {msgTotal} messages across all branches
+                  </span>
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} className="flex-shrink-0 p-1.5 rounded-lg transition-colors mt-0.5" style={{ color: 'rgb(var(--color-text-muted))' }}>
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="ml-3 flex-shrink-0 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
-            title="Close (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
-        {/* Canvas */}
-        <div className="flex-1 relative">
-          {treeChats.length <= 1 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8">
-              <div className="w-10 h-10 rounded-full border border-accent-violet/20 flex items-center justify-center">
-                <span className="text-accent-violet/50 text-sm">↗</span>
+        {/* Topics strip */}
+        {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} />}
+
+        {/* Tree */}
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          {!tree ? (
+            <div className="h-full flex flex-col items-center justify-center gap-4 px-10 text-center">
+              <div
+                className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                style={{ background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.18)' }}
+              >
+                <span style={{ fontSize: 22, color: 'rgba(168,85,247,0.55)' }}>↗</span>
               </div>
-              <p className="text-text-muted text-[12px] text-center leading-relaxed">
-                Select text in any AI message and tap{' '}
-                <span className="text-accent-violet">Drift</span> to start branching
-              </p>
+              <div>
+                <p className="text-[13px] font-semibold mb-1" style={{ color: 'rgb(var(--color-text-primary))' }}>No drifts yet</p>
+                <p className="text-[11px] leading-relaxed" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                  Select any text in an AI response and tap{' '}
+                  <span style={{ color: '#a855f7', fontWeight: 600 }}>Drift</span>{' '}
+                  to open a focused branch conversation.
+                </p>
+              </div>
             </div>
           ) : (
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={onNodeClick}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.18 }}
-              minZoom={0.2}
-              maxZoom={2.5}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={20}
-                size={1}
-                color="rgba(255,255,255,0.055)"
-              />
-            </ReactFlow>
+            <TreeRow
+              node={tree}
+              depth={0}
+              isLast={true}
+              ancestorLines={[]}
+              activeChatId={activeChatId}
+              onSwitchChat={onSwitchChat}
+              collapsed={collapsed}
+              onToggleCollapse={onToggleCollapse}
+            />
           )}
         </div>
       </div>
     </>
-  )
-}
-
-// ── Exported component ────────────────────────────────────────────────────────
-
-export default function DriftKnowledgeGraph(props: Props) {
-  return (
-    <ReactFlowProvider>
-      <KnowledgeGraphInner {...props} />
-    </ReactFlowProvider>
   )
 }

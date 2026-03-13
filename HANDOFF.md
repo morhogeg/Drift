@@ -2,12 +2,35 @@
 
 **Date:** March 13, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 30 (iOS Xcode) / 30 (web)
-**Status:** Knowledge graph overhaul (direction-aware edges, depth styling, live updates, node click stays open), "↗ N drifts" button now correctly reopens existing drift conversations instead of creating blank ones.
+**Build:** 31 (iOS Xcode) / 31 (web)
+**Status:** Drift Tree panel fully redesigned — dropped ReactFlow for a clean indented tree list, topics strip, timestamps, collapsible branches, depth colour palette, light/dark theme via CSS variables.
 
 ---
 
 ## What Was Done This Session
+
+### 101. Drift Tree — topics strip, timestamps, collapsible branches (POLISH)
+- **Topics strip:** Row of coloured chips below header — one per phrase drifted on, cycling violet→indigo→blue. Click any chip to jump directly to that drift. True at-a-glance overview of the whole exploration.
+- **Timestamps:** Relative time ("just now", "5m ago", "2h ago") per card next to the drift badge.
+- **Collapsible branches:** Chevron toggle on any card with children. Collapses subtree, shows "N hidden branches" summary. Connector lines extend correctly through collapsed nodes.
+
+### 100. Drift Tree — complete visual overhaul, Apple-grade polish (REDESIGN)
+- Width: `min(560px, 44vw)`. Titles wrap to 2 lines instead of truncating. Preview bumped to 120 chars / 11px / 2 lines.
+- Depth palette: depth 1 = violet, depth 2 = indigo, depth 3+ = blue — applied to left border, phrase pill, connector lines.
+- Thick 3px coloured left accent border on drift cards.
+- `↗ drift` / `main chat` eyebrow badges; message count top-right.
+- Stats pill: `↗ N drifts · M messages across all branches`.
+- Hover: subtle shadow; active: 3px glow ring matching depth colour.
+- Phrase pills: `background` tint only (no border), up to 40 chars, depth-coloured.
+- Removed "source" button (tap card to switch, already works).
+
+### 99. Drift Tree — complete rebuild, dropped ReactFlow (MAJOR REFACTOR)
+- Replaced `@xyflow/react` with pure HTML/CSS/SVG indented tree list. Eliminated white background bleed, CSS variable conflicts, floating edge label boxes.
+- Top-down tree: root at top, each drift indented 24px per depth level with elbow connector lines.
+- "branched from '[phrase]'" pill inside each drift card — unambiguous parent→child labelling.
+- All colours via CSS custom properties (`rgb(var(--color-surface))` etc) — full light/dark theme support.
+- Fixed duplicate node bug: `collectTree` now uses a `Set` to deduplicate child IDs from both `parentChatId` and `driftInfos` traversal.
+- Fixed stale message count: temp messages now merged over persisted snapshots when available.
 
 ### 94. "↗ 1 drift" button — correctly reopens existing drift conversation (BUG FIX)
 - **Root cause 1:** Early-return path in `handleStartDrift` (when source message text search fails) stripped both `driftChatId` and `existingMessages` entirely → drift opened fresh every time.
@@ -147,7 +170,7 @@ src/
     settingsStorage.ts       localStorage settings
   components/
     DriftPanel.tsx           ~1000 lines — side panel (keyboard-aware input)
-    DriftKnowledgeGraph.tsx  radial mind map — @xyflow/react, direction-aware edges, depth styling
+    DriftKnowledgeGraph.tsx  indented tree list — pure HTML/CSS, topics strip, timestamps, collapsible, depth palette
     SelectionTooltip.tsx     iOS: persistent bottom bar; desktop: floating tooltip
     MultiModelCarousel.tsx   mobile swipeable card carousel for broadcast
     ModelPillRow.tsx         model selection chips above input (mobile, light+dark)
@@ -178,7 +201,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 30 in Xcode → upload to App Store Connect.
+- [ ] **TestFlight submission** — archive build 31 in Xcode → upload to App Store Connect.
 - [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Radial mind map — polish pass** — mini always-visible thumbnail (small collapsed graph in corner); animate node entrance; improve node sizing for very long selected phrases.
