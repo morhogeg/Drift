@@ -2,12 +2,17 @@
 
 **Date:** March 13, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 32 (iOS Xcode) / 32 (web)
-**Status:** Drift Tree overhauled for mobile + UX cleanup — full-screen bottom sheet on mobile, push layout on desktop, prominent header button, anchor navigation from tree cards.
+**Build:** 33 (iOS Xcode) / 33 (web)
+**Status:** Drift Tree chip bar now horizontally scrollable on both desktop and mobile.
 
 ---
 
 ## What Was Done This Session
+
+### 107. Drift Tree — "Explored" chip bar horizontally scrollable (FIX)
+- Added `flexWrap: 'nowrap'` to the chips scroll container — chips no longer wrap to a second line when there are many topics.
+- Scrollbar hidden on all browsers (`scrollbarWidth: none` + `[&::-webkit-scrollbar]:hidden`) for a clean invisible-scroll feel.
+- Applies to both desktop panel and mobile bottom sheet.
 
 ### 106. Drift Tree card → anchor scroll + open drift panel (NEW BEHAVIOUR)
 - Tapping a drift card in the tree now: (1) switches to parent chat if needed, (2) smooth-scrolls the main chat to the exact source message anchor, (3) opens the DriftPanel with the existing drift conversation loaded. No more "just switch chat ID" — you land at the right place.

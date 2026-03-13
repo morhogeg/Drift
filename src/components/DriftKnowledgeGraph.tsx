@@ -453,9 +453,10 @@ function TopicsStrip({
 
       {/* Scrollable chips */}
       <div
-        className="flex-1 overflow-x-auto py-3 pr-4"
+        className="flex-1 overflow-x-auto py-3 pr-4 [&::-webkit-scrollbar]:hidden"
         style={{
           display: 'flex',
+          flexWrap: 'nowrap',
           gap: 6,
           scrollbarWidth: 'none',
           WebkitOverflowScrolling: 'touch',
