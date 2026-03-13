@@ -121,6 +121,19 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
   return [...here, ...node.children.flatMap(collectTopics)]
 }
 
+/** Number duplicate phrases so chips are distinguishable: "guitarist", "guitarist 2" */
+function disambiguateTopics(raw: { phrase: string; chatId: string }[]): { phrase: string; chatId: string }[] {
+  const counts = new Map<string, number>()
+  raw.forEach(({ phrase }) => counts.set(phrase, (counts.get(phrase) ?? 0) + 1))
+  const seen = new Map<string, number>()
+  return raw.map(({ phrase, chatId }) => {
+    if ((counts.get(phrase) ?? 1) <= 1) return { phrase, chatId }
+    const n = (seen.get(phrase) ?? 0) + 1
+    seen.set(phrase, n)
+    return { phrase: `${phrase} ${n}`, chatId }
+  })
+}
+
 function timeAgo(date: Date): string {
   const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
   if (s < 10) return 'just now'
@@ -289,8 +302,8 @@ function TreeCard({
             border: `1px solid ${borderColor}`,
             borderLeftWidth: isDrift ? 3 : 1,
             borderLeftColor: accentLeft,
-            padding: isMobile ? '12px 14px' : '10px 14px',
-            marginBottom: isMobile ? 10 : 8,
+            padding: isMobile ? '9px 11px' : '10px 14px',
+            marginBottom: isMobile ? 7 : 8,
             boxShadow: isActive
               ? `0 0 0 3px ${p?.accent ?? '#a855f7'}22, 0 2px 12px rgba(0,0,0,0.06)`
               : '0 1px 3px rgba(0,0,0,0.04)',
@@ -361,7 +374,7 @@ function TreeCard({
           <div
             className="font-semibold leading-snug mb-1.5"
             style={{
-              fontSize: isMobile ? 15 : 13,
+              fontSize: isMobile ? 13 : 13,
               color: isDrift ? (p?.accent ?? '#a855f7') : 'rgb(var(--color-text-primary))',
               display: '-webkit-box',
               WebkitLineClamp: 2,
@@ -377,7 +390,7 @@ function TreeCard({
             <div
               className="leading-relaxed mb-2"
               style={{
-                fontSize: isMobile ? 12 : 11,
+                fontSize: 11,
                 color: 'rgb(var(--color-text-muted))',
                 display: '-webkit-box',
                 WebkitLineClamp: 2,
@@ -445,7 +458,7 @@ function TopicsStrip({
     >
       {/* Label */}
       <div
-        className="flex-shrink-0 px-4 py-3 text-[10px] font-bold uppercase tracking-widest"
+        className="flex-shrink-0 px-3 py-2 text-[9px] font-bold uppercase tracking-widest"
         style={{ color: 'rgb(var(--color-text-muted))' }}
       >
         Explored
@@ -453,7 +466,7 @@ function TopicsStrip({
 
       {/* Scrollable chips */}
       <div
-        className="flex-1 overflow-x-auto py-3 pr-4 [&::-webkit-scrollbar]:hidden"
+        className="flex-1 overflow-x-auto py-2 pr-3 [&::-webkit-scrollbar]:hidden"
         style={{
           display: 'flex',
           flexWrap: 'nowrap',
@@ -470,12 +483,12 @@ function TopicsStrip({
               onClick={() => onJump(chatId)}
               className="flex-shrink-0 font-medium rounded-full transition-all duration-150 active:scale-95"
               style={{
-                fontSize: isMobile ? 12 : 11,
-                padding: isMobile ? '5px 12px' : '3px 10px',
+                fontSize: 11,
+                padding: '3px 10px',
                 background: withAlpha(p.bg, 0.12),
                 border: `1px solid ${p.accent}33`,
                 color: p.accent + 'dd',
-                minHeight: isMobile ? 30 : 24,
+                minHeight: isMobile ? 26 : 24,
               }}
             >
               {phrase.length > 20 ? phrase.slice(0, 20) + '…' : phrase}
@@ -541,7 +554,7 @@ export default function DriftKnowledgeGraph({
   const rootChat = rootId ? chatHistory.find(c => c.id === rootId) : null
   const driftCount = treeChats.filter(c => !!c.metadata?.isDrift).length
   const msgTotal = tree ? totalMessages(tree) : 0
-  const topics = tree ? collectTopics(tree) : []
+  const topics = tree ? disambiguateTopics(collectTopics(tree)) : []
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const onToggleCollapse = useCallback((id: string) => {
@@ -576,10 +589,10 @@ export default function DriftKnowledgeGraph({
           ref={panelRef}
           className="fixed left-0 right-0 bottom-0 z-50 flex flex-col"
           style={{
-            height: '92dvh',
+            height: '88dvh',
             background: 'rgb(var(--color-surface))',
-            borderRadius: '20px 20px 0 0',
-            boxShadow: '0 -8px 40px rgba(0,0,0,0.2)',
+            borderRadius: '16px 16px 0 0',
+            boxShadow: '0 -6px 30px rgba(0,0,0,0.18)',
             transition: 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
           }}
         >
@@ -598,26 +611,26 @@ export default function DriftKnowledgeGraph({
 
           {/* Header */}
           <div
-            className="px-5 pt-2 pb-4 flex-shrink-0"
+            className="px-4 pt-1.5 pb-3 flex-shrink-0"
             style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <GitBranch className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(168,85,247,0.7)' }} />
+                <div className="flex items-center gap-1.5 mb-1">
+                  <GitBranch className="w-3 h-3 flex-shrink-0" style={{ color: 'rgba(168,85,247,0.7)' }} />
                   <span
-                    className="text-[11px] font-bold uppercase tracking-widest"
+                    className="text-[9px] font-bold uppercase tracking-widest"
                     style={{ color: 'rgba(168,85,247,0.7)' }}
                   >
                     Drift Tree
                   </span>
                 </div>
                 <h2
-                  className="text-[17px] font-bold leading-snug"
+                  className="text-[15px] font-bold leading-snug"
                   style={{
                     color: 'rgb(var(--color-text-primary))',
                     display: '-webkit-box',
-                    WebkitLineClamp: 2,
+                    WebkitLineClamp: 1,
                     WebkitBoxOrient: 'vertical',
                     overflow: 'hidden',
                   } as React.CSSProperties}
@@ -625,15 +638,15 @@ export default function DriftKnowledgeGraph({
                   {rootChat?.title || 'Untitled'}
                 </h2>
                 {driftCount > 0 && (
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 mt-1">
                     <span
-                      className="inline-flex items-center gap-1 text-[12px] font-semibold rounded-full px-3 py-1"
-                      style={{ background: 'rgba(168,85,247,0.12)', color: 'rgba(168,85,247,0.9)', border: '1px solid rgba(168,85,247,0.2)' }}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5"
+                      style={{ background: 'rgba(168,85,247,0.1)', color: 'rgba(168,85,247,0.9)', border: '1px solid rgba(168,85,247,0.18)' }}
                     >
                       ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                     </span>
-                    <span className="text-[12px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                      {msgTotal} messages total
+                    <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                      · {msgTotal} msgs
                     </span>
                   </div>
                 )}
@@ -642,13 +655,13 @@ export default function DriftKnowledgeGraph({
                 onClick={onClose}
                 className="flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90"
                 style={{
-                  width: 36, height: 36,
+                  width: 30, height: 30,
                   background: 'rgb(var(--color-elevated))',
                   border: '1px solid rgb(var(--color-border))',
                   color: 'rgb(var(--color-text-muted))',
                 }}
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -657,7 +670,7 @@ export default function DriftKnowledgeGraph({
           {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile={isMobile} />}
 
           {/* Tree */}
-          <div className="flex-1 overflow-y-auto px-4 py-4" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+          <div className="flex-1 overflow-y-auto px-3 py-3" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {!tree ? (
               <EmptyState isMobile />
             ) : (

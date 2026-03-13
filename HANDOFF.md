@@ -2,12 +2,27 @@
 
 **Date:** March 13, 2026
 **Branch:** `feature/list-anchors-links`
-**Build:** 33 (iOS Xcode) / 33 (web)
-**Status:** Drift Tree chip bar now horizontally scrollable on both desktop and mobile.
+**Build:** 34 (iOS Xcode) / 34 (web)
+**Status:** Mobile Drift Tree — duplicate chip fix, compact design, and working drift-open-from-card.
 
 ---
 
 ## What Was Done This Session
+
+### 110. Drift Tree — card tap opens existing drift correctly on mobile (BUG FIX)
+- Replaced `handleStartDrift` (designed for new drifts) with a direct `driftStore.openDrift()` call when opening from tree card — bypasses the complex message-index-finding logic that was producing blank panels.
+- Three-tier message fallback: `chatHistory` → `driftStore.getTempConversation` → `driftChat.messages` (the node itself always has messages since the tree renders the count).
+- Context messages resolved from the parent chat's stored messages, not the stale closure — fixes the case where `switchChat` hasn't settled before context is read.
+
+### 109. Drift Tree — mobile design compact pass (POLISH)
+- Bottom sheet: `88dvh` (was 92), `16px` border radius (was 20px).
+- Header: title `15px` clamped to 1 line (was 17px / 2 lines), tighter padding, close button `30×30` (was 36×36), drift badge text `10px`.
+- Cards: padding `9/11px` (was `12/14px`), title `13px` (was `15px`), preview `11px` uniform on all sizes.
+- Topics strip: label `9px`, chips `11px` / `3px 10px` padding / `26px` min-height.
+
+### 108. Drift Tree — duplicate "Explored" chips disambiguated (FIX)
+- Added `disambiguateTopics()`: two-pass over collected phrases — if "guitarist" appears twice, chips become "guitarist 1" / "guitarist 2". Single occurrences are unchanged.
+- Applied in both mobile and desktop paths via `disambiguateTopics(collectTopics(tree))`.
 
 ### 107. Drift Tree — "Explored" chip bar horizontally scrollable (FIX)
 - Added `flexWrap: 'nowrap'` to the chips scroll container — chips no longer wrap to a second line when there are many topics.

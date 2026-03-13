@@ -1,17 +1,16 @@
 # Drift — Quick Status
 
-**Date:** March 13, 2026 | **Branch:** `feature/list-anchors-links` | **Build:** 33 (iOS + web)
+**Date:** March 13, 2026 | **Branch:** `feature/list-anchors-links` | **Build:** 34 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 ## Last Session (Mar 13)
-- Drift Tree mobile redesign: full-screen bottom sheet (92dvh), drag-to-dismiss, blurred backdrop, larger touch-friendly cards
-- Desktop push layout: tree panel pushes main chat aside (480px) instead of overlapping; backdrop removed
-- UX cleanup: removed redundant per-message `↗ drift` badge and old KG header icon; replaced with a single Drift Tree button in the header using the app's favicon icon + count badge
-- Drift tree card tap now scrolls main chat to the source anchor message AND opens the DriftPanel with existing conversation
-- "Explored" chip bar now horizontally scrollable (nowrap) on both desktop and mobile — no more wrapping
+- Mobile Drift Tree: compact design pass — smaller header (15px title, 30px close btn), tighter card padding (9/11px), uniform 11px preview, 88dvh sheet height
+- Duplicate "Explored" chips fixed: `disambiguateTopics()` numbers duplicates ("guitarist 1", "guitarist 2") while leaving unique phrases unchanged
+- Tree card tap on mobile now correctly opens the existing drift conversation — replaced `handleStartDrift` with direct `driftStore.openDrift()` using 3-tier message fallback (chatHistory → temp store → node object)
+- Context messages for the opened drift resolved from parent chat's stored messages, not a stale closure
 
 ## Pending (priority order)
-- [ ] **TestFlight** — archive build 33 in Xcode → App Store Connect
+- [ ] **TestFlight** — archive build 34 in Xcode → App Store Connect
 - [ ] **Message editing** — click to edit sent message, regenerate AI response (`updateMessage` exists)
 - [ ] **AddModelSheet: OpenRouter + Ollama** — extend beyond Gemini-only
 - [ ] **Conversation forking** — fork main chat at any message ("what if I'd asked X instead?")
@@ -24,7 +23,7 @@
 React 19 + TypeScript + Vite 7 + Capacitor 7 + Tailwind CSS (darkMode: 'class', CSS vars for colors).
 **Primary LLM:** Gemini REST+SSE (grounding enabled) · **Secondary:** OpenRouter · **Local:** Ollama · **Demo:** DummyAI
 **State:** Zustand 5 — chatStore, driftStore, modelStore, uiStore · **DB:** IndexedDB via idb
-**Drift Tree:** Mobile bottom sheet + desktop push panel — pure HTML/CSS/SVG tree, no ReactFlow · App.tsx ~3000 lines · DriftPanel.tsx ~1000 lines
+**Drift Tree:** Mobile bottom sheet (88dvh) + desktop push panel — pure HTML/CSS/SVG tree, no ReactFlow · App.tsx ~3000 lines · DriftPanel.tsx ~1000 lines
 
 ## Key files
 `src/App.tsx` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`

@@ -3045,6 +3045,7 @@ function App() {
             const sourceMessageId = driftChat.metadata?.sourceMessageId
             const parentChatId = driftChat.metadata?.parentChatId
             const selectedText = driftChat.metadata?.selectedText ?? ''
+            const driftChatId = driftChat.id
 
             // Switch to the parent chat if needed
             if (parentChatId && parentChatId !== activeChatId) {
@@ -3061,11 +3062,35 @@ function App() {
               })
             }
 
-            // Open the drift panel with existing messages
-            const existing = chatHistory.find(c => c.id === driftChat.id)?.messages
-              ?? driftStore.getTempConversation(driftChat.id)
-              ?? undefined
-            handleStartDrift(selectedText, sourceMessageId ?? '', driftChat.id, existing)
+            // Resolve existing messages — prefer chatHistory, then temp store, then the node object itself
+            const existing: Message[] =
+              (chatHistory.find(c => c.id === driftChatId)?.messages?.length
+                ? chatHistory.find(c => c.id === driftChatId)!.messages
+                : null)
+              ?? driftStore.getTempConversation(driftChatId)
+              ?? (driftChat.messages?.length ? driftChat.messages : null)
+              ?? []
+
+            // Get context from parent chat (use the chat we're switching to)
+            const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
+            const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
+
+            // Open drift panel directly — more reliable than handleStartDrift for existing drifts
+            driftStore.openDrift({
+              selectedText,
+              sourceMessageId: sourceMessageId ?? '',
+              contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+              highlightMessageId: sourceMessageId,
+              driftChatId,
+              existingMessages: existing,
+              ancestry: [{
+                isMainChat: true,
+                label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
+                selectedText: '',
+                sourceMessageId: '',
+                contextMessages: [],
+              }],
+            })
           }}
           getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
         />
