@@ -213,7 +213,6 @@ function App() {
 
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
-  const driftExpanded = driftStore.driftExpanded
 
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1879,7 +1878,7 @@ function App() {
           flex-1 flex flex-col relative
           transition-all duration-150 ease-in-out
           ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-          ${driftOpen ? 'lg:mr-[450px]' : 'mr-0'}
+          ${(driftOpen || knowledgeGraphOpen) ? 'lg:mr-[480px]' : 'mr-0'}
         `}
         onTouchStart={swipeHandlers.onTouchStart}
         onTouchEnd={swipeHandlers.onTouchEnd}
@@ -1921,19 +1920,33 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Knowledge Graph Button — shown when there are multiple chats */}
-              {chatHistory.length > 1 && (
+              {/* Drift Tree Button — shown when current chat has drifts */}
+              {totalDriftCount > 0 && (
                 <button
-                  onClick={() => setKnowledgeGraphOpen(true)}
-                  title="Knowledge graph (⌘⌥G)"
-                  className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                  onClick={() => setKnowledgeGraphOpen(!knowledgeGraphOpen)}
+                  title="Drift Tree (⌘⌥G)"
+                  className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center gap-1.5 rounded-lg transition-all duration-75 relative
+                    ${knowledgeGraphOpen
+                      ? 'text-accent-violet bg-accent-violet/10'
+                      : 'text-text-muted hover:text-accent-violet hover:bg-accent-violet/5'
+                    }`}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
-                    <path d="M12 7v4"/><path d="M6.5 17.5l4-4.5"/><path d="M17.5 17.5l-4-4.5"/>
-                    <path d="M7 19h10"/>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <defs>
+                      <linearGradient id="drift-icon-g" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#ff006e"/>
+                        <stop offset="1" stopColor="#a855f7"/>
+                      </linearGradient>
+                    </defs>
+                    <circle cx="14" cy="14" r="2.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
+                    <circle cx="4" cy="4" r="2.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
+                    <circle cx="4" cy="14" r="2.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
+                    <path d="M4 6.5v5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
+                    <path d="M6.5 4h5a2 2 0 0 1 2 2v5.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
                   </svg>
+                  <span className="absolute -top-0.5 -right-0.5 text-[9px] font-bold bg-accent-violet text-white rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1 leading-none">
+                    {totalDriftCount}
+                  </span>
                 </button>
               )}
               {/* New Chat Button */}
@@ -1961,14 +1974,14 @@ function App() {
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0" style={{ touchAction: 'pan-y' }}>
-            <div style={{ paddingBottom: selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container ${driftOpen && !driftExpanded ? 'lg:pr-[450px] lg:md:pr-[520px]' : ''}`} data-context-links-version={contextLinkVersion}>
+            <div style={{ paddingBottom: selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
               {showScrollButton && (
                 <div className={`fixed bottom-24 z-20 transition-all duration-150
                   left-1/2 lg:${sidebarOpen ? 'left-[calc(50%+170px)]' : 'left-1/2'}
                   transform -translate-x-1/2
-                  ${driftOpen ? 'lg:mr-[225px]' : ''}
+                  ${(driftOpen || knowledgeGraphOpen) ? 'lg:-translate-x-[calc(50%+240px)]' : ''}
                 `}>
                   <button
                     onClick={() => {
@@ -1994,22 +2007,6 @@ function App() {
                 </div>
               )}
 
-              {/* Floating drift map pill */}
-              {totalDriftCount > 0 && !knowledgeGraphOpen && (
-                <button
-                  onClick={() => setKnowledgeGraphOpen(true)}
-                  className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] right-4 z-30
-                    flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                    bg-dark-surface/90 backdrop-blur-md border border-accent-violet/25
-                    text-[11px] font-medium text-accent-violet/80
-                    shadow-[0_2px_12px_rgba(168,85,247,0.15)]
-                    hover:border-accent-violet/50 hover:bg-dark-elevated/90
-                    transition-all active:scale-95"
-                >
-                  <span className="text-[10px]">↗</span>
-                  {totalDriftCount} {totalDriftCount === 1 ? 'drift' : 'drifts'}
-                </button>
-              )}
 
               {/* Show parent chat link if this is a saved drift */}
               {(() => {
@@ -2711,77 +2708,6 @@ function App() {
                               >
                                 <Bookmark className={`w-4 h-4 ${savedMessageIds.has(msg.id) ? 'fill-cyan-400' : ''}`} />
                               </button>
-                              {msg.driftInfos && msg.driftInfos.length > 0 && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    if (msg.driftInfos!.length > 1) {
-                                      // Multiple drifts — open the map so user can pick
-                                      setKnowledgeGraphOpen(true)
-                                    } else {
-                                      const d = msg.driftInfos![0]
-                                      const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
-                                        ?? driftStore.getTempConversation(d.driftChatId)
-                                        ?? undefined
-                                      if (existing && existing.length > 0) {
-                                        // Navigate directly to existing drift — no re-creation
-                                        const chatContainer = document.querySelector('.chat-messages-container')
-                                        if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
-                                        const msgIdx = messages.findIndex(m => m.id === msg.id)
-                                        driftStore.openDrift({
-                                          selectedText: d.selectedText,
-                                          sourceMessageId: msg.id,
-                                          contextMessages: msgIdx >= 0 ? messages.slice(0, msgIdx + 1) : [],
-                                          highlightMessageId: msg.id,
-                                          driftChatId: d.driftChatId,
-                                          existingMessages: existing,
-                                          ancestry: [{ isMainChat: true, label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat', selectedText: '', sourceMessageId: '', contextMessages: [] }],
-                                        })
-                                      } else {
-                                        handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
-                                      }
-                                    }
-                                  }}
-                                  onTouchEnd={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    if (msg.driftInfos!.length > 1) {
-                                      setKnowledgeGraphOpen(true)
-                                    } else {
-                                      const d = msg.driftInfos![0]
-                                      const existing = chatHistory.find(c => c.id === d.driftChatId)?.messages
-                                        ?? driftStore.getTempConversation(d.driftChatId)
-                                        ?? undefined
-                                      if (existing && existing.length > 0) {
-                                        const chatContainer = document.querySelector('.chat-messages-container')
-                                        if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
-                                        const msgIdx = messages.findIndex(m => m.id === msg.id)
-                                        driftStore.openDrift({
-                                          selectedText: d.selectedText,
-                                          sourceMessageId: msg.id,
-                                          contextMessages: msgIdx >= 0 ? messages.slice(0, msgIdx + 1) : [],
-                                          highlightMessageId: msg.id,
-                                          driftChatId: d.driftChatId,
-                                          existingMessages: existing,
-                                          ancestry: [{ isMainChat: true, label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat', selectedText: '', sourceMessageId: '', contextMessages: [] }],
-                                        })
-                                      } else {
-                                        handleStartDrift(d.selectedText, msg.id, d.driftChatId, existing)
-                                      }
-                                    }
-                                  }}
-                                  className="ml-1 flex items-center gap-1 px-2 py-0.5
-                                             rounded-full text-xs
-                                             text-accent-violet/70 hover:text-accent-violet
-                                             bg-accent-violet/5 hover:bg-accent-violet/15
-                                             border border-accent-violet/20 hover:border-accent-violet/40
-                                             transition-all duration-150"
-                                  title={msg.driftInfos.length > 1 ? 'View all drifts' : 'Open drift'}
-                                >
-                                  <span>↗</span>
-                                  <span>{msg.driftInfos.length} {msg.driftInfos.length === 1 ? 'drift' : 'drifts'}</span>
-                                </button>
-                              )}
                               {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}
@@ -2845,7 +2771,7 @@ function App() {
         )}
 
         {/* Input area */}
-        <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border ${driftOpen && !driftExpanded ? 'lg:mr-[450px] lg:md:mr-[520px]' : ''}`}>
+        <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
           <div className="max-w-4xl mx-auto">
             {/* Mobile-only: model pill row above textarea */}
             <div className="lg:hidden">
@@ -3114,6 +3040,32 @@ function App() {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)
             el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
             setKnowledgeGraphOpen(false)
+          }}
+          onOpenDrift={(driftChat) => {
+            const sourceMessageId = driftChat.metadata?.sourceMessageId
+            const parentChatId = driftChat.metadata?.parentChatId
+            const selectedText = driftChat.metadata?.selectedText ?? ''
+
+            // Switch to the parent chat if needed
+            if (parentChatId && parentChatId !== activeChatId) {
+              switchChat(parentChatId)
+            }
+
+            // Scroll to the source anchor message
+            if (sourceMessageId) {
+              requestAnimationFrame(() => {
+                setTimeout(() => {
+                  const el = document.querySelector(`[data-message-id="${sourceMessageId}"]`)
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                }, 150)
+              })
+            }
+
+            // Open the drift panel with existing messages
+            const existing = chatHistory.find(c => c.id === driftChat.id)?.messages
+              ?? driftStore.getTempConversation(driftChat.id)
+              ?? undefined
+            handleStartDrift(selectedText, sourceMessageId ?? '', driftChat.id, existing)
           }}
           getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
         />
