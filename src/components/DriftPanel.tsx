@@ -52,7 +52,11 @@ interface DriftPanelProps {
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
   onNavigateToBreadcrumb?: (index: number) => void
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
+  templateType?: 'simplify' | 'research' | 'connect'
+  /** Pre-loaded suggestion chips — bypasses AI fetch when provided. */
+  initialSuggestions?: string[]
+  /** Opens a new drift from within this panel (e.g. from a Connect card). */
+  onStartDrift?: (text: string, messageId: string, suggestions?: string[]) => void
 }
 
 export default function DriftPanel({
@@ -79,6 +83,7 @@ export default function DriftPanel({
   ancestry,
   onNavigateToBreadcrumb,
   templateType,
+  initialSuggestions,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -103,6 +108,10 @@ export default function DriftPanel({
   const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
+  const [connectCards, setConnectCards] = useState<string[] | null>(null)
+  const [connectQuestion, setConnectQuestion] = useState<string | null>(null)
+  const connectAnswersRef = useRef<Map<string, Message[]>>(new Map())
+  const [connectVisitedVersion, setConnectVisitedVersion] = useState(0)
   const [isComparing, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
@@ -115,19 +124,27 @@ export default function DriftPanel({
   // --------------------------------------------------------------------------
 
   const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
-    'challenge': "You are a sharp critical thinker. Your job is to identify weaknesses, assumptions, and counterarguments in the selected text. Be constructive but direct. Challenge assumptions rigorously.",
     'simplify': "You are an expert at making complex ideas simple. Explain the selected text as if to a curious 12-year-old. Use analogies, avoid jargon, and make it memorable.",
     'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
-    'devils-advocate': "You are playing devil's advocate. Argue the OPPOSITE of what the selected text suggests or implies. Be persuasive and intellectually honest about the strongest counterposition.",
-    'pros-cons': "You are a balanced analyst. Provide a clear, comprehensive list of pros and cons for the topic or claim in the selected text. Be specific and concrete, not generic.",
+    'connect': `You are a lateral thinking engine for an exploratory reading app. The user has selected a word or phrase from a conversation and wants to discover surprising intellectual threads to explore.
+
+Return ONLY a raw JSON array of 4-5 strings. Each string is a short, thought-provoking question or reframe that opens a genuinely interesting direction. No prose, no markdown, no code fences.
+
+Example output for "Julius Caesar":
+["Did Shakespeare use Caesar to warn Elizabeth I about succession?","What does the Rubicon crossing tell us about the psychology of no return?","How did Caesar's calendar reform still shape our daily lives?","Why do assassinations so rarely achieve what their planners intended?","Is charisma a weapon or a vulnerability for leaders?"]
+
+Rules:
+- Each item is a question or reframe, 6-12 words.
+- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern.
+- Skip the obvious — nothing the user can already infer from the conversation.
+- Make them feel like doorways, not trivia.
+- Output raw JSON array of strings only. Any other text breaks the app.`,
   }
 
   const TEMPLATE_USER_PREFIXES: Record<string, string> = {
-    'challenge': 'Challenge this',
     'simplify': 'Simplify this',
-    'research': 'Research this',
-    'devils-advocate': "Devil's advocate on this",
-    'pros-cons': 'Pros and cons of this',
+    'research': 'Deep dive into this',
+    'connect': 'Show me what this connects to',
   }
 
   // Initialize Drift with existing messages or system message
@@ -144,7 +161,9 @@ export default function DriftPanel({
         setDriftOnlyMessages(existingMessages)
       } else {
         // Add system context message for new drift
-        const systemMessageText = templateType
+        const systemMessageText = templateType === 'connect'
+          ? `Finding connections for "${selectedText}"…`
+          : templateType
           ? `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Exploring'}: "${selectedText}"`
           : `What would you like to know about "${selectedText}"?`
         const systemMessage: Message = {
@@ -165,8 +184,13 @@ export default function DriftPanel({
       setDriftSuggestions([])
       setMsgHighlights(new Map())
 
-      // Fetch suggestion chips for fresh non-template drifts
-      if (!templateType && !(existingMessages && existingMessages.length > 0)) {
+      // Reset connect cards on each open
+      setConnectCards(null)
+
+      // Suggestion chips: use pre-loaded ones, fetch for plain drifts, skip for templates
+      if (initialSuggestions && initialSuggestions.length > 0) {
+        setDriftSuggestions(initialSuggestions)
+      } else if (!templateType && !(existingMessages && existingMessages.length > 0)) {
         const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
         if (geminiKey) {
           const ctx = contextMessages.slice(-3).map(m => m.text).join(' ')
@@ -203,19 +227,47 @@ export default function DriftPanel({
     // Only fire when the panel has exactly the system message (fresh drift, not restored)
     if (messages.length !== 1 || !messages[0]?.id?.startsWith('drift-system-')) return
 
-    const prefix = TEMPLATE_USER_PREFIXES[templateType] ?? 'Explore this'
-    const autoText = `${prefix}: "${selectedText}"`
+    // In connect chip-chat mode, send the chosen question directly
+    const autoText = (templateType === 'connect' && connectQuestion)
+      ? connectQuestion
+      : `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Explore this'}: "${selectedText}"`
 
     const timer = window.setTimeout(() => {
       if (!autoSentRef.current) {
         autoSentRef.current = true
         sendMessage(autoText)
       }
-    }, 400)
+    }, 60)
 
     return () => window.clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, templateType, messages.length])
+  }, [isOpen, templateType, messages.length, connectQuestion])
+
+  // Reset connect state whenever the selected term changes
+  useEffect(() => {
+    if (templateType === 'connect') {
+      setConnectCards(null)
+      setConnectQuestion(null)
+      connectAnswersRef.current = new Map()
+    }
+  }, [selectedText, templateType])
+
+  // Parse Connect AI response into cards once streaming finishes (only in chips mode)
+  useEffect(() => {
+    if (templateType !== 'connect' || isTyping || connectQuestion) return
+    const aiMsg = driftOnlyMessages.find(m => !m.isUser && !m.id.startsWith('drift-system-'))
+    if (!aiMsg?.text) return
+    try {
+      const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        setConnectCards(parsed.filter((x: unknown) => typeof x === 'string').slice(0, 5))
+      }
+    } catch {
+      setConnectCards([])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateType, isTyping, driftOnlyMessages, selectedText])
 
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
@@ -416,7 +468,7 @@ export default function DriftPanel({
       // Only use drift-specific messages, not the context messages
       // Filter out the system message and any context messages
       const driftConversation = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Challenge this') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Research this') && !msg.text.startsWith("Devil's advocate") && !msg.text.startsWith('Pros and cons') && msg.id !== newMessage.id
+        msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Finding connections for') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Deep dive into this') && !msg.text.startsWith('Show me what this connects to') && msg.id !== newMessage.id
       )
       
       // Build context string from parent conversation (last ~6 messages)
@@ -425,7 +477,10 @@ export default function DriftPanel({
       ).join('\n')
 
       // Use template system prompt if set, otherwise use default context-aware prompt
-      const baseSystemContent = templateType
+      // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
+      const baseSystemContent = (templateType === 'connect' && connectQuestion)
+        ? `The user is reading about "${selectedText}" and chose to explore this question: "${connectQuestion}". Answer it directly and insightfully. Draw connections back to "${selectedText}" where relevant. Be concise.${parentContext ? `\n\nConversation context:\n${parentContext}` : ''}`
+        : templateType
         ? TEMPLATE_SYSTEM_PROMPTS[templateType]
         : (parentContext
             ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
@@ -806,13 +861,26 @@ export default function DriftPanel({
               <ChevronDown className="w-4 h-4" />
             </button>
 
-            {/* Selected text — acts as the title */}
-            <p
-              className="flex-1 text-[12px] italic text-text-muted/70 truncate text-center px-1 select-none"
-              title={selectedText}
-            >
-              "{selectedText}"
-            </p>
+            {/* Title: template badge + selected text */}
+            <div className="flex-1 flex items-center justify-center gap-1.5 min-w-0 px-1">
+              {templateType && (
+                <span className={`flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wide
+                  ${templateType === 'connect'  ? 'bg-cyan-500/15 text-cyan-400/90' :
+                    templateType === 'simplify' ? 'bg-violet-500/15 text-violet-400/90' :
+                    'bg-blue-500/15 text-blue-400/90'}`}>
+                  {templateType === 'connect'  ? '🔗' :
+                   templateType === 'simplify' ? '📖' : '🔍'}
+                  {templateType === 'connect'  ? 'Connect' :
+                   templateType === 'simplify' ? 'Simplify' : 'Deep dive'}
+                </span>
+              )}
+              <p
+                className="text-[12px] italic text-text-muted/70 truncate select-none"
+                title={selectedText}
+              >
+                "{selectedText}"
+              </p>
+            </div>
 
             {/* Expand button */}
             <button
@@ -915,8 +983,84 @@ export default function DriftPanel({
           )}
         </header>
         
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-transparent custom-scrollbar" style={{ paddingBottom: 'calc(var(--kb-h, 0px) + 5rem)' }}>
+        {/* Connect view — chips list or inline chat */}
+        {templateType === 'connect' && !connectQuestion && (
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-24 custom-scrollbar">
+            {(isTyping || connectCards === null) ? (
+              <div className="flex flex-col gap-2.5">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="h-12 rounded-2xl bg-white/[0.04] animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
+                ))}
+              </div>
+            ) : connectCards.length === 0 ? (
+              <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                <p className="text-[10px] text-text-muted/40 uppercase tracking-widest mb-1">Explore from here</p>
+                {connectCards.map((question, i) => {
+                  const visited = connectAnswersRef.current.has(question)
+                  void connectVisitedVersion // consumed to trigger re-render
+                  return <button
+                    key={i}
+                    onClick={() => {
+                      const cached = connectAnswersRef.current.get(question)
+                      if (cached) {
+                        // Restore previous conversation — no LLM call needed
+                        setConnectQuestion(question)
+                        autoSentRef.current = true
+                        setMessages(cached)
+                        setDriftOnlyMessages(cached)
+                      } else {
+                        // Fresh chat — auto-send the question
+                        setConnectQuestion(question)
+                        autoSentRef.current = false
+                        const systemMsg: Message = {
+                          id: 'drift-system-' + Date.now(),
+                          text: question,
+                          isUser: false,
+                          timestamp: new Date(),
+                        }
+                        setMessages([systemMsg])
+                        setDriftOnlyMessages([systemMsg])
+                      }
+                    }}
+                    className={`text-left w-full flex items-start justify-between gap-2 px-4 py-3 rounded-2xl text-[14px] leading-snug active:scale-[0.98] transition-all duration-150
+                      ${visited
+                        ? 'border border-cyan-400/30 bg-cyan-500/[0.08] text-text-primary'
+                        : 'border border-cyan-500/15 bg-cyan-500/[0.04] text-text-secondary hover:border-cyan-400/35 hover:text-text-primary hover:bg-cyan-500/[0.09]'}`}
+                  >
+                    <span>{question}</span>
+                    {visited && <span className="flex-shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400/70" />}
+                  </button>
+                })}
+
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Back button when in connect chat mode */}
+        {templateType === 'connect' && connectQuestion && (
+          <button
+            onClick={() => {
+              window.getSelection()?.removeAllRanges()
+              if (connectQuestion && driftOnlyMessages.length > 1) {
+                connectAnswersRef.current.set(connectQuestion, driftOnlyMessages)
+                setConnectVisitedVersion(v => v + 1)
+              }
+              setConnectQuestion(null)
+              autoSentRef.current = true
+              setMessages([])
+              setDriftOnlyMessages([])
+            }}
+            className="flex items-center gap-1.5 mx-4 mt-2 mb-1 px-3 py-1.5 rounded-xl text-[12px] text-cyan-400/80 border border-cyan-500/20 bg-cyan-500/[0.05] hover:bg-cyan-500/[0.10] hover:text-cyan-300 transition-all self-start w-fit"
+          >
+            <ArrowLeft className="w-3 h-3" /> Back to suggestions
+          </button>
+        )}
+
+        {/* Messages — hidden in connect chips mode */}
+        <div className={`flex-1 overflow-y-auto p-4 space-y-4 bg-transparent custom-scrollbar ${templateType === 'connect' && !connectQuestion ? 'hidden' : ''}`} style={{ paddingBottom: 'calc(var(--kb-h, 0px) + 5rem)' }}>
           {(() => {
             const renderedGroups = new Set<string>()
             return messages.map((msg) => {
@@ -1110,8 +1254,8 @@ export default function DriftPanel({
             </div>
           )}
 
-          {/* Suggestion chips — inside scroll area, shown when fresh (no user messages, no template) */}
-          {!templateType && driftSuggestions.length > 0 && !driftOnlyMessages.some(m => m.isUser) && (
+          {/* Suggestion chips — shown for plain drifts and drifts opened from Connect cards */}
+          {(!templateType || initialSuggestions?.length) && driftSuggestions.length > 0 && !driftOnlyMessages.some(m => m.isUser) && (
             <div className="mt-2 mb-4 flex flex-col gap-1.5">
               <p className="text-[10px] text-text-muted/50 uppercase tracking-wide px-1">Try asking</p>
               {driftSuggestions.map((s, i) => (
@@ -1132,8 +1276,8 @@ export default function DriftPanel({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div className="absolute bottom-0 left-0 right-0 z-10">
+        {/* Input — hidden in connect chips mode, shown in connect chat mode */}
+        <div className={`absolute bottom-0 left-0 right-0 z-10 ${templateType === 'connect' && !connectQuestion ? 'hidden' : ''}`}>
           <div className="h-8 bg-gradient-to-t from-dark-bg to-transparent pointer-events-none" />
           <div className="bg-dark-bg px-4 pt-1" style={{ paddingBottom: 'calc(var(--kb-h, 0px) + env(safe-area-inset-bottom) + 0.5rem)' }}>
             <div className="relative flex-1">

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { Bookmark, GitBranch } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
-type TemplateType = 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
+type TemplateType = 'simplify' | 'research' | 'connect'
 
 interface SelectionTooltipProps {
   onStartDrift: (text: string, messageId: string, templateType?: TemplateType) => void
@@ -423,12 +423,10 @@ export default function SelectionTooltip({
     }
   }
 
-  const TEMPLATES: Array<{ type: TemplateType; label: string; emoji: string }> = [
-    { type: 'challenge', label: 'Challenge', emoji: '🔥' },
-    { type: 'simplify', label: 'Simplify', emoji: '📖' },
-    { type: 'research', label: 'Research', emoji: '🔍' },
-    { type: 'devils-advocate', label: "Devil's Advocate", emoji: '🤔' },
-    { type: 'pros-cons', label: 'Pros & Cons', emoji: '⚖️' },
+  const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; emoji: string }> = [
+    { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',   emoji: '📖' },
+    { type: 'research',  label: 'Deep dive', desc: 'Facts & background',  emoji: '🔍' },
+    { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', emoji: '🔗' },
   ]
 
   const handleSave = () => {
@@ -513,12 +511,15 @@ export default function SelectionTooltip({
                 <button
                   key={t.type}
                   type="button"
-                  className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-text-muted bg-dark-elevated/80 border border-dark-border/60 active:scale-95 active:border-accent-violet/50 transition-all whitespace-nowrap"
+                  className="flex-shrink-0 flex flex-col items-start gap-0 px-3 py-1.5 rounded-lg bg-dark-elevated/80 border border-dark-border/60 active:scale-95 active:border-accent-violet/50 transition-all whitespace-nowrap"
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
-                  <span>{t.emoji}</span>
-                  <span>{t.label}</span>
+                  <span className="flex items-center gap-1 text-[12px] font-semibold text-text-secondary">
+                    <span>{t.emoji}</span>
+                    <span>{t.label}</span>
+                  </span>
+                  <span className="text-[10px] text-text-muted/70 leading-tight">{t.desc}</span>
                 </button>
               ))}
             </div>
@@ -592,14 +593,17 @@ export default function SelectionTooltip({
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift(t.type) }}
-                title={`${t.label} drift`}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-text-muted
+                title={t.desc}
+                className="flex flex-col items-start gap-0 px-2.5 py-1.5 rounded-lg
                            bg-dark-elevated/60 border border-dark-border/50
-                           hover:border-accent-violet/40 hover:text-text-secondary active:scale-95
+                           hover:border-accent-violet/40 active:scale-95
                            transition-all duration-150 cursor-pointer whitespace-nowrap"
               >
-                <span>{t.emoji}</span>
-                <span>{t.label}</span>
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-text-secondary">
+                  <span>{t.emoji}</span>
+                  <span>{t.label}</span>
+                </span>
+                <span className="text-[9px] text-text-muted/60 leading-tight">{t.desc}</span>
               </button>
             ))}
           </div>

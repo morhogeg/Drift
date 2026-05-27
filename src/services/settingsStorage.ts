@@ -14,8 +14,8 @@ const defaultSettings: AISettings = {
   ollamaUrl: 'http://localhost:11434',
   ollamaModel: 'llama2',
   modelPresets: [
-    { id: 'gemini-flash-lite', provider: 'gemini', label: 'Gemini Flash Lite', model: GEMINI_MODELS.FLASH_LITE_PREVIEW, enabled: true },
-    { id: 'gemini-flash', provider: 'gemini', label: 'Gemini Flash', model: GEMINI_MODELS.FLASH_PREVIEW, enabled: true },
+    { id: 'gemini-flash-lite', provider: 'gemini', label: 'Gemini 3.1 Flash Lite', model: GEMINI_MODELS.FLASH_LITE_PREVIEW, enabled: true },
+    { id: 'gemini-flash', provider: 'gemini', label: 'Gemini 3.5 Flash', model: GEMINI_MODELS.FLASH_PREVIEW, enabled: true },
     { id: 'ollama', provider: 'ollama', label: 'Ollama', model: 'llama2', serverUrl: 'http://localhost:11434', enabled: false },
     { id: 'qwen3', provider: 'openrouter', label: 'Qwen3', model: OPENROUTER_MODELS.QWEN3, enabled: false },
   ]

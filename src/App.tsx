@@ -1014,7 +1014,7 @@ function App() {
   }
 
   // ── Drift handlers ──────────────────────────────────────────────────────────
-  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType']) => {
+  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[]) => {
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
 
@@ -1083,6 +1083,7 @@ function App() {
             driftChatId: newDriftChatId,
             existingMessages: existingNestedMessages,
             templateType,
+            initialSuggestions,
             ancestry: [
               ...parentAncestry,
               {
@@ -1126,6 +1127,7 @@ function App() {
         driftChatId: existingDriftChatId,
         existingMessages: fallbackExisting,
         templateType,
+        initialSuggestions,
         ancestry: [{
           isMainChat: true,
           label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -1174,6 +1176,7 @@ function App() {
       driftChatId: finalDriftChatId,
       existingMessages: existingMessagesToUse,
       templateType,
+      initialSuggestions,
       ancestry: [{
         isMainChat: true,
         label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -2908,7 +2911,7 @@ function App() {
 
       {/* Selection Tooltip */}
       <SelectionTooltip
-        onStartDrift={handleStartDrift}
+        onStartDrift={(text, messageId, templateType) => handleStartDrift(text, messageId, undefined, undefined, templateType)}
         currentChatId={activeChatId}
         currentChatTitle={chatHistory.find(c => c.id === activeChatId)?.title || 'Chat'}
         onSnippetSaved={() => uiStore.setSnippetCount(snippetStorage.getAllSnippets().length)}
@@ -2977,6 +2980,8 @@ function App() {
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
         templateType={driftContext?.templateType}
+        initialSuggestions={driftContext?.initialSuggestions}
+        onStartDrift={(text, msgId, suggestions) => handleStartDrift(text, msgId, undefined, undefined, undefined, suggestions)}
       />
 
       {/* Settings Modal */}

@@ -8,10 +8,10 @@
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 export const GEMINI_MODELS = {
-  FLASH_LITE_PREVIEW: 'gemini-3.1-flash-lite-preview',
-  FLASH_PREVIEW: 'gemini-3-flash-preview',
+  FLASH_LITE_PREVIEW: 'gemini-3.1-flash-lite',
+  FLASH_PREVIEW: 'gemini-3.5-flash',
   FLASH_25: 'gemini-2.5-flash',
-  FLASH_20: 'gemini-2.0-flash',
+  FLASH_20: 'gemini-2.5-flash-lite',
 } as const
 
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]

@@ -89,5 +89,7 @@ export interface DriftContext {
   /** Breadcrumb trail of ancestor contexts, from root (main chat) to parent drift. */
   ancestry?: AncestryEntry[]
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'challenge' | 'simplify' | 'research' | 'devils-advocate' | 'pros-cons'
+  templateType?: 'simplify' | 'research' | 'connect'
+  /** Pre-loaded suggestion chips to show in the drift panel (bypasses AI fetch). */
+  initialSuggestions?: string[]
 }
