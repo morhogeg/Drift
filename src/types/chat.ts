@@ -27,6 +27,10 @@ export interface Message {
   driftInfos?: Array<{
     selectedText: string
     driftChatId: string
+    templateType?: 'simplify' | 'research' | 'connect'
+    connectCards?: string[]
+    /** Cached per-question conversations for Connect chips — keyed by question text */
+    connectAnswers?: Record<string, Message[]>
   }>
   /** Marks messages that were pushed from drift. */
   isDriftPush?: boolean
@@ -77,6 +81,12 @@ export interface AncestryEntry {
   contextMessages: Message[]
   /** Drift chat ID — undefined for the root main-chat entry. */
   driftChatId?: string
+  /** Template type in use when this drift was active (preserved for navigation restore). */
+  templateType?: 'simplify' | 'research' | 'connect'
+  /** Active Connect question when the user navigated away — used to restore chat mode. */
+  connectQuestion?: string | null
+  /** Chips that were visible in Connect mode — avoids re-fetching on navigate back. */
+  connectCards?: string[]
 }
 
 export interface DriftContext {
@@ -92,4 +102,10 @@ export interface DriftContext {
   templateType?: 'simplify' | 'research' | 'connect'
   /** Pre-loaded suggestion chips to show in the drift panel (bypasses AI fetch). */
   initialSuggestions?: string[]
+  /** Active Connect question to restore when re-opening a Connect drift. */
+  connectQuestion?: string | null
+  /** Connect chips to restore when re-opening a Connect drift in chips view. */
+  connectCards?: string[]
+  /** Cached per-question conversations to restore — avoids re-fetching on re-open. */
+  connectAnswers?: Record<string, Message[]>
 }

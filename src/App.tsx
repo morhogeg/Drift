@@ -87,6 +87,10 @@ function App() {
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mainScrollPosition = useRef<number>(0)
+  // Tracks the live Connect state inside DriftPanel so it can be saved into ancestry entries
+  const connectStateRef = useRef<{ question: string | null; cards: string[] | null }>({ question: null, cards: null })
+  // Persists generated Connect chips per driftChatId so re-opening a Connect drift shows chips instantly
+  const connectCardsCache = useRef<Map<string, string[]>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
@@ -1014,9 +1018,12 @@ function App() {
   }
 
   // ── Drift handlers ──────────────────────────────────────────────────────────
-  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[]) => {
+  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[], restoredConnectCards?: string[], restoredConnectAnswers?: Record<string, Message[]>) => {
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
+
+    // Reset connect state tracker for the new drift context
+    connectStateRef.current = { question: null, cards: null }
 
     // ── Nested drift: selection came from within an open drift panel ──────────
     // If the panel is open, look for the source message in the active drift's
@@ -1092,6 +1099,9 @@ function App() {
                 sourceMessageId: parentCtx.sourceMessageId,
                 contextMessages: parentCtx.contextMessages,
                 driftChatId: activeDriftChatId,
+                templateType: parentCtx.templateType,
+                connectQuestion: connectStateRef.current.question,
+                connectCards: connectStateRef.current.cards ?? undefined,
               },
             ],
           })
@@ -1120,6 +1130,8 @@ function App() {
       const fallbackExisting = (reconstructedMessages?.length ? reconstructedMessages : null)
         ?? (existingDriftChatId ? driftStore.getTempConversation(existingDriftChatId) : undefined)
         ?? []
+      const cachedFallbackCards = restoredConnectCards
+        ?? (existingDriftChatId ? connectCardsCache.current.get(existingDriftChatId) : undefined)
       driftStore.openDrift({
         selectedText,
         sourceMessageId: messageId,
@@ -1128,6 +1140,8 @@ function App() {
         existingMessages: fallbackExisting,
         templateType,
         initialSuggestions,
+        connectCards: cachedFallbackCards?.length ? cachedFallbackCards : undefined,
+        connectAnswers: restoredConnectAnswers && Object.keys(restoredConnectAnswers).length > 0 ? restoredConnectAnswers : undefined,
         ancestry: [{
           isMainChat: true,
           label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -1152,7 +1166,7 @@ function App() {
               hasDrift: true,
               driftInfos: existingDrift ? msg.driftInfos : [
                 ...(msg.driftInfos || []),
-                { selectedText, driftChatId }
+                { selectedText, driftChatId, templateType }
               ]
             }
           : msg
@@ -1162,11 +1176,18 @@ function App() {
     }
 
     const finalSourceMessageId = actualMessage?.id || messageId
+    // Check actualMessage first, then search all messages as fallback (handles drifts started via Connect chips or other paths)
     const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
+      ?? currentMessages.flatMap(m => m.driftInfos ?? []).find(d => d.selectedText === selectedText)
     const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
     const existingMessagesToUse = (reconstructedMessages?.length ? reconstructedMessages : null)
       ?? driftStore.getTempConversation(finalDriftChatId)
       ?? []
+
+    const cachedConnectCards = restoredConnectCards
+      ?? connectCardsCache.current.get(finalDriftChatId)
+    const cachedConnectAnswers = restoredConnectAnswers
+      ?? (existingDrift?.connectAnswers)
 
     driftStore.openDrift({
       selectedText,
@@ -1177,6 +1198,8 @@ function App() {
       existingMessages: existingMessagesToUse,
       templateType,
       initialSuggestions,
+      connectCards: cachedConnectCards?.length ? cachedConnectCards : undefined,
+      connectAnswers: cachedConnectAnswers && Object.keys(cachedConnectAnswers).length > 0 ? cachedConnectAnswers : undefined,
       ancestry: [{
         isMainChat: true,
         label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
@@ -1244,6 +1267,9 @@ function App() {
       driftStore.getTempConversation(entry.driftChatId) ??
       (chatHistory.find(c => c.id === entry.driftChatId)?.messages ?? [])
 
+    // Reset connect tracker — the restored drift will fire onConnectStateChange to update it
+    connectStateRef.current = { question: null, cards: null }
+
     driftStore.openDrift({
       selectedText: entry.selectedText,
       sourceMessageId: entry.sourceMessageId,
@@ -1251,6 +1277,9 @@ function App() {
       driftChatId: entry.driftChatId,
       existingMessages: existingMsgs,
       ancestry: ancestry.slice(0, index),
+      templateType: entry.templateType,
+      connectQuestion: entry.connectQuestion,
+      connectCards: entry.connectCards,
     })
   }
 
@@ -2578,7 +2607,7 @@ function App() {
                                               const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
                                                 ?? driftStore.getTempConversation(m.drift.driftChatId)
                                                 ?? undefined
-                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
+                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
                                             }}
                                             onTouchEnd={(e) => {
                                               e.preventDefault()
@@ -2586,7 +2615,7 @@ function App() {
                                               const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
                                                 ?? driftStore.getTempConversation(m.drift.driftChatId)
                                                 ?? undefined
-                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing)
+                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
                                             }}
                                             className="inline cursor-pointer
                                                      border-b border-accent-violet/50 hover:border-accent-violet
@@ -2981,6 +3010,58 @@ function App() {
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
         templateType={driftContext?.templateType}
         initialSuggestions={driftContext?.initialSuggestions}
+        initialConnectQuestion={driftContext?.connectQuestion}
+        initialConnectCards={driftContext?.connectCards}
+        onConnectStateChange={(question, cards) => {
+          connectStateRef.current = { question, cards }
+          // Persist chips into the message's driftInfos so re-opening always gets the original set
+          if (cards && cards.length > 0 && driftContext?.driftChatId) {
+            const driftId = driftContext.driftChatId
+            connectCardsCache.current.set(driftId, cards)
+            // Update the parent message's driftInfos entry so cards survive component remounts
+            const currentChat = chatHistory.find(c => c.id === activeChatId)
+            const currentMsgs = currentChat?.messages ?? messages
+            const updated = currentMsgs.map(msg => {
+              if (!msg.driftInfos) return msg
+              const hasEntry = msg.driftInfos.some(d => d.driftChatId === driftId)
+              if (!hasEntry) return msg
+              return {
+                ...msg,
+                driftInfos: msg.driftInfos.map(d =>
+                  d.driftChatId === driftId ? { ...d, connectCards: cards } : d
+                ),
+              }
+            })
+            if (updated !== currentMsgs) {
+              chatStore.setMessages(updated)
+              chatStore.updateChat(activeChatId, { messages: updated })
+            }
+          }
+        }}
+        initialConnectAnswers={driftContext?.connectAnswers}
+        onConnectAnswerSaved={(question, answerMessages) => {
+          if (!driftContext?.driftChatId) return
+          const driftId = driftContext.driftChatId
+          const currentChat = chatHistory.find(c => c.id === activeChatId)
+          const currentMsgs = currentChat?.messages ?? messages
+          const updated = currentMsgs.map(msg => {
+            if (!msg.driftInfos) return msg
+            const hasEntry = msg.driftInfos.some(d => d.driftChatId === driftId)
+            if (!hasEntry) return msg
+            return {
+              ...msg,
+              driftInfos: msg.driftInfos.map(d => {
+                if (d.driftChatId !== driftId) return d
+                const prev = d.connectAnswers ?? {}
+                return { ...d, connectAnswers: { ...prev, [question]: answerMessages } }
+              }),
+            }
+          })
+          if (updated !== currentMsgs) {
+            chatStore.setMessages(updated)
+            chatStore.updateChat(activeChatId, { messages: updated })
+          }
+        }}
         onStartDrift={(text, msgId, suggestions) => handleStartDrift(text, msgId, undefined, undefined, undefined, suggestions)}
       />
 
