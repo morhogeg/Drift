@@ -66,6 +66,10 @@ function App() {
   const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
+  // Drift just promoted to the main thread — drives a one-time settle-in arrival
+  // animation (cleared shortly after, so reloads/scroll don't re-animate it).
+  const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
+  const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevContinueTargetsRef = useRef<typeof modelStore.selectedTargets | null>(null)
 
   // Mobile carousel + model picker state
@@ -118,6 +122,7 @@ function App() {
   const activeChatId = chatStore.activeChatId
   const isTyping = chatStore.isTyping
   const streamingResponse = chatStore.streamingResponse
+  const streamingMessageId = chatStore.streamingMessageId
   const message = chatStore.inputText
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
@@ -722,6 +727,9 @@ function App() {
         canvasId: canvasIdSnapshot
       }
 
+      // Sending a message has weight — a light, confident thunk.
+      haptics.impact('light')
+
       const updatedMessages = [...messages, newMessage]
       chatStore.setMessages(updatedMessages)
       if (activeCanvasId) setActiveCanvasId(null)
@@ -771,17 +779,33 @@ function App() {
           }
           // append empty bubble — use getState() to avoid stale closure overwriting user message
           chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
-          await streamer(
-            apiMessages as any,
-            (chunk) => {
-              acc += chunk
-              chatStore.setStreaming(acc)
-              // patch the bubble in place
-              const current = useChatStore.getState().messages
-              chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
-            },
-            abortControllerRef.current?.signal
-          )
+          // Mark this bubble as the actively-streaming one (drives the live shimmer).
+          // For broadcast we let the first lane "own" the id — the shimmer is per-message.
+          chatStore.setStreamingMessageId(aiResponseId)
+          let firstToken = true
+          try {
+            await streamer(
+              apiMessages as any,
+              (chunk) => {
+                if (firstToken) {
+                  firstToken = false
+                  // A thought materializing — a light tick as the first token lands.
+                  haptics.selection()
+                }
+                acc += chunk
+                chatStore.setStreaming(acc)
+                // patch the bubble in place
+                const current = useChatStore.getState().messages
+                chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+              },
+              abortControllerRef.current?.signal
+            )
+          } finally {
+            // Stop shimmering this bubble (only if it's still the active one).
+            if (useChatStore.getState().streamingMessageId === aiResponseId) {
+              chatStore.setStreamingMessageId(null)
+            }
+          }
           // update lastMessage preview
           chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(acc).slice(0, 100) })
           return { id: aiResponseId, text: acc }
@@ -906,6 +930,7 @@ function App() {
         chatStore.updateChat(activeChatId, { lastMessage: 'Connection error' })
       } finally {
         chatStore.setIsTyping(false)
+        chatStore.setStreamingMessageId(null)
         abortControllerRef.current = null
         if (!userHasScrolled.current) setTimeout(scrollToBottom, 100)
       }
@@ -918,6 +943,7 @@ function App() {
       abortControllerRef.current = null
       chatStore.setIsTyping(false)
       chatStore.setStreaming('')
+      chatStore.setStreamingMessageId(null)
     }
   }
 
@@ -1043,6 +1069,12 @@ function App() {
 
   // ── Drift handlers ──────────────────────────────────────────────────────────
   const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[], restoredConnectCards?: string[], restoredConnectAnswers?: Record<string, Message[]>) => {
+    // Haptic weight communicates significance:
+    //  • branching deeper (panel already open → a new topic emerges) = the
+    //    defining gesture, a heavy "you went somewhere" thunk.
+    //  • opening a fresh space from the main thread = a medium "occasion."
+    haptics.impact(driftStore.driftOpen ? 'heavy' : 'medium')
+
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
 
@@ -1558,6 +1590,11 @@ function App() {
     haptics.success()
     const promoteLabel = selectedText.length > 28 ? selectedText.slice(0, 28) + '…' : selectedText
     toast.success(`Promoted "${promoteLabel}" to the main thread`)
+
+    // Trigger a one-time settle-in arrival for the freshly-promoted messages.
+    setJustPromotedChatId(actualDriftChatId)
+    if (justPromotedTimerRef.current) clearTimeout(justPromotedTimerRef.current)
+    justPromotedTimerRef.current = setTimeout(() => setJustPromotedChatId(null), 1200)
   }
 
   // ── Context menu handlers ───────────────────────────────────────────────────
@@ -2307,7 +2344,7 @@ function App() {
 
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
                     data-drift-promoted={isDriftMessage ? 'true' : undefined}
                     key={msg.id}
                   >
@@ -2353,7 +2390,10 @@ function App() {
                             : msg.isUser ? 'justify-end' : 'justify-start'
                         } animate-fade-up relative group
                                     ${isDriftMessage && hasMultipleDriftMessages && !isLastDriftMessage ? 'mb-2' : ''}`}
-                        style={{ animationDelay: `${index * 50}ms` }}
+                        /* Gentle cascade on load; capped so a new message in a long
+                           thread still appears promptly rather than waiting out a
+                           per-index delay. */
+                        style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
                       >
                         <div
                           className={`
@@ -2597,7 +2637,7 @@ function App() {
                             </p>
                           ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
                             <div
-                              className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
+                              className={`text-[13px] leading-6 ${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
@@ -2702,7 +2742,7 @@ function App() {
                             </div>
                           ) : (
                             <div
-                              className={`${getRTLClassName(msg.text)}`}
+                              className={`${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
@@ -2794,7 +2834,8 @@ function App() {
               {isTyping && !streamingResponse && !messages.some(m => !m.isUser && (!m.text || m.text.length === 0)) && (
                 <div className="max-w-5xl mx-auto px-5">
                   <div className="flex justify-start animate-fade-up py-2">
-                    <div className="flex gap-1.5 items-center px-1">
+                    {/* Thinking — the dots breathe (container) while each dot bounces */}
+                    <div className="flex gap-1.5 items-center px-1 animate-breathe">
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />

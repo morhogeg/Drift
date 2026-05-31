@@ -15,6 +15,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
 import { X, GitBranch, Maximize2 } from 'lucide-react'
+import { haptics } from '@/lib/haptics'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -363,6 +364,7 @@ function GraphCanvas({
   const handleActivate = (laid: Laid) => {
     if (drag.current?.moved) return
     const id = laid.node.chat.id
+    haptics.selection()
     onSelect(id)
     if (laid.depth > 0 && onOpenDrift) onOpenDrift(laid.node.chat)
     else onSwitchChat(id)

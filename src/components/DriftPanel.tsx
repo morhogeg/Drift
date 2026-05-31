@@ -114,6 +114,11 @@ export default function DriftPanel({
   const [messages, setMessages] = useState<Message[]>([])
   const [driftOnlyMessages, setDriftOnlyMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  // Id of the AI message currently receiving streamed tokens — drives the live shimmer.
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
+  // Bumped whenever a space unfolds (panel opens) or a new topic emerges (drift
+  // changes while open) — retriggers the bloom animation on the panel shell.
+  const [bloomKey, setBloomKey] = useState(0)
   const [pushedToMain, setPushedToMain] = useState(false)
   const [savedAsChat, setSavedAsChat] = useState(false)
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
@@ -379,6 +384,13 @@ Rules:
     }
   }, [isOpen])
 
+  // Bloom: a space unfolding. Retrigger the bloom whenever the panel opens or
+  // the topic changes underneath it (branching into a new drift) — the shell
+  // scales up, the blur clears, and a glow blooms behind it.
+  useEffect(() => {
+    if (isOpen) setBloomKey(k => k + 1)
+  }, [isOpen, driftChatId])
+
   // Auto-scroll breadcrumb to the end (current item) whenever depth changes
   useEffect(() => {
     if (breadcrumbScrollRef.current) {
@@ -544,6 +556,9 @@ Rules:
   const sendMessage = async (overrideText?: string) => {
     const textToSend = (overrideText ?? message).trim()
     if (textToSend) {
+      // Sending a message has weight — a light, confident thunk.
+      haptics.impact('light')
+
       const newMessage: Message = {
         id: 'drift-' + Date.now().toString(),
         text: textToSend,
@@ -631,8 +646,15 @@ Rules:
         }
         setMessages(prev => [...prev, aiMessage])
         setDriftOnlyMessages(prev => [...prev, aiMessage])
-        
+        setStreamingMsgId(aiResponseId)
+
+        let firstToken = true
         const onChunk = (chunk: string) => {
+          if (firstToken) {
+            firstToken = false
+            // A thought materializing — a light tick as the first token lands.
+            haptics.selection()
+          }
           accumulatedResponse += chunk
           setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
           setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
@@ -690,6 +712,7 @@ Rules:
         setDriftOnlyMessages(prev => [...prev, aiResponse])
       } finally {
         setIsTyping(false)
+        setStreamingMsgId(null)
         abortControllerRef.current = null
       }
     }
@@ -701,6 +724,7 @@ Rules:
       abortControllerRef.current = null
       setIsTyping(false)
       setIsComparing(false)
+      setStreamingMsgId(null)
     }
     if (compareAbortControllersRef.current) {
       for (const c of Object.values(compareAbortControllersRef.current)) {
@@ -941,8 +965,18 @@ Rules:
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
     `}>
-      {/* Panel */}
-      <div className={`
+      {/* Glow blooming behind the panel as it unfolds — keyed to retrigger on
+          open and on branching into a new topic. */}
+      <div
+        key={`glow-${bloomKey}`}
+        aria-hidden
+        className="drift-bloom-glow pointer-events-none absolute inset-y-0 right-0 w-2/3 z-0"
+      />
+      {/* Panel — blooms open (scale + blur-clear) on each new space */}
+      <div
+        key={`shell-${bloomKey}`}
+        className={`
+        drift-bloom-shell relative z-[1]
         w-full h-full bg-dark-bg
         border-l border-accent-violet/[0.12]
         shadow-[-8px_0_60px_rgba(168,85,247,0.08)]
@@ -950,6 +984,14 @@ Rules:
       `}>
         {/* Header */}
         <header className="relative z-10 border-b border-white/[0.05] bg-dark-surface/95 backdrop-blur-xl pt-safe">
+          {/* Quiet breathing accent — the space stays alive while idle, settles
+              while a thought is materializing. */}
+          {!isTyping && (
+            <div
+              aria-hidden
+              className="animate-breathe pointer-events-none absolute -top-6 right-8 w-40 h-12 rounded-full blur-2xl bg-accent-violet/[0.10]"
+            />
+          )}
           {(() => {
             const actionMessages = driftOnlyMessages.filter(m => !m.text.startsWith('What would you'))
             const showActions = templateType === 'connect'
@@ -1204,6 +1246,7 @@ Rules:
                   return <button
                     key={i}
                     onClick={() => {
+                      haptics.selection()
                       const cached = connectAnswersRef.current.get(question)
                       if (cached) {
                         // Restore previous conversation — no LLM call needed
@@ -1399,7 +1442,7 @@ Rules:
                         <span className="block mb-1 text-[10px] text-text-muted/60 pl-1">{msg.modelTag}</span>
                       )}
                       <div className="px-1 pb-1">
-                        <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
+                        <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)} ${streamingMsgId === msg.id ? 'drift-text-shimmer' : ''}`} dir={getTextDirection(msg.text)}>
                           <ReactMarkdown
                             className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20"
                             remarkPlugins={[remarkGfm]}
@@ -1486,7 +1529,8 @@ Rules:
           
           {isTyping && (
             <div className="flex justify-start pl-1">
-              <div className="flex gap-1 items-center py-2">
+              {/* Thinking — the dot cluster breathes while each dot bounces */}
+              <div className="flex gap-1 items-center py-2 animate-breathe">
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '120ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '240ms' }} />
