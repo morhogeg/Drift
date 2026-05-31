@@ -454,75 +454,59 @@ export default function SelectionTooltip({
 
   if (!tooltip?.visible) return null
 
-  // Touch/iOS: persistent bottom bar
+  // Touch/iOS: floating pill action bar
   if (isTouchDevice) {
-    const selectedText = tooltip.text
-    const preview = selectedText.length > 32 ? selectedText.slice(0, 32) + '\u2026' : selectedText
     return (
       <div
         style={{
           position: 'fixed',
-          bottom: `calc(env(safe-area-inset-bottom) + 72px)`,
-          left: '12px',
-          right: '12px',
+          bottom: `calc(env(safe-area-inset-bottom) + 76px)`,
+          left: '20px',
+          right: '20px',
           zIndex: 99997,
         }}
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex flex-col gap-2 px-3.5 py-2.5 rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border/70 shadow-[0_8px_32px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.10)]">
-
-          {/* Row 1: accent bar + preview + action buttons */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-2.5 flex-1 min-w-0">
-              <div className="w-[3px] h-7 rounded-full bg-gradient-to-b from-accent-pink to-accent-violet flex-shrink-0" />
-              <span className="text-[12px] text-text-muted italic truncate">
-                &ldquo;{preview}&rdquo;
-              </span>
-            </div>
-
-            {/* Save button */}
-            <button
-              type="button"
-              className="px-3.5 py-1.5 rounded-xl text-[13px] font-medium text-text-secondary bg-dark-elevated border border-dark-border/80 active:scale-95 active:opacity-70 transition-all flex-shrink-0"
-              onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
-              onClick={handleSave}
-            >
-              Save
-            </button>
-
-            {/* Drift button */}
-            {!tooltip.isUserMessage && (
-              <button
-                type="button"
-                className="px-4 py-1.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-accent-pink to-accent-violet shadow-[0_4px_14px_rgba(168,85,247,0.35)] active:scale-95 active:opacity-80 transition-all flex-shrink-0"
-                onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
-                onClick={() => handleDrift()}
-              >
-                Drift
-              </button>
-            )}
-          </div>
-
-          {/* Row 2: template quick-action buttons */}
-          {!tooltip.isUserMessage && (
-            <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
-              {TEMPLATES.map(t => (
+        <div className="flex items-center rounded-full bg-[#1c1c1e]/97 backdrop-blur-2xl border border-white/[0.09] shadow-[0_12px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+          {!tooltip.isUserMessage ? (
+            <>
+              {TEMPLATES.map((t, i) => (
                 <button
                   key={t.type}
                   type="button"
-                  className="flex-shrink-0 flex flex-col items-start gap-0 px-3 py-1.5 rounded-lg bg-dark-elevated/80 border border-dark-border/60 active:scale-95 active:border-accent-violet/50 transition-all whitespace-nowrap"
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-[13px] text-[13px] font-medium transition-all duration-150 active:bg-white/[0.08]
+                    ${i < TEMPLATES.length - 1 ? 'border-r border-white/[0.07]' : ''}
+                    ${t.type === 'connect'  ? 'text-cyan-400'   :
+                      t.type === 'simplify' ? 'text-violet-400' :
+                      'text-blue-400'}`}
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
-                  <span className="flex items-center gap-1 text-[12px] font-semibold text-text-secondary">
-                    <span>{t.emoji}</span>
-                    <span>{t.label}</span>
-                  </span>
-                  <span className="text-[10px] text-text-muted/70 leading-tight">{t.desc}</span>
+                  <span className="text-[15px] leading-none">{t.emoji}</span>
+                  <span>{t.label}</span>
                 </button>
               ))}
-            </div>
+              <div className="w-px h-5 bg-white/[0.07] flex-shrink-0" />
+              <button
+                type="button"
+                className="px-5 py-[13px] text-text-muted/60 active:text-white active:bg-white/[0.08] transition-all duration-150 flex-shrink-0"
+                onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
+                onClick={handleSave}
+              >
+                <Bookmark className="w-[17px] h-[17px]" />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="flex-1 flex items-center justify-center gap-2 py-[13px] text-[13px] font-medium text-text-secondary active:bg-white/[0.08] transition-all duration-150"
+              onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
+              onClick={handleSave}
+            >
+              <Bookmark className="w-4 h-4" />
+              Save
+            </button>
           )}
         </div>
       </div>

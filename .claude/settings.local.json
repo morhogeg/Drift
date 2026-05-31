@@ -11,14 +11,24 @@
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(npm uninstall:*)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_ekbA3s/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_tLX1P5/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_yt3iBS/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_rT5fXA/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_vOYFBg/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_5vGhF7/**)",
-      "Read(/var/folders/rk/7dq0v3917cqb6rhg6k03z4kr0000gn/T/TemporaryItems/NSIRD_screencaptureui_NWhzhn/**)"
+      "Bash(npm run build:*)",
+      "Bash(npm run build)",
+      "Bash(npx cap sync ios)",
+      "Read(/var/folders/**)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/morhogeg/Drift && pgrep -f 'vite' > /dev/null && echo '⚡ Live reload active — skipping build' || (npm run build && npx cap sync ios)"
+          }
+        ]
+      }
+    ]
   }
 }
