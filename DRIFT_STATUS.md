@@ -1,7 +1,21 @@
 # Drift — Quick Status
 
-**Date:** May 27, 2026 | **Branch:** `main` | **Build:** 34 (iOS + web, pending new archive)
+**Date:** May 31, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 34 (iOS + web, pending new archive)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
+
+## Last Session (May 31) — Apple-level overhaul (4-domain pass)
+Foundation-first, then four coordinated domains. All on `feature/apple-level-overhaul`, build green, not yet merged to `main`.
+- **Foundation:** motion easing + luminous accent ramp + glow/type tokens (`tailwind.config.js`), reduced-motion floor + `.drift-text-shimmer` (`index.css`), `src/lib/haptics.ts`, `src/lib/termIndex.ts` (cross-drift term index), `src/components/motion/` (Reveal/Stagger/Bloom/Pressable). Added `@capacitor/haptics`.
+- **Vision:** rebuilt `DriftKnowledgeGraph.tsx` into a bioluminescent spatial map (glow-from-within nodes, river bézier connectors, pan/pinch); new `DESIGN_SYSTEM.md`.
+- **Intelligence:** `getConnections()` in `gemini.ts`; connection-surfacing moment in the Connect view ("you explored this before" via termIndex, back/forward connections); history-aware Connect chips; push-to-main reworked as "promote an idea" (haptics + toast).
+- **Feel:** drift-open/branch bloom, streaming "thought materializing" shimmer + first-token haptic, breathing idle states, full haptic map, capped staggered message entry.
+- **Flow:** first-run gesture cue, mobile Knowledge Tree now a first-class "Map" pill, persistent chat-context header + one-tap reopen-last-drift, visible New-chat button, drift-vs-chat sidebar distinction.
+- **Synthesis:** verified boots clean (0 console errors, iOS-width); fixed duplicated tagline on mobile Login.
+
+### Next on this branch
+- [ ] Manual on-device pass in the iOS simulator (haptics, tree bottom-sheet, safe-area, reduced-motion).
+- [ ] Merge to `main` once happy → new TestFlight archive (build 35).
+- [ ] Optional: distinguish *saved* vs *auto-persisted draft* drifts (needs a small `ChatSession` flag).
 
 ## Last Session (May 27)
 - Fixed broken Gemini model names (gemini-3.1-flash-lite-preview → gemini-3.1-flash-lite, gemini-3-flash-preview → gemini-3.5-flash, gemini-2.0-flash → gemini-2.5-flash-lite before June 1 shutdown)
