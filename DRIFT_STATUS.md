@@ -12,10 +12,23 @@ Foundation-first, then four coordinated domains. All on `feature/apple-level-ove
 - **Flow:** first-run gesture cue, mobile Knowledge Tree now a first-class "Map" pill, persistent chat-context header + one-tap reopen-last-drift, visible New-chat button, drift-vs-chat sidebar distinction.
 - **Synthesis:** verified boots clean (0 console errors, iOS-width); fixed duplicated tagline on mobile Login.
 
+- **Mobile tooltip Drift button** (`b00636f`): mobile pill bar was missing plain "Drift" — added as first/prominent item (pink→violet gradient) ahead of Simplify/Deep dive/Connect.
+
 ### Next on this branch
-- [ ] Manual on-device pass in the iOS simulator (haptics, tree bottom-sheet, safe-area, reduced-motion).
+- [ ] Manual on-device simulator pass: haptics, tree bottom-sheet feel, safe-area, reduced-motion.
 - [ ] Merge to `main` once happy → new TestFlight archive (build 35).
-- [ ] Optional: distinguish *saved* vs *auto-persisted draft* drifts (needs a small `ChatSession` flag).
+- [ ] Optional: distinguish *saved* vs *auto-persisted draft* drifts (needs a `ChatSession` flag).
+- [ ] Message editing (click to edit, regenerate AI response).
+- [ ] AddModelSheet: extend beyond Gemini-only (OpenRouter + Ollama).
+
+## Style & vibe to continue in
+See `DESIGN_SYSTEM.md` for the full canonical spec. Short version:
+- **Dark, luminous** — the void is calm, important things glow. Never borders for borders' sake.
+- **Spring physics** — `ease-spring` `cubic-bezier(0.34,1.46,0.64,1)` everywhere motion happens.
+- **Breathe, don't snap** — idle states pulse gently; entrances bloom or reveal-up; nothing just appears.
+- **iOS-first** — touch targets ≥ 26 px, haptics on meaningful moments, safe-area aware, reduced-motion honored.
+- **Voice: smart, understated, curious** — never generic ("explore" → "drift"), teaches through design not instructions.
+- **Primitives:** `src/components/motion/` + `src/lib/haptics.ts` — reach for these before hand-rolling.
 
 ## Last Session (May 27)
 - Fixed broken Gemini model names (gemini-3.1-flash-lite-preview → gemini-3.1-flash-lite, gemini-3-flash-preview → gemini-3.5-flash, gemini-2.0-flash → gemini-2.5-flash-lite before June 1 shutdown)
