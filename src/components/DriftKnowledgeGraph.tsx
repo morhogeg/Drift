@@ -1,11 +1,20 @@
 /**
- * DriftKnowledgeGraph — bird's-eye view of all drifts in a conversation.
- * Mobile-first: full-screen bottom sheet on small screens, right panel on desktop.
- * Light/dark theme aware via CSS custom properties.
+ * DriftKnowledgeGraph — "a map of a mind in motion."
+ *
+ * A bird's-eye, spatial view of every drift in a conversation, rendered as a
+ * living constellation: bioluminescent nodes that glow from within, connected
+ * by organically curving rivers of light. The active branch breathes; deeper
+ * thoughts recede into a soft depth-of-field haze.
+ *
+ * Pure SVG + CSS — no WebGL, no heavy deps. Touch-friendly, iOS-first, and
+ * equally at home in a narrow mobile bottom sheet or a desktop side panel.
+ *
+ * The public surface (props, default export) and click-to-open-drift behavior
+ * are preserved exactly; only the visual layer was reimagined.
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, ChevronDown, ChevronRight, GitBranch } from 'lucide-react'
+import { X, GitBranch, Maximize2 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +34,7 @@ interface TreeNode {
   children: TreeNode[]
 }
 
-// ── Data helpers ──────────────────────────────────────────────────────────────
+// ── Data helpers (preserved) ────────────────────────────────────────────────────
 
 function findRootId(chatId: string, allChats: ChatSession[]): string {
   const chat = allChats.find(c => c.id === chatId)
@@ -109,7 +118,7 @@ function lastAiPreview(chat: ChatSession): string | undefined {
   const last = [...chat.messages].reverse().find(m => !m.isUser)
   if (!last?.text) return undefined
   const clean = last.text.replace(/[#*`[\]\n]/g, ' ').replace(/\s+/g, ' ').trim()
-  return clean.length > 100 ? clean.slice(0, 100) + '…' : clean
+  return clean.length > 120 ? clean.slice(0, 120) + '…' : clean
 }
 
 function totalMessages(node: TreeNode): number {
@@ -143,17 +152,20 @@ function timeAgo(date: Date): string {
   return new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-// ── Depth palette ─────────────────────────────────────────────────────────────
+// ── Luminosity palette ──────────────────────────────────────────────────────────
+// A descent into deeper waters: violet surface → indigo → cyan discovery depths.
+// Each depth has a core (bright center of the glow) and a halo (outer light).
 
-const PALETTE = [
-  { accent: '#a855f7', bg: 'rgba(168,85,247,{a})', line: 'rgba(168,85,247,0.3)' },
-  { accent: '#6366f1', bg: 'rgba(99,102,241,{a})', line: 'rgba(99,102,241,0.3)' },
-  { accent: '#3b82f6', bg: 'rgba(59,130,246,{a})', line: 'rgba(59,130,246,0.3)' },
+interface Hue { core: string; halo: string; rim: string }
+const HUES: Hue[] = [
+  { core: '#c084fc', halo: '#a855f7', rim: '#7c3aed' }, // root / surface — violet
+  { core: '#a5b4fc', halo: '#6366f1', rim: '#4f46e5' }, // depth 1 — indigo
+  { core: '#7dd3fc', halo: '#38bdf8', rim: '#0ea5e9' }, // depth 2 — sky
+  { core: '#67e8f9', halo: '#22d3ee', rim: '#06b6d4' }, // depth 3+ — discovery cyan
 ]
-function palette(depth: number) { return PALETTE[Math.min(depth - 1, PALETTE.length - 1)] }
-function withAlpha(t: string, a: number) { return t.replace('{a}', String(a)) }
+function hueAt(depth: number): Hue { return HUES[Math.min(depth, HUES.length - 1)] }
 
-// ── Responsive hook ────────────────────────────────────────────────────────────
+// ── Responsive hook (preserved) ──────────────────────────────────────────────────
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
@@ -165,287 +177,529 @@ function useIsMobile() {
   return isMobile
 }
 
-// ── Tree card ──────────────────────────────────────────────────────────────────
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
 
-function TreeCard({
-  node, depth, isLast, ancestorLines, activeChatId, onSwitchChat, onOpenDrift,
-  collapsed, onToggleCollapse, isMobile,
+// ── Spatial layout ───────────────────────────────────────────────────────────────
+// A tidy-tree layout flowing left→right (depth = x, siblings spread on y).
+// Each subtree owns a vertical band sized by its leaf count, so branches never
+// overlap and the whole thing reads like tributaries of a river.
+
+interface Laid {
+  node: TreeNode
+  depth: number
+  x: number
+  y: number
+  parent: Laid | null
+  index: number     // sibling index for staggered entrance
+  leafCount: number
+}
+
+const COL = 168   // horizontal distance between depths
+const ROW = 96    // vertical distance between leaves
+const PAD_X = 96  // left/right breathing room
+const PAD_Y = 70  // top/bottom breathing room
+
+function countLeaves(node: TreeNode): number {
+  if (!node.children.length) return 1
+  return node.children.reduce((s, c) => s + countLeaves(c), 0)
+}
+
+function layoutTree(root: TreeNode): { nodes: Laid[]; width: number; height: number } {
+  const nodes: Laid[] = []
+  let order = 0
+  let maxDepth = 0
+
+  // Recursively place: y is the vertical center of the band this subtree occupies.
+  function place(node: TreeNode, depth: number, bandTop: number, parent: Laid | null): Laid {
+    maxDepth = Math.max(maxDepth, depth)
+    const leaves = countLeaves(node)
+    const bandHeight = leaves * ROW
+    const y = bandTop + bandHeight / 2
+    const laid: Laid = {
+      node, depth, x: PAD_X + depth * COL, y: PAD_Y + y,
+      parent, index: order++, leafCount: leaves,
+    }
+    nodes.push(laid)
+    let childTop = bandTop
+    node.children.forEach((child) => {
+      const childLeaves = countLeaves(child)
+      place(child, depth + 1, childTop, laid)
+      childTop += childLeaves * ROW
+    })
+    return laid
+  }
+
+  place(root, 0, 0, null)
+  const totalLeaves = countLeaves(root)
+  const width = PAD_X * 2 + maxDepth * COL + 30
+  const height = PAD_Y * 2 + totalLeaves * ROW
+  return { nodes, width, height }
+}
+
+/** Organic S-curve between two points (horizontal-flowing bézier). */
+function flowPath(x1: number, y1: number, x2: number, y2: number): string {
+  const dx = (x2 - x1) * 0.55
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+}
+
+// ── Node sizing ───────────────────────────────────────────────────────────────
+
+function nodeRadius(laid: Laid): number {
+  // Root largest; size also nudged up by how much conversation lives in the node.
+  const base = laid.depth === 0 ? 26 : laid.depth === 1 ? 20 : 17
+  const msgs = laid.node.chat.messages.length
+  return base + Math.min(msgs, 8) * 0.7
+}
+
+// ── The living graph (SVG) ───────────────────────────────────────────────────────
+
+function GraphCanvas({
+  root, activeChatId, onSwitchChat, onOpenDrift, isMobile, onSelect, selectedId,
 }: {
-  node: TreeNode; depth: number; isLast: boolean; ancestorLines: boolean[]
-  activeChatId: string | null; onSwitchChat: (id: string) => void
+  root: TreeNode
+  activeChatId: string | null
+  onSwitchChat: (id: string) => void
   onOpenDrift?: (chat: ChatSession) => void
-  collapsed: Set<string>; onToggleCollapse: (id: string) => void
   isMobile: boolean
+  onSelect: (id: string) => void
+  selectedId: string | null
 }) {
-  const isActive = node.chat.id === activeChatId
-  const isCollapsed = collapsed.has(node.chat.id)
-  const isDrift = depth > 0
-  const p = isDrift ? palette(depth) : null
-  const hasChildren = node.children.length > 0
+  const { nodes, width, height } = useMemo(() => layoutTree(root), [root])
+  const reduce = useMemo(prefersReducedMotion, [])
 
-  const title = node.chat.metadata?.selectedText || node.chat.title || 'Untitled'
-  const msgCount = node.chat.messages.length
-  const preview = lastAiPreview(node.chat)
-  const ts = node.chat.createdAt ? timeAgo(node.chat.createdAt) : null
+  // Pan + zoom: contain-to-fit on mount, then free drag/pinch.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
+  const fitDone = useRef(false)
 
-  // Indent per level — tighter on mobile
-  const INDENT = isMobile ? 18 : 24
+  const fit = useCallback(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const cw = el.clientWidth, ch = el.clientHeight
+    if (!cw || !ch) return
+    const s = Math.min(cw / width, ch / height, 1.15)
+    setView({
+      scale: s,
+      x: (cw - width * s) / 2,
+      y: (ch - height * s) / 2,
+    })
+  }, [width, height])
 
-  const cardBg = isActive
-    ? withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.1)
-    : 'rgb(var(--color-elevated))'
+  useEffect(() => {
+    fitDone.current = false
+  }, [width, height])
 
-  const borderColor = isActive
-    ? (p?.accent ?? '#a855f7') + 'aa'
-    : isDrift
-      ? (p?.accent ?? '#a855f7') + '35'
-      : 'rgb(var(--color-border))'
+  useEffect(() => {
+    if (fitDone.current) return
+    fit()
+    fitDone.current = true
+  }, [fit])
 
-  const accentLeft = isDrift
-    ? (p?.accent ?? '#a855f7') + (isActive ? 'dd' : '66')
-    : undefined
+  // ── Drag to pan ──
+  const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null)
+  const pinch = useRef<{ dist: number; scale: number } | null>(null)
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (pinch.current) return
+    drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }
+    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return
+    const dx = e.clientX - drag.current.x
+    const dy = e.clientY - drag.current.y
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true
+    setView(v => ({ ...v, x: drag.current!.vx + dx, y: drag.current!.vy + dy }))
+  }
+  const onPointerUp = () => { drag.current = null }
+
+  const onWheel = (e: React.WheelEvent) => {
+    const el = wrapRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+    setView(v => {
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
+      const ns = Math.max(0.4, Math.min(2.4, v.scale * factor))
+      const k = ns / v.scale
+      return { scale: ns, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+    })
+  }
+
+  // Touch pinch (two-finger) — simple distance-based zoom around midpoint.
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]]
+      pinch.current = { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale: view.scale }
+      drag.current = null
+    }
+  }
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinch.current) {
+      const el = wrapRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const [a, b] = [e.touches[0], e.touches[1]]
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+      const px = (a.clientX + b.clientX) / 2 - rect.left
+      const py = (a.clientY + b.clientY) / 2 - rect.top
+      const ns = Math.max(0.4, Math.min(2.4, pinch.current.scale * (dist / pinch.current.dist)))
+      setView(v => {
+        const k = ns / v.scale
+        return { scale: ns, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+      })
+    }
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinch.current = null
+  }
+
+  const byId = useMemo(() => new Map(nodes.map(n => [n.node.chat.id, n])), [nodes])
+
+  const handleActivate = (laid: Laid) => {
+    if (drag.current?.moved) return
+    const id = laid.node.chat.id
+    onSelect(id)
+    if (laid.depth > 0 && onOpenDrift) onOpenDrift(laid.node.chat)
+    else onSwitchChat(id)
+  }
+
+  // Background drifting motes — decorative, gated on reduced-motion.
+  const motes = useMemo(() => {
+    if (reduce) return []
+    return Array.from({ length: 14 }).map((_, i) => ({
+      id: i,
+      cx: (i * 137.5) % 100,
+      cy: (i * 71.3) % 100,
+      r: 0.6 + (i % 3) * 0.5,
+      delay: (i % 7) * 1.3,
+      dur: 14 + (i % 5) * 4,
+    }))
+  }, [reduce])
 
   return (
-    <div>
-      {/* Branch connector */}
-      {isDrift && (
-        <div className="flex" style={{ height: isMobile ? 28 : 32 }}>
-          {Array.from({ length: depth }).map((_, i) => {
-            const isThisLevel = i === depth - 1
-            const drawLine = isThisLevel ? true : ancestorLines[i]
-            return (
-              <div key={i} className="flex-shrink-0 relative" style={{ width: INDENT }}>
-                {drawLine && (
-                  <div
-                    className="absolute"
-                    style={{
-                      left: INDENT / 2 - 0.75,
-                      top: 0,
-                      bottom: isThisLevel ? '50%' : 0,
-                      width: 1.5,
-                      background: p?.line,
-                      borderRadius: 1,
-                    }}
-                  />
-                )}
-                {isThisLevel && (
-                  <div
-                    className="absolute"
-                    style={{
-                      left: INDENT / 2,
-                      right: 0,
-                      top: '50%',
-                      height: 1.5,
-                      background: p?.line,
-                      borderRadius: 1,
-                    }}
-                  />
-                )}
-              </div>
-            )
-          })}
-          {/* Phrase pill */}
-          {node.phrase && (
-            <div className="flex items-end pb-1 flex-1 min-w-0">
-              <span
-                className="text-[10px] font-semibold rounded-full px-2 py-0.5 truncate"
-                style={{
-                  color: p ? p.accent + 'dd' : 'rgba(168,85,247,0.86)',
-                  background: withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.12),
-                  border: `1px solid ${p ? p.accent + '33' : 'rgba(168,85,247,0.2)'}`,
-                  maxWidth: isMobile ? 180 : 240,
-                }}
-              >
-                "{node.phrase.length > 28 ? node.phrase.slice(0, 28) + '…' : node.phrase}"
-              </span>
-            </div>
-          )}
-        </div>
+    <div
+      ref={wrapRef}
+      className="dkg-canvas relative w-full h-full overflow-hidden touch-none select-none"
+      style={{ cursor: drag.current ? 'grabbing' : 'grab' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerUp}
+      onWheel={onWheel}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Ambient depth gradient + drifting motes behind everything */}
+      <div className="dkg-ambient" aria-hidden />
+      {!reduce && (
+        <svg className="dkg-motes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+          {motes.map(m => (
+            <circle
+              key={m.id}
+              cx={m.cx} cy={m.cy} r={m.r}
+              fill="rgba(168,140,255,0.5)"
+              style={{ animation: `dkgMote ${m.dur}s ease-in-out ${m.delay}s infinite` }}
+            />
+          ))}
+        </svg>
       )}
 
-      {/* Card row */}
-      <div className="flex">
-        {/* Ancestor guide lines */}
-        {Array.from({ length: depth }).map((_, i) => {
-          const drawLine = i === depth - 1 ? !isLast || (hasChildren && !isCollapsed) : ancestorLines[i]
-          return (
-            <div key={i} className="flex-shrink-0 relative" style={{ width: INDENT }}>
-              {drawLine && (
-                <div
-                  className="absolute"
-                  style={{
-                    left: INDENT / 2 - 0.75,
-                    top: 0,
-                    bottom: 0,
-                    width: 1.5,
-                    background: p?.line,
-                    borderRadius: 1,
-                  }}
+      {/* Refit control */}
+      <button
+        onClick={(e) => { e.stopPropagation(); fit() }}
+        className="dkg-fit absolute z-20 flex items-center justify-center rounded-full active:scale-90"
+        style={{ top: 10, right: 10, width: 32, height: 32 }}
+        title="Recenter"
+        aria-label="Recenter map"
+      >
+        <Maximize2 className="w-3.5 h-3.5" />
+      </button>
+
+      <svg
+        className="absolute top-0 left-0"
+        width={width}
+        height={height}
+        style={{
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+          transformOrigin: '0 0',
+          willChange: 'transform',
+          overflow: 'visible',
+        }}
+      >
+        <defs>
+          {/* One radial gradient per hue — bright core fading to transparent halo */}
+          {HUES.map((h, i) => (
+            <radialGradient key={`g${i}`} id={`dkg-core-${i}`} cx="38%" cy="34%" r="72%">
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+              <stop offset="22%" stopColor={h.core} stopOpacity="0.98" />
+              <stop offset="68%" stopColor={h.halo} stopOpacity="0.92" />
+              <stop offset="100%" stopColor={h.rim} stopOpacity="0.78" />
+            </radialGradient>
+          ))}
+          {/* Flowing connector gradients (parent hue → child hue) */}
+          {HUES.map((h, i) => {
+            const next = hueAt(i + 1)
+            return (
+              <linearGradient key={`l${i}`} id={`dkg-link-${i}`} x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor={h.halo} stopOpacity="0.55" />
+                <stop offset="100%" stopColor={next.halo} stopOpacity="0.42" />
+              </linearGradient>
+            )
+          })}
+          {/* Soft outer glow */}
+          <filter id="dkg-glow" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="4.5" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          {/* Depth-of-field blur for deep/unselected nodes */}
+          <filter id="dkg-haze" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="1.1" />
+          </filter>
+        </defs>
+
+        {/* Connectors first (under nodes) */}
+        <g>
+          {nodes.map(laid => {
+            if (!laid.parent) return null
+            const p = laid.parent
+            const path = flowPath(p.x, p.y, laid.x, laid.y)
+            const onActivePath =
+              selectedId === laid.node.chat.id ||
+              activeChatId === laid.node.chat.id ||
+              selectedId === p.node.chat.id
+            return (
+              <g key={`edge-${laid.node.chat.id}`}>
+                {/* base river */}
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={`url(#dkg-link-${Math.min(p.depth, HUES.length - 1)})`}
+                  strokeWidth={onActivePath ? 2.6 : 1.6}
+                  strokeLinecap="round"
+                  opacity={onActivePath ? 0.95 : 0.5}
                 />
-              )}
-            </div>
-          )
-        })}
+                {/* flowing pulse of light along the river */}
+                {!reduce && (
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={hueAt(laid.depth).core}
+                    strokeWidth={onActivePath ? 2.4 : 1.4}
+                    strokeLinecap="round"
+                    className="dkg-flow"
+                    style={{ animationDelay: `${(laid.index % 6) * 0.5}s` }}
+                  />
+                )}
+              </g>
+            )
+          })}
+        </g>
 
-        {/* Main card */}
-        <button
-          onClick={() => {
-            if (isDrift && onOpenDrift) {
-              onOpenDrift(node.chat)
-            } else {
-              onSwitchChat(node.chat.id)
-            }
-          }}
-          className="flex-1 min-w-0 text-left rounded-2xl transition-all duration-150 active:scale-[0.98]"
-          style={{
-            background: cardBg,
-            border: `1px solid ${borderColor}`,
-            borderLeftWidth: isDrift ? 3 : 1,
-            borderLeftColor: accentLeft,
-            padding: isMobile ? '9px 11px' : '10px 14px',
-            marginBottom: isMobile ? 7 : 8,
-            boxShadow: isActive
-              ? `0 0 0 3px ${p?.accent ?? '#a855f7'}22, 0 2px 12px rgba(0,0,0,0.06)`
-              : '0 1px 3px rgba(0,0,0,0.04)',
-          }}
-        >
-          {/* Top row: badge + msg count + collapse */}
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-1.5">
-              {isDrift ? (
-                <span
-                  className="text-[10px] font-bold uppercase tracking-widest"
-                  style={{ color: p ? p.accent + 'cc' : 'rgba(168,85,247,0.8)' }}
-                >
-                  ↗ Drift
-                </span>
-              ) : (
-                <span
-                  className="text-[10px] font-bold uppercase tracking-widest"
-                  style={{ color: 'rgb(var(--color-text-muted))' }}
-                >
-                  Main Chat
-                </span>
-              )}
-            </div>
+        {/* Nodes */}
+        <g>
+          {nodes.map(laid => {
+            const id = laid.node.chat.id
+            const h = hueAt(laid.depth)
+            const r = nodeRadius(laid)
+            const isActive = id === activeChatId
+            const isSelected = id === selectedId
+            const focused = isActive || isSelected
+            const gi = Math.min(laid.depth, HUES.length - 1)
+            const phrase = laid.node.phrase ?? laid.node.chat.title ?? 'Untitled'
+            const label = phrase.length > 22 ? phrase.slice(0, 22) + '…' : phrase
+            const depthDim = laid.depth >= 2 && !focused
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {/* Message count pill */}
-              <span
-                className="text-[10px] font-medium rounded-full px-2 py-0.5 tabular-nums"
+            return (
+              <g
+                key={id}
+                className="dkg-node"
                 style={{
-                  background: isDrift
-                    ? withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.1)
-                    : 'rgba(var(--color-border-raw, 100,100,100), 0.12)',
-                  color: isDrift
-                    ? (p?.accent ?? '#a855f7') + 'aa'
-                    : 'rgb(var(--color-text-muted))',
-                  border: `1px solid ${isDrift ? (p?.accent ?? '#a855f7') + '22' : 'rgb(var(--color-border))'}`,
+                  cursor: 'pointer',
+                  animation: reduce ? undefined : `dkgRise 0.6s cubic-bezier(0.16,1,0.3,1) ${0.05 + laid.index * 0.05}s both`,
                 }}
+                onPointerUp={(e) => { e.stopPropagation(); handleActivate(laid) }}
               >
-                {msgCount} {msgCount === 1 ? 'msg' : 'msgs'}
-              </span>
+                {/* wide ambient halo */}
+                <circle
+                  cx={laid.x} cy={laid.y} r={r * (focused ? 2.5 : 1.95)}
+                  fill={h.halo}
+                  opacity={focused ? 0.22 : depthDim ? 0.07 : 0.12}
+                  style={{ filter: 'blur(7px)' }}
+                  className={focused && !reduce ? 'dkg-breathe' : undefined}
+                />
+                {/* breathing aura ring for the active/selected node */}
+                {focused && (
+                  <circle
+                    cx={laid.x} cy={laid.y} r={r + 6}
+                    fill="none"
+                    stroke={h.core}
+                    strokeWidth={1.5}
+                    opacity={0.7}
+                    className={reduce ? undefined : 'dkg-ring'}
+                  />
+                )}
+                {/* the glowing orb itself */}
+                <circle
+                  cx={laid.x} cy={laid.y} r={r}
+                  fill={`url(#dkg-core-${gi})`}
+                  filter={depthDim ? 'url(#dkg-haze)' : 'url(#dkg-glow)'}
+                  opacity={depthDim ? 0.82 : 1}
+                  stroke={focused ? '#ffffff' : h.rim}
+                  strokeWidth={focused ? 1.2 : 0.6}
+                  strokeOpacity={focused ? 0.85 : 0.4}
+                />
+                {/* inner specular highlight — the "light inside" */}
+                <circle
+                  cx={laid.x - r * 0.28} cy={laid.y - r * 0.32} r={r * 0.34}
+                  fill="#ffffff" opacity={depthDim ? 0.3 : 0.6}
+                  style={{ filter: 'blur(1.5px)' }}
+                />
+                {/* root crown */}
+                {laid.depth === 0 && (
+                  <circle
+                    cx={laid.x} cy={laid.y} r={r + 11}
+                    fill="none" stroke={h.core} strokeWidth={0.8}
+                    strokeDasharray="2 5" opacity={0.5}
+                    className={reduce ? undefined : 'dkg-spin'}
+                    style={{ transformOrigin: `${laid.x}px ${laid.y}px` }}
+                  />
+                )}
 
-              {/* Collapse toggle */}
-              {hasChildren && (
-                <button
-                  onClick={e => { e.stopPropagation(); onToggleCollapse(node.chat.id) }}
-                  className="flex items-center justify-center rounded-full transition-all duration-200 flex-shrink-0 active:scale-90"
+                {/* label */}
+                <text
+                  x={laid.x}
+                  y={laid.y + r + (isMobile ? 15 : 16)}
+                  textAnchor="middle"
+                  className="dkg-label"
                   style={{
-                    width: isMobile ? 24 : 20,
-                    height: isMobile ? 24 : 20,
-                    minWidth: isMobile ? 24 : 20,
-                    background: withAlpha(p?.bg ?? 'rgba(168,85,247,{a})', 0.12),
-                    border: `1px solid ${p?.accent ?? '#a855f7'}33`,
-                    color: p?.accent ?? '#a855f7',
+                    fontSize: laid.depth === 0 ? 12 : 11,
+                    fontWeight: focused ? 700 : 600,
+                    fill: focused ? '#ffffff' : h.core,
+                    opacity: depthDim ? 0.6 : focused ? 1 : 0.92,
                   }}
-                  title={isCollapsed ? 'Expand' : 'Collapse'}
                 >
-                  {isCollapsed
-                    ? <ChevronRight className="w-3 h-3" />
-                    : <ChevronDown className="w-3 h-3" />
-                  }
-                </button>
-              )}
-            </div>
-          </div>
+                  {label}
+                </text>
+                {/* depth-0 sublabel: message count */}
+                <text
+                  x={laid.x}
+                  y={laid.y + r + (isMobile ? 28 : 30)}
+                  textAnchor="middle"
+                  className="dkg-sublabel"
+                  style={{
+                    fontSize: 9,
+                    fill: h.halo,
+                    opacity: depthDim ? 0.4 : 0.7,
+                  }}
+                >
+                  {laid.node.chat.messages.length} {laid.node.chat.messages.length === 1 ? 'msg' : 'msgs'}
+                </text>
+              </g>
+            )
+          })}
+        </g>
+      </svg>
 
-          {/* Title */}
+      {/* Selected node detail card — floats over the map */}
+      {selectedId && byId.has(selectedId) && (
+        <DetailCard
+          laid={byId.get(selectedId)!}
+          isMobile={isMobile}
+          onOpen={() => handleActivate(byId.get(selectedId)!)}
+          onDismiss={() => onSelect('')}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Floating detail card for the selected node ───────────────────────────────────
+
+function DetailCard({
+  laid, isMobile, onOpen, onDismiss,
+}: { laid: Laid; isMobile: boolean; onOpen: () => void; onDismiss: () => void }) {
+  const h = hueAt(laid.depth)
+  const isDrift = laid.depth > 0
+  const title = laid.node.chat.metadata?.selectedText || laid.node.chat.title || 'Untitled'
+  const preview = lastAiPreview(laid.node.chat)
+  const ts = laid.node.chat.createdAt ? timeAgo(laid.node.chat.createdAt) : null
+  const msgs = laid.node.chat.messages.length
+
+  return (
+    <div
+      className="dkg-detail absolute z-30 left-1/2 -translate-x-1/2"
+      style={{ bottom: isMobile ? 14 : 16, width: isMobile ? 'calc(100% - 24px)' : 340 }}
+      onPointerDown={e => e.stopPropagation()}
+      onPointerUp={e => e.stopPropagation()}
+    >
+      <div
+        className="dkg-detail-inner rounded-2xl overflow-hidden"
+        style={{ ['--hue-core' as string]: h.core, ['--hue-halo' as string]: h.halo, ['--hue-rim' as string]: h.rim }}
+      >
+        <div className="px-4 pt-3 pb-3.5">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <span
+              className="text-[10px] font-bold uppercase tracking-widest"
+              style={{ color: h.core }}
+            >
+              {isDrift ? '↗ Drift' : 'Origin'}
+            </span>
+            <button
+              onClick={onDismiss}
+              className="flex items-center justify-center rounded-full active:scale-90"
+              style={{ width: 22, height: 22, color: 'rgb(var(--color-text-muted))', background: 'rgba(255,255,255,0.06)' }}
+              aria-label="Deselect"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
           <div
-            className="font-semibold leading-snug mb-1.5"
+            className="font-semibold leading-snug mb-1"
             style={{
-              fontSize: isMobile ? 13 : 13,
-              color: isDrift ? (p?.accent ?? '#a855f7') : 'rgb(var(--color-text-primary))',
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
+              fontSize: 14, color: '#fff',
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
             } as React.CSSProperties}
           >
             {title}
           </div>
-
-          {/* Preview */}
           {preview && (
             <div
-              className="leading-relaxed mb-2"
+              className="leading-relaxed mb-3"
               style={{
-                fontSize: 11,
-                color: 'rgb(var(--color-text-muted))',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
+                fontSize: 11.5, color: 'rgba(255,255,255,0.6)',
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
               } as React.CSSProperties}
             >
               {preview}
             </div>
           )}
-
-          {/* Footer row: timestamp + collapsed hint */}
-          <div className="flex items-center justify-between gap-2">
-            {isCollapsed && hasChildren && (
-              <span
-                className="text-[10px] font-medium"
-                style={{ color: (p?.accent ?? '#a855f7') + 'aa' }}
-              >
-                {node.children.length} hidden branch{node.children.length !== 1 ? 'es' : ''}
-              </span>
-            )}
-            {!isCollapsed && <span />}
-            {ts && (
-              <span
-                className="text-[10px] tabular-nums flex-shrink-0 ml-auto"
-                style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.55 }}
-              >
-                {ts}
-              </span>
-            )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onOpen}
+              className="dkg-open-btn flex-1 rounded-xl text-[12px] font-semibold py-2 active:scale-[0.98]"
+            >
+              {isDrift ? 'Open this drift' : 'Go to chat'}
+            </button>
+            <span className="text-[10px] tabular-nums flex-shrink-0" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              {msgs} {msgs === 1 ? 'msg' : 'msgs'}{ts ? ` · ${ts}` : ''}
+            </span>
           </div>
-        </button>
+        </div>
       </div>
-
-      {/* Children */}
-      {!isCollapsed && node.children.map((child, i) => (
-        <TreeCard
-          key={child.chat.id}
-          node={child}
-          depth={depth + 1}
-          isLast={i === node.children.length - 1}
-          ancestorLines={[...ancestorLines, !isLast]}
-          activeChatId={activeChatId}
-          onSwitchChat={onSwitchChat}
-          onOpenDrift={onOpenDrift}
-          collapsed={collapsed}
-          onToggleCollapse={onToggleCollapse}
-          isMobile={isMobile}
-        />
-      ))}
     </div>
   )
 }
 
-// ── Topics strip ──────────────────────────────────────────────────────────────
+// ── Topics strip (refined for the luminous palette) ──────────────────────────────
 
 function TopicsStrip({
   topics, onJump, isMobile,
@@ -456,39 +710,33 @@ function TopicsStrip({
       className="flex-shrink-0 flex items-center gap-0"
       style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
     >
-      {/* Label */}
       <div
         className="flex-shrink-0 px-3 py-2 text-[9px] font-bold uppercase tracking-widest"
         style={{ color: 'rgb(var(--color-text-muted))' }}
       >
         Explored
       </div>
-
-      {/* Scrollable chips */}
       <div
         className="flex-1 overflow-x-auto py-2 pr-3 [&::-webkit-scrollbar]:hidden"
         style={{
-          display: 'flex',
-          flexWrap: 'nowrap',
-          gap: 6,
-          scrollbarWidth: 'none',
-          WebkitOverflowScrolling: 'touch',
+          display: 'flex', flexWrap: 'nowrap', gap: 6,
+          scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
         } as React.CSSProperties}
       >
         {topics.map(({ phrase, chatId }, i) => {
-          const p = palette((i % PALETTE.length) + 1)
+          const h = hueAt((i % (HUES.length - 1)) + 1)
           return (
             <button
               key={chatId}
               onClick={() => onJump(chatId)}
-              className="flex-shrink-0 font-medium rounded-full transition-all duration-150 active:scale-95"
+              className="dkg-chip flex-shrink-0 font-medium rounded-full active:scale-95"
               style={{
-                fontSize: 11,
-                padding: '3px 10px',
-                background: withAlpha(p.bg, 0.12),
-                border: `1px solid ${p.accent}33`,
-                color: p.accent + 'dd',
+                fontSize: 11, padding: '3px 10px',
+                background: `${h.halo}1f`,
+                border: `1px solid ${h.halo}40`,
+                color: h.core,
                 minHeight: isMobile ? 26 : 24,
+                boxShadow: `0 0 10px ${h.halo}22`,
               }}
             >
               {phrase.length > 20 ? phrase.slice(0, 20) + '…' : phrase}
@@ -500,7 +748,7 @@ function TopicsStrip({
   )
 }
 
-// ── Drag-to-close for mobile bottom sheet ─────────────────────────────────────
+// ── Drag-to-close for mobile bottom sheet (preserved) ─────────────────────────────
 
 function useDragClose(onClose: () => void, enabled: boolean) {
   const startY = useRef<number | null>(null)
@@ -556,14 +804,10 @@ export default function DriftKnowledgeGraph({
   const msgTotal = tree ? totalMessages(tree) : 0
   const topics = tree ? disambiguateTopics(collectTopics(tree)) : []
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const onToggleCollapse = useCallback((id: string) => {
-    setCollapsed(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }, [])
+  // Selected node in the map (drives the floating detail card).
+  const [selectedId, setSelectedId] = useState<string | null>(activeChatId)
+  useEffect(() => { setSelectedId(activeChatId) }, [activeChatId])
+  const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
 
   const { panelRef, onTouchStart, onTouchMove, onTouchEnd } = useDragClose(onClose, isMobile)
 
@@ -573,26 +817,36 @@ export default function DriftKnowledgeGraph({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const graph = tree ? (
+    <GraphCanvas
+      root={tree}
+      activeChatId={activeChatId}
+      onSwitchChat={isMobile ? (id => { onSwitchChat(id); onClose() }) : onSwitchChat}
+      onOpenDrift={onOpenDrift ? (chat => { onOpenDrift(chat); if (isMobile) onClose() }) : undefined}
+      isMobile={isMobile}
+      onSelect={onSelect}
+      selectedId={selectedId}
+    />
+  ) : (
+    <EmptyState isMobile={isMobile} />
+  )
+
   // ── Mobile: full-screen bottom sheet ──
   if (isMobile) {
     return (
       <>
-        {/* Backdrop */}
+        <StyleBlock />
         <div
           className="fixed inset-0 z-40"
-          style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}
+          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)' }}
           onClick={onClose}
         />
-
-        {/* Panel */}
         <div
           ref={panelRef}
-          className="fixed left-0 right-0 bottom-0 z-50 flex flex-col"
+          className="dkg-sheet fixed left-0 right-0 bottom-0 z-50 flex flex-col"
           style={{
             height: '88dvh',
-            background: 'rgb(var(--color-surface))',
-            borderRadius: '16px 16px 0 0',
-            boxShadow: '0 -6px 30px rgba(0,0,0,0.18)',
+            borderRadius: '18px 18px 0 0',
             transition: 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
           }}
         >
@@ -603,37 +857,22 @@ export default function DriftKnowledgeGraph({
             onTouchMove={onTouchMove}
             onTouchEnd={onTouchEnd}
           >
-            <div
-              className="rounded-full"
-              style={{ width: 36, height: 4, background: 'rgb(var(--color-border))' }}
-            />
+            <div className="rounded-full" style={{ width: 36, height: 4, background: 'rgba(255,255,255,0.25)' }} />
           </div>
 
           {/* Header */}
-          <div
-            className="px-4 pt-1.5 pb-3 flex-shrink-0"
-            style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
-          >
+          <div className="px-4 pt-1.5 pb-3 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <GitBranch className="w-3 h-3 flex-shrink-0" style={{ color: 'rgba(168,85,247,0.7)' }} />
-                  <span
-                    className="text-[9px] font-bold uppercase tracking-widest"
-                    style={{ color: 'rgba(168,85,247,0.7)' }}
-                  >
-                    Drift Tree
+                  <GitBranch className="w-3 h-3 flex-shrink-0" style={{ color: '#c084fc' }} />
+                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#c084fc' }}>
+                    Drift Map
                   </span>
                 </div>
                 <h2
                   className="text-[15px] font-bold leading-snug"
-                  style={{
-                    color: 'rgb(var(--color-text-primary))',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 1,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                  } as React.CSSProperties}
+                  style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
                 >
                   {rootChat?.title || 'Untitled'}
                 </h2>
@@ -641,53 +880,28 @@ export default function DriftKnowledgeGraph({
                   <div className="flex items-center gap-1.5 mt-1">
                     <span
                       className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5"
-                      style={{ background: 'rgba(168,85,247,0.1)', color: 'rgba(168,85,247,0.9)', border: '1px solid rgba(168,85,247,0.18)' }}
+                      style={{ background: 'rgba(168,85,247,0.16)', color: '#d8b4fe', border: '1px solid rgba(168,85,247,0.3)' }}
                     >
                       ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                     </span>
-                    <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                      · {msgTotal} msgs
-                    </span>
+                    <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>· {msgTotal} msgs</span>
                   </div>
                 )}
               </div>
               <button
                 onClick={onClose}
-                className="flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90"
-                style={{
-                  width: 30, height: 30,
-                  background: 'rgb(var(--color-elevated))',
-                  border: '1px solid rgb(var(--color-border))',
-                  color: 'rgb(var(--color-text-muted))',
-                }}
+                className="flex-shrink-0 flex items-center justify-center rounded-full active:scale-90"
+                style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)' }}
+                aria-label="Close"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          {/* Topics strip */}
-          {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile={isMobile} />}
+          {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile />}
 
-          {/* Tree */}
-          <div className="flex-1 overflow-y-auto px-3 py-3" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-            {!tree ? (
-              <EmptyState isMobile />
-            ) : (
-              <TreeCard
-                node={tree}
-                depth={0}
-                isLast={true}
-                ancestorLines={[]}
-                activeChatId={activeChatId}
-                onSwitchChat={id => { onSwitchChat(id); onClose() }}
-                onOpenDrift={onOpenDrift ? chat => { onOpenDrift(chat); onClose() } : undefined}
-                collapsed={collapsed}
-                onToggleCollapse={onToggleCollapse}
-                isMobile={isMobile}
-              />
-            )}
-          </div>
+          <div className="flex-1 relative overflow-hidden">{graph}</div>
         </div>
       </>
     )
@@ -696,36 +910,24 @@ export default function DriftKnowledgeGraph({
   // ── Desktop: right panel ──
   return (
     <>
+      <StyleBlock />
       <div
-        className="fixed top-0 right-0 bottom-0 z-40 flex flex-col shadow-2xl"
-        style={{
-          width: 'min(480px, 42vw)',
-          background: 'rgb(var(--color-surface))',
-          borderLeft: '1px solid rgb(var(--color-border))',
-        }}
+        className="dkg-sheet fixed top-0 right-0 bottom-0 z-40 flex flex-col"
+        style={{ width: 'min(520px, 46vw)', borderLeft: '1px solid rgb(var(--color-border))' }}
       >
         {/* Header */}
-        <div
-          className="px-5 pt-4 pb-3.5 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
-        >
+        <div className="px-5 pt-4 pb-3.5 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 mb-1">
-                <GitBranch className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'rgba(168,85,247,0.6)' }} />
-                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(168,85,247,0.6)' }}>
-                  Drift Tree
+                <GitBranch className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#c084fc' }} />
+                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#c084fc' }}>
+                  Drift Map
                 </span>
               </div>
               <h2
                 className="text-[14px] font-semibold leading-snug"
-                style={{
-                  color: 'rgb(var(--color-text-primary))',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                } as React.CSSProperties}
+                style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
                 {rootChat?.title || 'Untitled'}
               </h2>
@@ -733,48 +935,28 @@ export default function DriftKnowledgeGraph({
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5"
-                    style={{ background: 'rgba(168,85,247,0.1)', color: 'rgba(168,85,247,0.85)', border: '1px solid rgba(168,85,247,0.18)' }}
+                    style={{ background: 'rgba(168,85,247,0.16)', color: '#d8b4fe', border: '1px solid rgba(168,85,247,0.3)' }}
                   >
                     ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                   </span>
-                  <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                    · {msgTotal} messages
-                  </span>
+                  <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>· {msgTotal} messages</span>
                 </div>
               )}
             </div>
             <button
               onClick={onClose}
-              className="flex-shrink-0 p-1.5 rounded-lg transition-colors"
-              style={{ color: 'rgb(var(--color-text-muted))' }}
+              className="flex-shrink-0 p-1.5 rounded-lg"
+              style={{ color: 'rgba(255,255,255,0.6)' }}
+              aria-label="Close"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Topics strip */}
         {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile={false} />}
 
-        {/* Tree */}
-        <div className="flex-1 overflow-y-auto px-3 py-3">
-          {!tree ? (
-            <EmptyState isMobile={false} />
-          ) : (
-            <TreeCard
-              node={tree}
-              depth={0}
-              isLast={true}
-              ancestorLines={[]}
-              activeChatId={activeChatId}
-              onSwitchChat={onSwitchChat}
-              onOpenDrift={onOpenDrift}
-              collapsed={collapsed}
-              onToggleCollapse={onToggleCollapse}
-              isMobile={false}
-            />
-          )}
-        </div>
+        <div className="flex-1 relative overflow-hidden">{graph}</div>
       </div>
     </>
   )
@@ -784,34 +966,144 @@ export default function DriftKnowledgeGraph({
 
 function EmptyState({ isMobile }: { isMobile: boolean }) {
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-5 px-10 text-center">
+    <div className="h-full flex flex-col items-center justify-center gap-5 px-10 text-center relative">
+      <div className="dkg-ambient" aria-hidden />
       <div
-        className="flex items-center justify-center rounded-3xl"
-        style={{
-          width: isMobile ? 72 : 56,
-          height: isMobile ? 72 : 56,
-          background: 'rgba(168,85,247,0.08)',
-          border: '1px solid rgba(168,85,247,0.2)',
-        }}
+        className="dkg-empty-orb flex items-center justify-center rounded-full relative"
+        style={{ width: isMobile ? 84 : 64, height: isMobile ? 84 : 64 }}
       >
-        <span style={{ fontSize: isMobile ? 30 : 24, color: 'rgba(168,85,247,0.6)' }}>↗</span>
+        <span style={{ fontSize: isMobile ? 30 : 24, color: '#fff', position: 'relative', zIndex: 1 }}>↗</span>
       </div>
-      <div>
-        <p
-          className="font-semibold mb-1.5"
-          style={{ fontSize: isMobile ? 16 : 13, color: 'rgb(var(--color-text-primary))' }}
-        >
+      <div className="relative">
+        <p className="font-semibold mb-1.5" style={{ fontSize: isMobile ? 16 : 13, color: '#fff' }}>
           No drifts yet
         </p>
-        <p
-          className="leading-relaxed"
-          style={{ fontSize: isMobile ? 14 : 11, color: 'rgb(var(--color-text-muted))' }}
-        >
+        <p className="leading-relaxed" style={{ fontSize: isMobile ? 14 : 11, color: 'rgba(255,255,255,0.55)' }}>
           Select any text in an AI response and tap{' '}
-          <span style={{ color: '#a855f7', fontWeight: 600 }}>Drift</span>{' '}
-          to open a focused branch conversation.
+          <span style={{ color: '#c084fc', fontWeight: 600 }}>Drift</span>{' '}
+          to open a focused branch. Each branch becomes a glowing node on your map.
         </p>
       </div>
     </div>
+  )
+}
+
+// ── Scoped styles (local CSS-in-JS — does not touch global tokens) ────────────────
+
+function StyleBlock() {
+  return (
+    <style>{`
+      /* The sheet itself: deep, luminous void rather than flat surface */
+      .dkg-sheet {
+        background:
+          radial-gradient(120% 80% at 50% -10%, rgba(124,58,237,0.16), transparent 60%),
+          radial-gradient(90% 60% at 80% 110%, rgba(34,211,238,0.10), transparent 55%),
+          rgb(var(--color-surface));
+        box-shadow: 0 -6px 40px rgba(0,0,0,0.4), 0 0 80px rgba(124,58,237,0.06) inset;
+      }
+      :root:not(.dark) .dkg-sheet {
+        background:
+          radial-gradient(120% 80% at 50% -10%, rgba(124,58,237,0.08), transparent 60%),
+          rgb(var(--color-surface));
+      }
+
+      /* Canvas backdrop — a starless deep with a faint current of light */
+      .dkg-canvas { background: transparent; }
+      .dkg-ambient {
+        position: absolute; inset: 0; pointer-events: none;
+        background:
+          radial-gradient(60% 50% at 30% 25%, rgba(124,58,237,0.14), transparent 70%),
+          radial-gradient(55% 45% at 75% 80%, rgba(34,211,238,0.10), transparent 70%),
+          radial-gradient(40% 35% at 60% 50%, rgba(99,102,241,0.08), transparent 70%);
+      }
+      .dkg-motes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.7; }
+
+      .dkg-label { font-family: Inter, system-ui, sans-serif; pointer-events: none; paint-order: stroke;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+      .dkg-sublabel { font-family: Inter, system-ui, sans-serif; pointer-events: none; }
+
+      .dkg-fit {
+        background: rgba(255,255,255,0.07);
+        border: 1px solid rgba(255,255,255,0.12);
+        color: rgba(255,255,255,0.7);
+        backdrop-filter: blur(8px);
+      }
+      .dkg-fit:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+      /* Detail card — glass over the void */
+      .dkg-detail-inner {
+        background: linear-gradient(180deg, rgba(30,28,46,0.92), rgba(18,16,28,0.94));
+        border: 1px solid var(--hue-halo, #a855f7);
+        border-color: color-mix(in srgb, var(--hue-halo, #a855f7) 45%, transparent);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 28px color-mix(in srgb, var(--hue-halo, #a855f7) 22%, transparent);
+        backdrop-filter: blur(16px) saturate(1.2);
+        animation: dkgCardIn 0.34s cubic-bezier(0.16,1,0.3,1);
+      }
+      :root:not(.dark) .dkg-detail-inner {
+        background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,246,255,0.97));
+      }
+      .dkg-detail-inner .font-semibold { color: #fff; }
+      :root:not(.dark) .dkg-detail-inner .font-semibold,
+      :root:not(.dark) .dkg-detail-inner .leading-relaxed { color: rgb(var(--color-text-primary)) !important; }
+
+      .dkg-open-btn {
+        color: #fff;
+        background: linear-gradient(135deg, var(--hue-halo, #a855f7), var(--hue-rim, #7c3aed));
+        box-shadow: 0 4px 16px color-mix(in srgb, var(--hue-halo, #a855f7) 40%, transparent);
+        border: none;
+      }
+      .dkg-open-btn:hover { filter: brightness(1.08); }
+
+      .dkg-chip:hover { filter: brightness(1.15); }
+
+      .dkg-empty-orb {
+        background: radial-gradient(circle at 38% 34%, #ffffff, #c084fc 30%, #7c3aed 80%);
+        box-shadow: 0 0 40px rgba(168,85,247,0.45), inset 0 0 14px rgba(255,255,255,0.4);
+        animation: dkgBreathe 4s ease-in-out infinite;
+      }
+
+      /* ── Keyframes (gated by media query below for reduced motion) ── */
+      @keyframes dkgRise {
+        from { opacity: 0; transform: scale(0.6); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+      @keyframes dkgCardIn {
+        from { opacity: 0; transform: translate(-50%, 12px); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+      }
+      .dkg-flow {
+        stroke-dasharray: 6 220;
+        opacity: 0.85;
+        animation: dkgFlow 3.4s linear infinite;
+        filter: drop-shadow(0 0 3px currentColor);
+      }
+      @keyframes dkgFlow {
+        from { stroke-dashoffset: 226; }
+        to   { stroke-dashoffset: 0; }
+      }
+      .dkg-breathe { animation: dkgBreathe 4.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes dkgBreathe {
+        0%, 100% { transform: scale(1); opacity: var(--o, 0.22); }
+        50%      { transform: scale(1.12); opacity: calc(var(--o, 0.22) + 0.08); }
+      }
+      .dkg-ring { animation: dkgRing 3.2s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes dkgRing {
+        0%   { transform: scale(0.9); opacity: 0.8; }
+        70%  { transform: scale(1.7); opacity: 0; }
+        100% { transform: scale(1.7); opacity: 0; }
+      }
+      .dkg-spin { animation: dkgSpin 28s linear infinite; }
+      @keyframes dkgSpin { to { transform: rotate(360deg); } }
+
+      @keyframes dkgMote {
+        0%, 100% { transform: translate(0, 0); opacity: 0.2; }
+        50%      { transform: translate(2px, -4px); opacity: 0.7; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .dkg-flow, .dkg-breathe, .dkg-ring, .dkg-spin, .dkg-empty-orb,
+        .dkg-detail-inner, .dkg-node { animation: none !important; }
+      }
+    `}</style>
   )
 }
