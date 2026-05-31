@@ -76,6 +76,42 @@ html, body {
 .pt-safe { padding-top: env(safe-area-inset-top); }
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 
+/* ── Motion utilities (Apple-level foundation) ── */
+
+/* Streaming-text shimmer: a soft light sweeps across materializing text.
+   Apply `.drift-text-shimmer` to a streaming message while tokens arrive. */
+.drift-text-shimmer {
+  background: linear-gradient(
+    100deg,
+    rgb(var(--color-text-secondary)) 35%,
+    rgb(var(--color-text-primary)) 50%,
+    rgb(var(--color-text-secondary)) 65%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2.4s linear infinite;
+}
+
+/* Respect the user's motion preference — neutralize ambient/looping motion,
+   keep essential, short transitions. This is the accessibility floor for every
+   animation the subagents add on top of the foundation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .drift-text-shimmer {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}
+
 @layer base {
   * {
     @apply transition-colors duration-200;
