@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights } from './services/gemini'
@@ -89,6 +90,13 @@ function App() {
   )
   const [coachMarkActive, setCoachMarkActive] = useState(false)
   const coachMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Last opened drift (for one-tap "reopen") ────────────────────────────────
+  // Remembers the most recently opened drift in this session so the user can
+  // jump back into their last branch from anywhere — they never lose their place.
+  const [lastDrift, setLastDrift] = useState<
+    { driftChatId: string; selectedText: string; parentChatId: string; sourceMessageId: string } | null
+  >(null)
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -1270,6 +1278,18 @@ function App() {
     // Read context before closing (driftContext is stable until next openDrift)
     const { selectedText, sourceMessageId, driftChatId, ancestry } = driftStore.driftContext
 
+    // Remember this drift so the user can reopen it in one tap from the header —
+    // only worth offering if there's an actual conversation to return to.
+    if (driftChatId && selectedText && driftMessages && driftMessages.length > 0) {
+      const rootEntry = ancestry?.[0]
+      setLastDrift({
+        driftChatId,
+        selectedText,
+        parentChatId: rootEntry?.isMainChat ? activeChatId : (ancestry?.find(e => e.driftChatId)?.driftChatId ?? activeChatId),
+        sourceMessageId: sourceMessageId ?? '',
+      })
+    }
+
     driftStore.closeDrift(driftMessages)
 
     // Auto-persist the drift conversation so it survives app restarts.
@@ -1301,6 +1321,45 @@ function App() {
       const chatContainer = document.querySelector('.chat-messages-container')
       if (chatContainer) chatContainer.scrollTop = mainScrollPosition.current
     }, 150)
+  }
+
+  // ── Reopen last drift ─────────────────────────────────────────────────────────
+  // One tap returns the user to the branch they most recently left, switching to
+  // its parent chat first if needed. Never make them hunt for where they were.
+  const reopenLastDrift = () => {
+    if (!lastDrift) return
+    haptics.impact('medium')
+    const { driftChatId, selectedText, parentChatId, sourceMessageId } = lastDrift
+
+    if (parentChatId && parentChatId !== activeChatId) {
+      switchChat(parentChatId)
+    }
+
+    const parentMessages = chatHistory.find(c => c.id === parentChatId)?.messages ?? messages
+    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
+    const existing: Message[] =
+      (chatHistory.find(c => c.id === driftChatId)?.messages?.length
+        ? chatHistory.find(c => c.id === driftChatId)!.messages
+        : null)
+      ?? driftStore.getTempConversation(driftChatId)
+      ?? []
+
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText,
+      sourceMessageId,
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sourceMessageId || undefined,
+      driftChatId,
+      existingMessages: existing,
+      ancestry: [{
+        isMainChat: true,
+        label: chatHistory.find(c => c.id === parentChatId)?.title || 'Chat',
+        selectedText: '',
+        sourceMessageId: '',
+        contextMessages: [],
+      }],
+    })
   }
 
   // ── Breadcrumb navigation ────────────────────────────────────────────────────
@@ -1850,6 +1909,22 @@ function App() {
           </button>
         </div>
 
+        {/* New chat — visible affordance (was keyboard-only, ⌘⌥N) */}
+        <div className="px-2 pt-2 pb-1.5">
+          <Pressable
+            onClick={() => { createNewChat(); uiStore.setSidebarOpen(false) }}
+            haptic="light"
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl
+                       border border-accent-violet/25 bg-gradient-to-r from-accent-pink/[0.08] to-accent-violet/[0.08]
+                       hover:from-accent-pink/[0.14] hover:to-accent-violet/[0.14] hover:border-accent-violet/40
+                       transition-all duration-150 group"
+          >
+            <Plus className="w-4 h-4 text-accent-violet group-hover:text-accent-pink transition-colors shrink-0" />
+            <span className="text-[13px] font-medium text-text-primary">New chat</span>
+            <span className="ml-auto text-[10px] text-text-muted/70 font-mono hidden lg:inline">⌘⌥N</span>
+          </Pressable>
+        </div>
+
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto divide-y divide-dark-border/30">
           {sortedChats.map((chat) => (
@@ -1897,12 +1972,17 @@ function App() {
                       autoFocus
                     />
                   ) : (
-                    <h3
-                      className={`text-[13px] font-medium text-text-primary ${getRTLClassName(chat.title)}`}
-                      dir={getTextDirection(chat.title)}
-                    >
-                      {chat.title}
-                    </h3>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {chat.metadata?.isDrift && (
+                        <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />
+                      )}
+                      <h3
+                        className={`text-[13px] font-medium truncate min-w-0 ${chat.metadata?.isDrift ? 'text-accent-violet/90' : 'text-text-primary'} ${getRTLClassName(chat.title)}`}
+                        dir={getTextDirection(chat.title)}
+                      >
+                        {chat.title}
+                      </h3>
+                    </div>
                   )}
                   <p
                     className={`text-[11px] text-text-muted truncate mt-0.5 ${getRTLClassName(chat.lastMessage || '')}`}
@@ -1985,8 +2065,8 @@ function App() {
       >
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
-          <div className="px-2 py-0.5 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="px-2 py-0.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-4 min-w-0 flex-1">
               {!sidebarOpen ? (
                 <>
                   <button
@@ -2002,11 +2082,11 @@ function App() {
                 <div className="w-[36px]" />
               )}
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 {/* Snippet Gallery Button — hidden on mobile */}
                 <button
                   onClick={() => uiStore.setGalleryOpen(true)}
-                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative"
+                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative shrink-0"
                   title="Snippet Gallery"
                 >
                   <Bookmark className="w-5 h-5 text-text-muted group-hover:text-cyan-400 transition-colors duration-75" />
@@ -2016,22 +2096,65 @@ function App() {
                     </span>
                   )}
                 </button>
+
+                {/* Current-chat context — always shows where you are. Tapping it
+                    opens the sidebar so "where am I / how do I get back" is one tap. */}
+                {(() => {
+                  const currentChat = chatHistory.find(c => c.id === activeChatId)
+                  const isDriftChat = !!currentChat?.metadata?.isDrift
+                  const title = currentChat?.title?.trim()
+                  if (!title || messages.length === 0) return null
+                  return (
+                    <button
+                      onClick={() => uiStore.setSidebarOpen(true)}
+                      className="flex items-center gap-1.5 min-w-0 px-1.5 py-1 rounded-lg hover:bg-dark-elevated/60 transition-colors duration-75 group"
+                      title={isDriftChat ? `Drift · ${title}` : title}
+                    >
+                      {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
+                      <span
+                        className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
+                        dir={getTextDirection(title)}
+                      >
+                        {title}
+                      </span>
+                    </button>
+                  )
+                })()}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Drift Tree Button — shown when current chat has drifts */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Reopen last drift — one tap back to the branch you just left.
+                  Hidden while the panel/tree is open (you're already there). */}
+              {lastDrift && !driftOpen && !knowledgeGraphOpen && (
+                <Pressable
+                  onClick={reopenLastDrift}
+                  haptic={null}
+                  title={`Reopen drift · "${lastDrift.selectedText}"`}
+                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full
+                             border border-accent-violet/25 bg-accent-violet/[0.07]
+                             text-accent-violet/85 hover:text-accent-violet hover:bg-accent-violet/[0.12]
+                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[34vw] sm:max-w-[200px]"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[12px] font-medium truncate">{lastDrift.selectedText}</span>
+                </Pressable>
+              )}
+
+              {/* Drift Tree Button — first-class control whenever the thread has
+                  branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
-                <button
-                  onClick={() => setKnowledgeGraphOpen(!knowledgeGraphOpen)}
-                  title="Drift Tree (⌘⌥G)"
-                  className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center gap-1.5 rounded-lg transition-all duration-75 relative
+                <Pressable
+                  onClick={() => { haptics.selection(); setKnowledgeGraphOpen(!knowledgeGraphOpen) }}
+                  haptic={null}
+                  title="Drift Map (⌘⌥G)"
+                  className={`h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition-all duration-150 relative
                     ${knowledgeGraphOpen
-                      ? 'text-accent-violet bg-accent-violet/10'
-                      : 'text-text-muted hover:text-accent-violet hover:bg-accent-violet/5'
+                      ? 'text-accent-violet bg-accent-violet/[0.12] border border-accent-violet/40'
+                      : 'text-text-secondary border border-accent-violet/25 bg-accent-violet/[0.06] hover:text-accent-violet hover:bg-accent-violet/[0.12] hover:border-accent-violet/40'
                     }`}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                     <defs>
                       <linearGradient id="drift-icon-g" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                         <stop stopColor="#ff006e"/>
@@ -2044,10 +2167,11 @@ function App() {
                     <path d="M4 6.5v5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
                     <path d="M6.5 4h5a2 2 0 0 1 2 2v5.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
                   </svg>
-                  <span className="absolute -top-0.5 -right-0.5 text-[9px] font-bold bg-accent-violet text-white rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1 leading-none">
+                  <span className="text-[12px] font-medium leading-none">Map</span>
+                  <span className={`text-[11px] font-semibold leading-none tabular-nums ${knowledgeGraphOpen ? 'text-accent-violet' : 'text-accent-violet/80'}`}>
                     {totalDriftCount}
                   </span>
-                </button>
+                </Pressable>
               )}
               {/* New Chat Button */}
               <button
@@ -2154,11 +2278,13 @@ function App() {
                           }, 150)
                         }
                       }}
-                      className="flex items-center gap-0.5 text-[11px] text-text-muted/45
-                               hover:text-accent-violet/80 transition-colors duration-150 shrink-0 leading-none"
+                      className="flex items-center gap-0.5 text-[11px] font-medium text-accent-violet/70
+                               hover:text-accent-violet rounded-full px-2 py-1 hover:bg-accent-violet/[0.08]
+                               transition-colors duration-150 shrink-0 leading-none"
+                      title="Back to the source conversation"
                     >
                       <ChevronLeft className="w-3 h-3" />
-                      back
+                      Back
                     </button>
                   </div>
                 )
@@ -2182,7 +2308,14 @@ function App() {
                       <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
                     </svg>
                     <h2 className="text-text-primary font-semibold text-[22px] leading-snug mb-2">What's on your mind?</h2>
-                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[260px] mx-auto">Ask anything. Highlight any response to <span className="text-accent-violet">drift</span> into a focused side chat.</p>
+                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
+                  </div>
+                  {/* Concept cue — teaches the core gesture without a tutorial wall. */}
+                  <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] mt-1">
+                    <MousePointerClick className="w-4 h-4 text-accent-violet/70 shrink-0" />
+                    <p className="text-text-muted text-[13px] leading-snug">
+                      Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
+                    </p>
                   </div>
                 </div>
               )}
@@ -2863,7 +2996,7 @@ function App() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-violet" />
               </span>
               <span className="text-sm text-text-primary">
-                Select any text to <span className="text-accent-violet font-medium">drift</span> →
+                Highlight anything that sparks a question to <span className="text-accent-violet font-medium">drift</span>
               </span>
               <button
                 onClick={dismissCoachMark}
