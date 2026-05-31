@@ -14,7 +14,7 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, GitBranch, Maximize2 } from 'lucide-react'
+import { X, GitBranch, Maximize2, Sparkles, Loader2 } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -27,6 +27,10 @@ interface Props {
   onScrollToMessage: (messageId: string) => void
   onOpenDrift?: (chat: ChatSession) => void
   getTempMessages?: (chatId: string) => Message[] | null
+  /** Weave every drift in the current conversation into one synthesis. */
+  onSynthesize?: (rootId: string) => void
+  /** True while a synthesis request is in flight. */
+  synthesizing?: boolean
 }
 
 interface TreeNode {
@@ -95,6 +99,36 @@ function collectTree(
     }
   }
   return result
+}
+
+// Synthetic root that gathers every conversation into one constellation.
+const ALL_ROOT_ID = '__all_explorations__'
+
+/** Build the global forest: one synthetic root whose children are every
+ *  top-level conversation (each with its own drift subtree). */
+function buildForest(
+  allChats: ChatSession[],
+  getTempMessages?: (chatId: string) => Message[] | null,
+): { tree: TreeNode | null; rootCount: number } {
+  const roots = allChats.filter(c => !c.metadata?.isDrift && !c.metadata?.parentChatId)
+  const children: TreeNode[] = []
+  for (const r of roots) {
+    const treeChats = collectTree(r.id, allChats, getTempMessages)
+    const sub = buildTree(treeChats, r.id)
+    if (!sub) continue
+    // Skip empty placeholder chats (no messages, no drifts).
+    if (sub.children.length === 0 && sub.chat.messages.length === 0) continue
+    children.push(sub)
+  }
+  if (children.length === 0) return { tree: null, rootCount: 0 }
+  const synthetic: ChatSession = {
+    id: ALL_ROOT_ID,
+    title: 'All explorations',
+    messages: [],
+    lastMessage: '',
+    createdAt: new Date(),
+  }
+  return { tree: { chat: synthetic, phrase: undefined, children }, rootCount: children.length }
 }
 
 function buildTree(chats: ChatSession[], rootId: string): TreeNode | null {
@@ -364,9 +398,11 @@ function GraphCanvas({
   const handleActivate = (laid: Laid) => {
     if (drag.current?.moved) return
     const id = laid.node.chat.id
+    if (id === ALL_ROOT_ID) return  // synthetic global root — not navigable
     haptics.selection()
     onSelect(id)
-    if (laid.depth > 0 && onOpenDrift) onOpenDrift(laid.node.chat)
+    // A drift opens in the focused panel; a full conversation switches the chat.
+    if (laid.node.chat.metadata?.isDrift && onOpenDrift) onOpenDrift(laid.node.chat)
     else onSwitchChat(id)
   }
 
@@ -794,15 +830,35 @@ function useDragClose(onClose: () => void, enabled: boolean) {
 
 export default function DriftKnowledgeGraph({
   chatHistory, activeChatId, onClose, onSwitchChat, onOpenDrift, getTempMessages,
+  onSynthesize, synthesizing,
 }: Props) {
   const isMobile = useIsMobile()
 
+  // Scope: just this conversation's tree, or a constellation of everything.
+  const [scope, setScope] = useState<'chat' | 'all'>('chat')
+
+  // How many distinct top-level conversations exist (gates the "All" toggle).
+  const conversationCount = useMemo(
+    () => chatHistory.filter(c => !c.metadata?.isDrift && !c.metadata?.parentChatId && (c.messages.length > 0)).length,
+    [chatHistory],
+  )
+
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
   const treeChats = rootId ? collectTree(rootId, chatHistory, getTempMessages) : []
-  const tree = rootId && treeChats.length > 1 ? buildTree(treeChats, rootId) : null
+  const chatTree = rootId && treeChats.length > 1 ? buildTree(treeChats, rootId) : null
+
+  const { tree: forestTree, rootCount } = useMemo(
+    () => scope === 'all' ? buildForest(chatHistory, getTempMessages) : { tree: null, rootCount: 0 },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scope, chatHistory],
+  )
+
+  const tree = scope === 'all' ? forestTree : chatTree
 
   const rootChat = rootId ? chatHistory.find(c => c.id === rootId) : null
-  const driftCount = treeChats.filter(c => !!c.metadata?.isDrift).length
+  const driftCount = scope === 'all'
+    ? (tree ? collectTopics(tree).length : 0)
+    : treeChats.filter(c => !!c.metadata?.isDrift).length
   const msgTotal = tree ? totalMessages(tree) : 0
   const topics = tree ? disambiguateTopics(collectTopics(tree)) : []
 
@@ -810,6 +866,42 @@ export default function DriftKnowledgeGraph({
   const [selectedId, setSelectedId] = useState<string | null>(activeChatId)
   useEffect(() => { setSelectedId(activeChatId) }, [activeChatId])
   const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
+
+  // A small segmented control shared by both layouts.
+  const scopeToggle = conversationCount > 1 ? (
+    <div className="inline-flex items-center rounded-full p-0.5 bg-white/[0.05] border border-white/[0.08]">
+      {(['chat', 'all'] as const).map(s => (
+        <button
+          key={s}
+          onClick={() => { haptics.selection(); setScope(s) }}
+          className={`px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide transition-colors ${
+            scope === s ? 'bg-accent-violet/30 text-white' : 'text-white/45 hover:text-white/70'
+          }`}
+        >
+          {s === 'chat' ? 'This chat' : 'All'}
+        </button>
+      ))}
+    </div>
+  ) : null
+
+  // "Bring it home" — synthesize the current conversation's drifts. Chat scope only.
+  const synthBar = scope === 'chat' && rootId && driftCount >= 2 && onSynthesize ? (
+    <div className="px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
+      <button
+        onClick={() => onSynthesize(rootId)}
+        disabled={synthesizing}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[12.5px] font-semibold text-white transition-all active:scale-[0.98] disabled:opacity-70"
+        style={{
+          background: 'linear-gradient(135deg, rgba(168,85,247,0.9), rgba(34,211,238,0.85))',
+          boxShadow: '0 4px 16px rgba(124,58,237,0.28)',
+        }}
+        title="Weave these drifts into one synthesis on your chat"
+      >
+        {synthesizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+        {synthesizing ? 'Synthesizing…' : `Synthesize ${driftCount} drifts`}
+      </button>
+    </div>
+  ) : null
 
   const { panelRef, onTouchStart, onTouchMove, onTouchEnd } = useDragClose(onClose, isMobile)
 
@@ -876,7 +968,7 @@ export default function DriftKnowledgeGraph({
                   className="text-[15px] font-bold leading-snug"
                   style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
                 >
-                  {rootChat?.title || 'Untitled'}
+                  {scope === 'all' ? 'All explorations' : (rootChat?.title || 'Untitled')}
                 </h2>
                 {driftCount > 0 && (
                   <div className="flex items-center gap-1.5 mt-1">
@@ -886,22 +978,28 @@ export default function DriftKnowledgeGraph({
                     >
                       ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                     </span>
-                    <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>· {msgTotal} msgs</span>
+                    <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                      {scope === 'all' ? `· ${rootCount} ${rootCount === 1 ? 'chat' : 'chats'}` : `· ${msgTotal} msgs`}
+                    </span>
                   </div>
                 )}
               </div>
-              <button
-                onClick={onClose}
-                className="flex-shrink-0 flex items-center justify-center rounded-full active:scale-90"
-                style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)' }}
-                aria-label="Close"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {scopeToggle}
+                <button
+                  onClick={onClose}
+                  className="flex items-center justify-center rounded-full active:scale-90"
+                  style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)' }}
+                  aria-label="Close"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
           {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile />}
+          {synthBar}
 
           <div className="flex-1 relative overflow-hidden">{graph}</div>
         </div>
@@ -931,7 +1029,7 @@ export default function DriftKnowledgeGraph({
                 className="text-[14px] font-semibold leading-snug"
                 style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
-                {rootChat?.title || 'Untitled'}
+                {scope === 'all' ? 'All explorations' : (rootChat?.title || 'Untitled')}
               </h2>
               {driftCount > 0 && (
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -941,22 +1039,28 @@ export default function DriftKnowledgeGraph({
                   >
                     ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                   </span>
-                  <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>· {msgTotal} messages</span>
+                  <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    {scope === 'all' ? `· ${rootCount} ${rootCount === 1 ? 'conversation' : 'conversations'}` : `· ${msgTotal} messages`}
+                  </span>
                 </div>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="flex-shrink-0 p-1.5 rounded-lg"
-              style={{ color: 'rgba(255,255,255,0.6)' }}
-              aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {scopeToggle}
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg"
+                style={{ color: 'rgba(255,255,255,0.6)' }}
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
         {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile={false} />}
+        {synthBar}
 
         <div className="flex-1 relative overflow-hidden">{graph}</div>
       </div>

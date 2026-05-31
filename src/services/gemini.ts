@@ -301,6 +301,61 @@ Return ONLY a raw JSON array of 4-5 objects. Each object: {"label": string, "kin
   }
 }
 
+// ── Synthesis ────────────────────────────────────────────────────────────────
+// "Bring it home" — weave the insights from several drift branches into one
+// cohesive synthesis posted back on the parent conversation.
+
+export async function synthesizeDrifts(
+  rootTopic: string,
+  branches: { term: string; content: string }[],
+  apiKey: string,
+  model: string = GEMINI_MODELS.FLASH_PREVIEW,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!apiKey?.trim() || branches.length === 0) return ''
+
+  try {
+    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const branchText = branches
+      .map((b, i) => `### Branch ${i + 1}: ${b.term}\n${b.content.substring(0, 1600)}`)
+      .join('\n\n')
+
+    const body = {
+      systemInstruction: {
+        parts: [{
+          text: `You are the synthesizing intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts"). Weave the key insights from those branches into ONE cohesive, illuminating synthesis.
+
+Write engaging markdown:
+- Open with a single bold takeaway sentence.
+- Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they relate, reinforce, or tension each other. Reference branch topics naturally.
+- Do NOT summarize each branch in isolation; surface the through-line and any surprising links.
+- End with one open question worth exploring next, prefixed "**Next:**".
+- Keep it under ~350 words. No preamble like "Here is the synthesis".`,
+        }],
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: `Root topic: "${rootTopic}"\n\nThe branches explored:\n\n${branchText}` }],
+      }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 1000 },
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) return ''
+
+    const json = await response.json()
+    const raw: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    return raw.trim()
+  } catch {
+    return ''
+  }
+}
+
 // ── Streaming ────────────────────────────────────────────────────────────────
 
 export async function sendMessageToGemini(

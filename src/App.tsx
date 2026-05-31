@@ -3,7 +3,7 @@ import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, Arrow
 import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights } from './services/gemini'
+import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
@@ -77,6 +77,7 @@ function App() {
   const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
+  const [synthesizing, setSynthesizing] = useState(false)
 
   // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -317,6 +318,65 @@ function App() {
       templateType: sib.templateType,
       ancestry,
     })
+  }
+
+  // ── Drift synthesis: "bring it home" ──────────────────────────────────────────
+  // Weaves every descendant drift of a conversation into one cohesive synthesis,
+  // posted back as a message on that conversation. Closes the explore→return loop.
+  const handleSynthesize = async (rootId: string) => {
+    if (synthesizing) return
+    const rootChat = chatHistory.find(c => c.id === rootId)
+    if (!rootChat) { toast.error('Conversation not found'); return }
+
+    // Walk the whole drift subtree, gathering each branch's conversation.
+    const branches: { term: string; content: string }[] = []
+    const seen = new Set<string>()
+    const collect = (pid: string) => {
+      for (const c of chatHistory) {
+        if (seen.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
+        seen.add(c.id)
+        const msgs = c.messages?.length ? c.messages : (driftStore.getTempConversation(c.id) ?? [])
+        const content = msgs.map(m => `${m.isUser ? 'Q' : 'A'}: ${stripMarkdown(m.text)}`).join('\n').trim()
+        if (content) branches.push({ term: c.metadata?.selectedText || c.title, content })
+        collect(c.id)
+      }
+    }
+    collect(rootId)
+
+    if (branches.length < 2) { toast.info('Explore at least 2 drifts to synthesize them'); return }
+
+    const geminiPreset = (aiSettings.modelPresets || []).find(p => p.provider === 'gemini' && p.enabled)
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || geminiPreset?.apiKey || aiSettings.geminiApiKey
+    if (!apiKey) { toast.error('Add a Gemini key in Settings to synthesize'); return }
+
+    setSynthesizing(true)
+    haptics.impact('medium')
+    toast.info(`Synthesizing ${branches.length} drifts…`)
+    try {
+      const text = await synthesizeDrifts(rootChat.title, branches, apiKey)
+      if (!text) { toast.error('Synthesis failed — try again'); return }
+      const msg: Message = {
+        id: 'synth-' + Date.now(),
+        text: `## ✦ Synthesis · ${branches.length} drifts\n\n${text}`,
+        isUser: false,
+        timestamp: new Date(),
+      }
+      chatStore.addMessage(rootId, msg)
+      haptics.impact('heavy')
+      if (rootId !== activeChatId) switchChat(rootId)
+      setKnowledgeGraphOpen(false)
+      setTimeout(() => {
+        const el = document.querySelector(`[data-message-id="${msg.id}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          el.classList.add('highlight-message')
+          setTimeout(() => el.classList.remove('highlight-message'), 2200)
+        }
+      }, 280)
+      toast.success('Synthesis added to your chat')
+    } finally {
+      setSynthesizing(false)
+    }
   }
 
   // ── On mount ────────────────────────────────────────────────────────────────
@@ -3528,6 +3588,8 @@ function App() {
             })
           }}
           getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
+          onSynthesize={handleSynthesize}
+          synthesizing={synthesizing}
         />
       )}
 
