@@ -213,6 +213,94 @@ export async function getDriftSuggestions(
   }
 }
 
+// ── Connections (intelligence layer) ──────────────────────────────────────────
+
+/** One AI-derived connection between the marked term and the wider conversation. */
+export interface Connection {
+  /** Short label for the connection (e.g. a related idea, a tension, a bridge). */
+  label: string
+  /** Whether this points backward (something already discussed) or forward (a new direction). */
+  kind: 'back' | 'forward'
+}
+
+/**
+ * Ask Gemini for connections between the marked `term` and where the user has
+ * been. Returns up to ~5 connections, split between "back" (relates to what
+ * was already said / explored) and "forward" (directions not yet taken).
+ *
+ * `priorTerms` are terms the user already drifted on (from the term index) so
+ * the model can steer toward genuinely unexplored ground. Returns an empty
+ * array on any error — non-critical, the surface degrades gracefully.
+ */
+export async function getConnections(
+  term: string,
+  contextSnippet: string,
+  priorTerms: string[],
+  apiKey: string,
+  model: string = GEMINI_MODELS.FLASH_LITE_PREVIEW,
+): Promise<Connection[]> {
+  if (!apiKey?.trim() || !term?.trim()) return []
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+
+    const priorLine = priorTerms.length
+      ? `\nAlready explored elsewhere (do NOT repeat these — find fresh ground): ${priorTerms.slice(0, 12).join(', ')}`
+      : ''
+
+    const body = {
+      systemInstruction: {
+        parts: [{
+          text: `You are the connective intelligence of a thinking app. The user marked a term mid-conversation. Surface how it connects to where they have been and where they could go next.
+
+Return ONLY a raw JSON array of 4-5 objects. Each object: {"label": string, "kind": "back" | "forward"}.
+- "back": a link to something already in the conversation context — name the relationship, not the fact ("echoes the tension you raised about X").
+- "forward": a fresh direction worth drifting into next — a doorway, not trivia.
+- label is 5-11 words, concrete, no trailing punctuation.
+- Aim for ~2 "back" and ~2-3 "forward". If there is no real context, return all "forward".
+- No prose, no markdown, no code fences. Any other text breaks the app.`,
+        }],
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: `Term: "${term}"\nConversation context:\n${contextSnippet.substring(0, 1200)}${priorLine}` }],
+      }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 320 },
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+    if (!response.ok) return []
+
+    const json = await response.json()
+    let raw: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .filter((x): x is { label: unknown; kind: unknown } => !!x && typeof x === 'object')
+      .map((x) => ({
+        label: typeof x.label === 'string' ? x.label.trim() : '',
+        kind: x.kind === 'back' ? ('back' as const) : ('forward' as const),
+      }))
+      .filter((c) => c.label.length > 0)
+      .slice(0, 5)
+  } catch {
+    return []
+  }
+}
+
 // ── Streaming ────────────────────────────────────────────────────────────────
 
 export async function sendMessageToGemini(

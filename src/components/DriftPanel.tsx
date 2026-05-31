@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, Mic, Home } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, Mic, Home, Compass, CornerUpLeft, History, ArrowUpRight } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
+import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
+import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, getConnections, type ChatMessage as GeminiMessage, type Connection } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -11,6 +12,9 @@ import type { AISettings } from './Settings'
 import { snippetStorage } from '../services/snippetStorage'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
+import { Reveal, Stagger, staggerChild } from './motion'
+import { haptics } from '../lib/haptics'
+import { motion } from 'framer-motion'
 
 interface Message {
   id: string
@@ -67,6 +71,10 @@ interface DriftPanelProps {
   onConnectAnswerSaved?: (question: string, messages: Message[]) => void
   /** Opens a new drift from within this panel (e.g. from a Connect card). */
   onStartDrift?: (text: string, messageId: string, suggestions?: string[]) => void
+  /** Prior explorations of this same/related term across all chats (from the term index). */
+  relatedDrifts?: TermOccurrence[]
+  /** Navigate to a prior drift surfaced in the "explored before" strip. */
+  onOpenRelatedDrift?: (occ: TermOccurrence) => void
 }
 
 export default function DriftPanel({
@@ -99,6 +107,8 @@ export default function DriftPanel({
   initialConnectAnswers,
   onConnectStateChange,
   onConnectAnswerSaved,
+  relatedDrifts,
+  onOpenRelatedDrift,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -135,6 +145,10 @@ export default function DriftPanel({
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
   /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
   const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
+  /** Intelligence layer: AI-derived connections (back to context / forward to new directions). */
+  const [connections, setConnections] = useState<Connection[] | null>(null)
+  /** Guards the connections fetch so it fires once per open. */
+  const connectionsFetchedRef = useRef(false)
 
   // --------------------------------------------------------------------------
   // Template helpers
@@ -200,6 +214,10 @@ Rules:
       // Reset suggestions and per-message highlights
       setDriftSuggestions([])
       setMsgHighlights(new Map())
+
+      // Reset intelligence-layer connections for this open
+      setConnections(null)
+      connectionsFetchedRef.current = false
 
       // Restore or reset Connect state
       connectAnswersRef.current = initialConnectAnswers
@@ -297,6 +315,27 @@ Rules:
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateType, isTyping, driftOnlyMessages, selectedText])
+
+  // Intelligence layer: fetch connections once per open (Connect mode chips view).
+  // This is the "leaning in" moment — how the term relates to where the user has
+  // been, plus fresh directions. priorTerms steers the model off explored ground.
+  useEffect(() => {
+    if (!isOpen || templateType !== 'connect' || connectionsFetchedRef.current) return
+    if (!selectedText?.trim()) return
+    connectionsFetchedRef.current = true
+
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
+    if (!geminiKey) return
+
+    const ctx = contextMessages.slice(-6).map(m => `${m.isUser ? 'User' : 'Assistant'}: ${m.text}`).join('\n')
+    const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
+
+    getConnections(selectedText, ctx, priorTerms, geminiKey).then(c => {
+      // Only show if the panel is still on the same term.
+      setConnections(c)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, templateType, selectedText])
 
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
@@ -530,8 +569,17 @@ Rules:
 
       // Use template system prompt if set, otherwise use default context-aware prompt
       // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
+      // History-aware Connect: feed prior same/related-term drifts into the chip
+      // prompt so the directions are ones the user has NOT already taken.
+      const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
+      const connectChipsPrompt = priorTerms.length
+        ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
+        : TEMPLATE_SYSTEM_PROMPTS['connect']
+
       const baseSystemContent = (templateType === 'connect' && connectQuestion)
         ? `The user is reading about "${selectedText}" and chose to explore this question: "${connectQuestion}". Answer it directly and insightfully. Draw connections back to "${selectedText}" where relevant. Be concise.${parentContext ? `\n\nConversation context:\n${parentContext}` : ''}`
+        : (templateType === 'connect')
+        ? connectChipsPrompt
         : templateType
         ? TEMPLATE_SYSTEM_PROMPTS[templateType]
         : (parentContext
@@ -1042,6 +1090,103 @@ Rules:
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
           <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
+            {/* ── Intelligence layer: the app leaning in ──────────────────────── */}
+
+            {/* "You explored this before" — prior drifts of the same/related term */}
+            {relatedDrifts && relatedDrifts.length > 0 && (
+              <Reveal className="mb-5" data-drift-connection-block="explored-before">
+                <div className="rounded-2xl border border-accent-discovery/20 bg-accent-discovery/[0.05] p-3.5 shadow-glow-discovery">
+                  <div className="flex items-center gap-1.5 mb-2.5">
+                    <History className="w-3.5 h-3.5 text-accent-discovery/80" />
+                    <p className="text-tiny font-medium text-accent-discovery/90">You explored this before</p>
+                  </div>
+                  <Stagger className="flex flex-col gap-1.5" step={0.04}>
+                    {relatedDrifts.slice(0, 4).map((occ) => (
+                      <motion.button
+                        key={occ.driftChatId}
+                        variants={staggerChild}
+                        onClick={() => { haptics.selection(); onOpenRelatedDrift?.(occ) }}
+                        className="drift-related-pill group flex items-center justify-between gap-2 w-full text-left px-3 py-2 rounded-xl
+                          border border-accent-discovery/15 bg-accent-discovery/[0.03]
+                          hover:border-accent-discovery/35 hover:bg-accent-discovery/[0.08]
+                          active:scale-[0.98] transition-all duration-150 min-h-[40px]"
+                        title={`Return to your drift on "${occ.term}"`}
+                      >
+                        <span className="text-meta text-text-secondary group-hover:text-text-primary truncate">{occ.chatTitle || occ.term}</span>
+                        <CornerUpLeft className="w-3.5 h-3.5 text-accent-discovery/50 group-hover:text-accent-discovery/90 shrink-0" />
+                      </motion.button>
+                    ))}
+                  </Stagger>
+                </div>
+              </Reveal>
+            )}
+
+            {/* AI connections — how this relates to where you've been + directions */}
+            {connections && connections.length > 0 && (() => {
+              const backs = connections.filter(c => c.kind === 'back')
+              const forwards = connections.filter(c => c.kind === 'forward')
+              const openConnection = (label: string) => {
+                haptics.selection()
+                setConnectQuestion(label)
+                autoSentRef.current = false
+                const systemMsg: Message = {
+                  id: 'drift-system-' + Date.now(),
+                  text: label,
+                  isUser: false,
+                  timestamp: new Date(),
+                }
+                setMessages([systemMsg])
+                setDriftOnlyMessages([systemMsg])
+              }
+              return (
+                <Reveal className="mb-5" delay={0.05} data-drift-connection-block="ai-connections">
+                  {backs.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <CornerUpLeft className="w-3 h-3 text-accent-discovery/70" />
+                        <p className="text-micro uppercase tracking-widest text-accent-discovery/70">How this relates to where you've been</p>
+                      </div>
+                      <Stagger className="flex flex-col gap-1.5" step={0.04}>
+                        {backs.map((c, i) => (
+                          <motion.div
+                            key={`back-${i}`}
+                            variants={staggerChild}
+                            className="drift-connection-back text-meta leading-snug text-text-secondary px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.02]"
+                          >
+                            {c.label}
+                          </motion.div>
+                        ))}
+                      </Stagger>
+                    </div>
+                  )}
+                  {forwards.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <Compass className="w-3 h-3 text-accent-discovery/70" />
+                        <p className="text-micro uppercase tracking-widest text-accent-discovery/70">Directions you could drift</p>
+                      </div>
+                      <Stagger className="flex flex-col gap-1.5" step={0.04}>
+                        {forwards.map((c, i) => (
+                          <motion.button
+                            key={`fwd-${i}`}
+                            variants={staggerChild}
+                            onClick={() => openConnection(c.label)}
+                            className="drift-connection-forward group flex items-center justify-between gap-2 w-full text-left px-3 py-2.5 rounded-xl
+                              border border-accent-discovery/20 bg-accent-discovery/[0.04]
+                              hover:border-accent-discovery/40 hover:bg-accent-discovery/[0.10]
+                              active:scale-[0.98] transition-all duration-150 min-h-[42px]"
+                          >
+                            <span className="text-meta leading-snug text-text-secondary group-hover:text-text-primary">{c.label}</span>
+                            <ArrowUpRight className="w-3.5 h-3.5 text-accent-discovery/50 group-hover:text-accent-discovery/90 shrink-0" />
+                          </motion.button>
+                        ))}
+                      </Stagger>
+                    </div>
+                  )}
+                </Reveal>
+              )
+            })()}
+
             {(isTyping || connectCards === null) ? (
               <div className="flex flex-col gap-2.5">
                 {[1,2,3,4,5].map(i => (

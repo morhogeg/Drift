@@ -24,6 +24,8 @@ import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
+import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { haptics } from '@/lib/haptics'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -217,6 +219,28 @@ function App() {
 
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
+
+  // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
+  // Index every prior drift by its term (cheap; reads only what's persisted).
+  // Rebuilds when chat history changes — memoized so it's free on other renders.
+  const termIndex = useMemo(() => buildTermIndex(chatHistory), [chatHistory])
+
+  // Prior explorations of the term the user just marked — surfaced as the
+  // "you explored this before" moment in the drift panel.
+  const relatedDrifts = useMemo<TermOccurrence[]>(() => {
+    const term = driftContext?.selectedText
+    if (!driftOpen || !term) return []
+    return findRelatedDrifts(termIndex, term, driftContext?.driftChatId)
+  }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, termIndex])
+
+  // Navigate to a prior drift surfaced in the connection strip. Reuses the same
+  // path the inline drift links use, so persisted/temp conversations restore.
+  const handleOpenRelatedDrift = (occ: TermOccurrence) => {
+    const existing = chatHistory.find(c => c.id === occ.driftChatId)?.messages
+      ?? driftStore.getTempConversation(occ.driftChatId)
+      ?? undefined
+    handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
+  }
 
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1527,6 +1551,13 @@ function App() {
       messages: forceRefreshMessages,
       lastMessage: stripMarkdown(lastDriftMessage?.text || 'Drift pushed')
     })
+
+    // Promoting an idea: this is a deliberate, satisfying gesture — a discovery
+    // moving into the more permanent main thread. Confirm it physically + visibly.
+    // (Undo stays available via the panel's push button toggle.)
+    haptics.success()
+    const promoteLabel = selectedText.length > 28 ? selectedText.slice(0, 28) + '…' : selectedText
+    toast.success(`Promoted "${promoteLabel}" to the main thread`)
   }
 
   // ── Context menu handlers ───────────────────────────────────────────────────
@@ -2276,7 +2307,8 @@ function App() {
 
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''}`}
+                    data-drift-promoted={isDriftMessage ? 'true' : undefined}
                     key={msg.id}
                   >
                     {/* Drift group header */}
@@ -3063,6 +3095,8 @@ function App() {
           }
         }}
         onStartDrift={(text, msgId, suggestions) => handleStartDrift(text, msgId, undefined, undefined, undefined, suggestions)}
+        relatedDrifts={relatedDrifts}
+        onOpenRelatedDrift={handleOpenRelatedDrift}
       />
 
       {/* Settings Modal */}
