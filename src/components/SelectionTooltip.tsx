@@ -471,11 +471,24 @@ export default function SelectionTooltip({
         <div className="flex items-center rounded-full bg-[#1c1c1e]/97 backdrop-blur-2xl border border-white/[0.09] shadow-[0_12px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
           {!tooltip.isUserMessage ? (
             <>
+              {/* Primary Drift action — most prominent, pink→violet gradient */}
+              <button
+                type="button"
+                className="flex items-center justify-center gap-1.5 px-4 py-[13px] text-[13px] font-semibold
+                           bg-gradient-to-r from-accent-pink to-accent-violet text-white
+                           border-r border-white/[0.07] transition-all duration-150 active:opacity-80 flex-shrink-0"
+                onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
+                onClick={() => handleDrift()}
+              >
+                <GitBranch className="w-[15px] h-[15px]" />
+                Drift
+              </button>
+              {/* Template actions */}
               {TEMPLATES.map((t, i) => (
                 <button
                   key={t.type}
                   type="button"
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-[13px] text-[13px] font-medium transition-all duration-150 active:bg-white/[0.08]
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-[13px] text-[12px] font-medium transition-all duration-150 active:bg-white/[0.08]
                     ${i < TEMPLATES.length - 1 ? 'border-r border-white/[0.07]' : ''}
                     ${t.type === 'connect'  ? 'text-cyan-400'   :
                       t.type === 'simplify' ? 'text-violet-400' :
@@ -483,14 +496,14 @@ export default function SelectionTooltip({
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
-                  <span className="text-[15px] leading-none">{t.emoji}</span>
+                  <span className="text-[14px] leading-none">{t.emoji}</span>
                   <span>{t.label}</span>
                 </button>
               ))}
               <div className="w-px h-5 bg-white/[0.07] flex-shrink-0" />
               <button
                 type="button"
-                className="px-5 py-[13px] text-text-muted/60 active:text-white active:bg-white/[0.08] transition-all duration-150 flex-shrink-0"
+                className="px-4 py-[13px] text-text-muted/60 active:text-white active:bg-white/[0.08] transition-all duration-150 flex-shrink-0"
                 onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
                 onClick={handleSave}
               >
