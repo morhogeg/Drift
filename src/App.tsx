@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
@@ -253,6 +253,70 @@ function App() {
       ?? driftStore.getTempConversation(occ.driftChatId)
       ?? undefined
     handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
+  }
+
+  // ── Lateral term-walking: sibling drifts ──────────────────────────────────────
+  // The other terms that branch from the same parent as the open drift. Lets the
+  // user walk sideways term→term without returning to the map. Resolved from the
+  // parent's messages' driftInfos, in the order they were created.
+  interface SiblingDrift { selectedText: string; driftChatId: string; sourceMessageId: string; templateType?: DriftContext['templateType'] }
+  const siblingDrifts = useMemo<SiblingDrift[]>(() => {
+    if (!driftOpen || !driftContext?.driftChatId) return []
+    const ancestry = driftContext.ancestry ?? []
+    const parentEntry = ancestry[ancestry.length - 1]
+    const parentIsMain = !parentEntry || parentEntry.isMainChat
+    const parentId = parentIsMain ? activeChatId : parentEntry.driftChatId
+    const parentMessages = parentIsMain
+      ? (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      : (driftStore.getTempConversation(parentId!) ?? chatHistory.find(c => c.id === parentId)?.messages ?? [])
+    const out: SiblingDrift[] = []
+    const seen = new Set<string>()
+    for (const m of parentMessages) {
+      if (!m.driftInfos) continue
+      for (const d of m.driftInfos) {
+        if (seen.has(d.driftChatId)) continue
+        seen.add(d.driftChatId)
+        out.push({ selectedText: d.selectedText, driftChatId: d.driftChatId, sourceMessageId: m.id, templateType: d.templateType })
+      }
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driftOpen, driftContext?.driftChatId, driftContext?.ancestry, chatHistory, messages, activeChatId])
+
+  // Open a sibling drift in place. Siblings share this drift's ancestry-to-parent,
+  // so we reuse it verbatim and only swap the term/source/conversation.
+  const navigateToSiblingDrift = (sib: SiblingDrift) => {
+    if (sib.driftChatId === driftContext?.driftChatId) return
+    haptics.impact('light')
+    const ancestry = driftContext?.ancestry ?? [{
+      isMainChat: true,
+      label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
+      selectedText: '', sourceMessageId: '', contextMessages: [],
+    }]
+    const parentEntry = ancestry[ancestry.length - 1]
+    const parentIsMain = !parentEntry || parentEntry.isMainChat
+    const parentId = parentIsMain ? activeChatId : parentEntry.driftChatId
+    const parentMessages = parentIsMain
+      ? (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      : (driftStore.getTempConversation(parentId!) ?? chatHistory.find(c => c.id === parentId)?.messages ?? [])
+    const msgIdx = parentMessages.findIndex(m => m.id === sib.sourceMessageId)
+    const existing: Message[] =
+      (chatHistory.find(c => c.id === sib.driftChatId)?.messages?.length
+        ? chatHistory.find(c => c.id === sib.driftChatId)!.messages
+        : null)
+      ?? driftStore.getTempConversation(sib.driftChatId)
+      ?? []
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText: sib.selectedText,
+      sourceMessageId: sib.sourceMessageId,
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sib.sourceMessageId,
+      driftChatId: sib.driftChatId,
+      existingMessages: existing,
+      templateType: sib.templateType,
+      ancestry,
+    })
   }
 
   // ── On mount ────────────────────────────────────────────────────────────────
@@ -2097,27 +2161,99 @@ function App() {
                   )}
                 </button>
 
-                {/* Current-chat context — always shows where you are. Tapping it
-                    opens the sidebar so "where am I / how do I get back" is one tap. */}
+                {/* Current-chat context — always shows where you are. For a drift
+                    chat it renders the full path (root › term › term) so "where am
+                    I / how do I get back up" is visible and one tap from anywhere. */}
                 {(() => {
                   const currentChat = chatHistory.find(c => c.id === activeChatId)
-                  const isDriftChat = !!currentChat?.metadata?.isDrift
                   const title = currentChat?.title?.trim()
                   if (!title || messages.length === 0) return null
-                  return (
-                    <button
-                      onClick={() => uiStore.setSidebarOpen(true)}
-                      className="flex items-center gap-1.5 min-w-0 px-1.5 py-1 rounded-lg hover:bg-dark-elevated/60 transition-colors duration-75 group"
-                      title={isDriftChat ? `Drift · ${title}` : title}
-                    >
-                      {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
-                      <span
-                        className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
-                        dir={getTextDirection(title)}
+
+                  // Walk up parentChatId to build the trail from root → here.
+                  const chain: { id: string; label: string; isDrift: boolean; sourceMessageId?: string }[] = []
+                  const guard = new Set<string>()
+                  let cur: typeof currentChat | undefined = currentChat
+                  while (cur && !guard.has(cur.id)) {
+                    guard.add(cur.id)
+                    const isDrift = !!cur.metadata?.isDrift
+                    chain.unshift({
+                      id: cur.id,
+                      label: (isDrift ? (cur.metadata?.selectedText || cur.title) : cur.title)?.trim() || 'Chat',
+                      isDrift,
+                      sourceMessageId: cur.metadata?.sourceMessageId,
+                    })
+                    const pid = cur.metadata?.parentChatId
+                    cur = pid ? chatHistory.find(c => c.id === pid) : undefined
+                  }
+
+                  // Plain root chat — keep the simple single-title affordance.
+                  if (chain.length <= 1) {
+                    const isDriftChat = !!currentChat?.metadata?.isDrift
+                    return (
+                      <button
+                        onClick={() => uiStore.setSidebarOpen(true)}
+                        className="flex items-center gap-1.5 min-w-0 px-1.5 py-1 rounded-lg hover:bg-dark-elevated/60 transition-colors duration-75 group"
+                        title={isDriftChat ? `Drift · ${title}` : title}
                       >
-                        {title}
-                      </span>
-                    </button>
+                        {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
+                        <span
+                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
+                          dir={getTextDirection(title)}
+                        >
+                          {title}
+                        </span>
+                      </button>
+                    )
+                  }
+
+                  // Drift chat — full breadcrumb. Tapping an ancestor switches to it
+                  // and scrolls to the message the child branched from.
+                  const goToCrumb = (crumb: typeof chain[number], childSourceMessageId?: string) => {
+                    haptics.selection()
+                    switchChat(crumb.id)
+                    if (childSourceMessageId) {
+                      setTimeout(() => {
+                        const el = document.querySelector(`[data-message-id="${childSourceMessageId}"]`)
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          el.classList.add('highlight-message')
+                          setTimeout(() => el.classList.remove('highlight-message'), 2000)
+                        }
+                      }, 150)
+                    }
+                  }
+                  return (
+                    <div
+                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[52vw] lg:max-w-[420px] [&::-webkit-scrollbar]:hidden"
+                      style={{ scrollbarWidth: 'none' }}
+                    >
+                      {chain.map((crumb, i) => {
+                        const isLast = i === chain.length - 1
+                        const childSrc = chain[i + 1]?.sourceMessageId
+                        return (
+                          <span key={crumb.id} className="flex items-center gap-0 shrink-0">
+                            <button
+                              onClick={() => isLast ? uiStore.setSidebarOpen(true) : goToCrumb(crumb, childSrc)}
+                              className={`flex items-center gap-1 px-1 py-1 rounded-md hover:bg-dark-elevated/60 transition-colors duration-75
+                                ${isLast
+                                  ? (crumb.isDrift ? 'text-accent-violet/90' : 'text-text-secondary')
+                                  : 'text-text-muted hover:text-text-secondary'}`}
+                              title={crumb.label}
+                            >
+                              {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
+                              {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
+                              <span
+                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLClassName(crumb.label)}`}
+                                dir={getTextDirection(crumb.label)}
+                              >
+                                {crumb.label}
+                              </span>
+                            </button>
+                            {!isLast && <ChevronRight className="w-3 h-3 text-text-muted/40 shrink-0" />}
+                          </span>
+                        )
+                      })}
+                    </div>
                   )
                 })()}
               </div>
@@ -2125,8 +2261,10 @@ function App() {
 
             <div className="flex items-center gap-1.5 shrink-0">
               {/* Reopen last drift — one tap back to the branch you just left.
-                  Hidden while the panel/tree is open (you're already there). */}
-              {lastDrift && !driftOpen && !knowledgeGraphOpen && (
+                  Hidden while the panel/tree is open (you're already there), and
+                  only shown for a drift that belongs to the chat you're viewing —
+                  otherwise a stale branch from another conversation leaks in. */}
+              {lastDrift && lastDrift.parentChatId === activeChatId && !driftOpen && !knowledgeGraphOpen && (
                 <Pressable
                   onClick={reopenLastDrift}
                   haptic={null}
@@ -3271,6 +3409,9 @@ function App() {
         onStartDrift={(text, msgId, suggestions) => handleStartDrift(text, msgId, undefined, undefined, undefined, suggestions)}
         relatedDrifts={relatedDrifts}
         onOpenRelatedDrift={handleOpenRelatedDrift}
+        siblingDrifts={siblingDrifts}
+        currentDriftChatId={driftContext?.driftChatId}
+        onNavigateToSibling={navigateToSiblingDrift}
       />
 
       {/* Settings Modal */}

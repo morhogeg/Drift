@@ -3,6 +3,20 @@
 **Date:** May 31, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 34 (iOS + web, pending new archive)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
+## Last Session (May 31) — Model-agnostic add flow + reopen-pill bug
+Build green (`tsc -b`, `vite build`, dev 200). On `feature/apple-level-overhaul`, not committed.
+- **Bug fix**: the reopen-last-drift pill (`App.tsx` header) leaked a stale drift (e.g. "Sporting CP") from another conversation onto a fresh chat. Now gated on `lastDrift.parentChatId === activeChatId`.
+- **Model-agnostic Add Model** (`AddModelSheet.tsx` full rewrite): was hardcoded Gemini-only. Now provider-first: **pick provider (Gemini / OpenRouter / Ollama / Demo) → connect (API key or server URL, validated) → choose model(s)**. OpenRouter & Ollama fetch live model lists (searchable) + accept a custom model ID / name. Outputs generic `ModelPreset[]`; downstream send-path already honors per-preset model/key/url, so added models work immediately. Demo AI adds in one tap.
+- Aligned provider dot colors across `ModelPickerSheet` + `ModelPillRow` to match Settings (gemini=sky, openrouter=blue, ollama=emerald, dummy=violet).
+- The deep Settings `PresetForm` was already provider-agnostic; only the prominent quick-add path needed it.
+
+## Last Session (May 31) — Navigation round 2: walk between terms
+Focus: make it effortless to "walk around" between terms without going back to the map. Build green (`tsc -b` clean, `vite build` ok, dev boots 200). On `feature/apple-level-overhaul`, not committed yet.
+- **Lateral term-walking** (`DriftPanel.tsx` + `App.tsx`): a sibling switcher strip under the drift header — prev/next chevrons + scrollable pills of every term branched from the *same parent*, current one highlighted. Walk term→term in place; active pill auto-scrolls into view. New `SiblingDrift` type exported from DriftPanel. `App.tsx` computes `siblingDrifts` (from parent's `driftInfos`) + `navigateToSiblingDrift` (reuses the open drift's ancestry, swaps term/source/conversation).
+- **Always-visible breadcrumb** (`App.tsx` header): when the active chat is a drift, the header shows the full path `root › term › term` (was only inside the drift panel). Each crumb is tappable — switches to that chat and scrolls to the message the child branched from. Plain root chats keep the simple single-title button. Walks `metadata.parentChatId` up with a cycle guard.
+- Note: `DriftMapPanel.tsx` is dead code (the bioluminescent `DriftKnowledgeGraph` replaced it) — safe to delete later.
+- Deferred (offered, not chosen this round): map keyboard-hub (arrow/Enter/`/`-search), global "All explorations" map across every chat.
+
 ## Last Session (May 31) — Apple-level overhaul (4-domain pass)
 Foundation-first, then four coordinated domains. All on `feature/apple-level-overhaul`, build green, not yet merged to `main`.
 - **Foundation:** motion easing + luminous accent ramp + glow/type tokens (`tailwind.config.js`), reduced-motion floor + `.drift-text-shimmer` (`index.css`), `src/lib/haptics.ts`, `src/lib/termIndex.ts` (cross-drift term index), `src/components/motion/` (Reveal/Stagger/Bloom/Pressable). Added `@capacitor/haptics`.

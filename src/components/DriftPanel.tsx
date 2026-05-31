@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, Mic, Home, Compass, CornerUpLeft, History, ArrowUpRight } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, Compass, CornerUpLeft, History, ArrowUpRight } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
@@ -75,6 +75,19 @@ interface DriftPanelProps {
   relatedDrifts?: TermOccurrence[]
   /** Navigate to a prior drift surfaced in the "explored before" strip. */
   onOpenRelatedDrift?: (occ: TermOccurrence) => void
+  /** Sibling drifts — other terms branched from the same parent — for lateral walking. */
+  siblingDrifts?: SiblingDrift[]
+  /** The chat id of the drift currently open, used to locate it among its siblings. */
+  currentDriftChatId?: string
+  /** Walk sideways to a sibling drift without leaving the panel. */
+  onNavigateToSibling?: (sib: SiblingDrift) => void
+}
+
+export interface SiblingDrift {
+  selectedText: string
+  driftChatId: string
+  sourceMessageId: string
+  templateType?: 'simplify' | 'research' | 'connect'
 }
 
 export default function DriftPanel({
@@ -109,6 +122,9 @@ export default function DriftPanel({
   onConnectAnswerSaved,
   relatedDrifts,
   onOpenRelatedDrift,
+  siblingDrifts,
+  currentDriftChatId,
+  onNavigateToSibling,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -131,6 +147,7 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
@@ -397,6 +414,14 @@ Rules:
       breadcrumbScrollRef.current.scrollLeft = breadcrumbScrollRef.current.scrollWidth
     }
   }, [ancestry?.length, isOpen])
+
+  // Keep the active term pill visible as the user walks between siblings.
+  useEffect(() => {
+    const strip = siblingStripRef.current
+    if (!strip) return
+    const active = strip.querySelector('[data-sibling-active="true"]')
+    active?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [currentDriftChatId, siblingDrifts])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1128,7 +1153,58 @@ Rules:
             )
           })()}
         </header>
-        
+
+        {/* Sibling switcher — walk sideways between terms branched from the same
+            parent, without going back to the map. Only shown when siblings exist. */}
+        {siblingDrifts && siblingDrifts.length > 1 && onNavigateToSibling && (() => {
+          const idx = siblingDrifts.findIndex(s => s.driftChatId === currentDriftChatId)
+          const prev = idx > 0 ? siblingDrifts[idx - 1] : null
+          const next = idx >= 0 && idx < siblingDrifts.length - 1 ? siblingDrifts[idx + 1] : null
+          return (
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0">
+              <button
+                onClick={() => prev && onNavigateToSibling(prev)}
+                disabled={!prev}
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div
+                ref={siblingStripRef}
+                className="flex-1 flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {siblingDrifts.map((sib) => {
+                  const isCurrent = sib.driftChatId === currentDriftChatId
+                  return (
+                    <button
+                      key={sib.driftChatId}
+                      data-sibling-active={isCurrent}
+                      onClick={() => !isCurrent && onNavigateToSibling(sib)}
+                      className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
+                        ${isCurrent
+                          ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
+                          : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20 hover:bg-white/[0.04]'}`}
+                      title={sib.selectedText}
+                    >
+                      {sib.selectedText}
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                onClick={() => next && onNavigateToSibling(next)}
+                disabled={!next}
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                title={next ? `Next: "${next.selectedText}"` : 'No next term'}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )
+        })()}
+
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
           <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
