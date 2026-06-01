@@ -3,6 +3,16 @@
 **Date:** May 31, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 34 (iOS + web, pending new archive)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
+## Last Session (Jun 1) — Exploration + navigation feature wave
+All on `feature/apple-level-overhaul`, each its own commit, build green (`tsc -b`, `vite build`, dev 200). Built directly (agent worktrees hit a session limit and produced nothing usable — cleaned up).
+- **Global "All explorations" map** (`DriftKnowledgeGraph.tsx`): scope toggle **This chat / All**; "All" builds a synthetic super-root forest (`buildForest`) of every conversation. Node activation now keys off `isDrift` (drift→panel, chat→switch), not depth.
+- **Drift synthesis** (`gemini.ts` `synthesizeDrifts` + `App.handleSynthesize`): a Synthesize bar in the map (chat scope, ≥2 drifts) weaves every descendant drift into one markdown synthesis posted back on the conversation, then scrolls to it.
+- **Full-text search** (`SearchModal.tsx`, new): ⌘K command palette across every message in every chat/drift; ranked, keyboard-navigable, jumps + highlights. Header search button added.
+- **Map keyboard hub + filter** (`DriftKnowledgeGraph.tsx`): arrow keys walk node→node, Enter/Space opens, view re-centers; floating filter box dims non-matches, Enter jumps to first match.
+- **Suggested next terms** (`App.tsx`): "Drift into" chip row under each AI answer from unexplored `suggestedHighlights` (these were already highlighted inline; now also explicit one-tap chips).
+- **Conversation forking** (`App.tsx handleForkChat` + `metadata.forkedFrom`): Fork button (GitBranch) on AI messages → new sibling chat carrying everything through that point, switches there.
+- Skipped per request: export/share, security (client-side Gemini key).
+
 ## Last Session (May 31) — Model-agnostic add flow + reopen-pill bug
 Build green (`tsc -b`, `vite build`, dev 200). On `feature/apple-level-overhaul`, not committed.
 - **Bug fix**: the reopen-last-drift pill (`App.tsx` header) leaked a stale drift (e.g. "Sporting CP") from another conversation onto a fresh chat. Now gated on `lastDrift.parentChatId === activeChatId`.
