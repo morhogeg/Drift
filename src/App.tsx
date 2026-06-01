@@ -3138,6 +3138,34 @@ function App() {
                             </div>
                           )}
 
+                          {/* Drift-into chips — AI-suggested next terms worth exploring.
+                              Surfaces the unexplored highlights as one-tap branches so
+                              "where do I go next" is explicit, not just inline. */}
+                          {!msg.isUser && (() => {
+                            const explored = new Set((msg.driftInfos ?? []).map(d => d.selectedText))
+                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 4)
+                            if (nextTerms.length === 0) return null
+                            return (
+                              <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
+                                <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-accent-violet/50 mr-0.5">
+                                  <GitBranch className="w-3 h-3" /> Drift into
+                                </span>
+                                {nextTerms.map((term) => (
+                                  <button
+                                    key={term}
+                                    onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
+                                    className="px-2.5 py-1 rounded-full text-[12px] font-medium leading-none max-w-[200px] truncate
+                                      text-accent-violet/90 border border-accent-violet/25 bg-accent-violet/[0.06]
+                                      hover:bg-accent-violet/[0.13] hover:border-accent-violet/45 active:scale-95 transition-all"
+                                    title={`Drift into "${term}"`}
+                                  >
+                                    {term}
+                                  </button>
+                                ))}
+                              </div>
+                            )
+                          })()}
+
                           {/* Bottom action row — Gemini-style */}
                           {!msg.isUser && (
                             <div className={`flex items-center gap-0.5 mt-2 ${!isPlainAI ? 'pt-1.5 border-t border-dark-border/20' : ''}`}>
