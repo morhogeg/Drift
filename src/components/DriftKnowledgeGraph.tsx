@@ -14,7 +14,7 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, GitBranch, Maximize2, Sparkles, Loader2 } from 'lucide-react'
+import { X, GitBranch, Maximize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -406,6 +406,77 @@ function GraphCanvas({
     else onSwitchChat(id)
   }
 
+  // ── Search / filter ──────────────────────────────────────────────────────────
+  const [filter, setFilter] = useState('')
+  const q = filter.trim().toLowerCase()
+  const nodeLabel = (laid: Laid) => (laid.node.phrase ?? laid.node.chat.title ?? '').toLowerCase()
+  const isMatch = useCallback(
+    (laid: Laid) => !q || nodeLabel(laid).includes(q),
+    [q],
+  )
+
+  // Pan the view so a node sits at the centre of the canvas (keeps zoom).
+  const centerOn = useCallback((laid: Laid) => {
+    const el = wrapRef.current
+    if (!el) return
+    const cw = el.clientWidth, ch = el.clientHeight
+    setView(v => ({ ...v, x: cw / 2 - laid.x * v.scale, y: ch / 2 - laid.y * v.scale }))
+  }, [])
+
+  // ── Keyboard navigation: arrows walk node→node, Enter/Space opens ─────────────
+  useEffect(() => {
+    const move = (dir: 'left' | 'right' | 'up' | 'down') => {
+      const cur = selectedId ? byId.get(selectedId) : null
+      if (!cur) {
+        const first = nodes.find(n => n.node.chat.id !== ALL_ROOT_ID)
+        if (first) { haptics.selection(); onSelect(first.node.chat.id); centerOn(first) }
+        return
+      }
+      let best: Laid | null = null
+      let bestScore = Infinity
+      for (const n of nodes) {
+        if (n === cur || n.node.chat.id === ALL_ROOT_ID) continue
+        const dx = n.x - cur.x, dy = n.y - cur.y
+        let ok = false, along = 0, perp = 0
+        if (dir === 'right') { ok = dx > 1; along = dx; perp = Math.abs(dy) }
+        else if (dir === 'left') { ok = dx < -1; along = -dx; perp = Math.abs(dy) }
+        else if (dir === 'down') { ok = dy > 1; along = dy; perp = Math.abs(dx) }
+        else { ok = dy < -1; along = -dy; perp = Math.abs(dx) }
+        if (!ok) continue
+        const score = along + perp * 2.5   // prefer aligned, nearby nodes
+        if (score < bestScore) { bestScore = score; best = n }
+      }
+      if (best) { haptics.selection(); onSelect(best.node.chat.id); centerOn(best) }
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      switch (e.key) {
+        case 'ArrowRight': e.preventDefault(); move('right'); break
+        case 'ArrowLeft': e.preventDefault(); move('left'); break
+        case 'ArrowUp': e.preventDefault(); move('up'); break
+        case 'ArrowDown': e.preventDefault(); move('down'); break
+        case 'Enter':
+        case ' ': {
+          const cur = selectedId ? byId.get(selectedId) : null
+          if (cur) { e.preventDefault(); handleActivate(cur) }
+          break
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, nodes, byId, centerOn])
+
+  // Enter in the filter box selects + centres the first match.
+  const jumpToFirstMatch = () => {
+    if (!q) return
+    const hit = nodes.find(n => n.node.chat.id !== ALL_ROOT_ID && nodeLabel(n).includes(q))
+    if (hit) { haptics.selection(); onSelect(hit.node.chat.id); centerOn(hit) }
+  }
+
   // Background drifting motes — decorative, gated on reduced-motion.
   const motes = useMemo(() => {
     if (reduce) return []
@@ -447,6 +518,35 @@ function GraphCanvas({
           ))}
         </svg>
       )}
+
+      {/* Filter box — type to find a node; Enter jumps to the first match */}
+      <div
+        className="dkg-search absolute z-20 flex items-center gap-1.5"
+        style={{ top: 10, left: 10 }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <Search className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }} />
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); jumpToFirstMatch() } }}
+          placeholder="Filter…"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          className="bg-transparent text-[12px] focus:outline-none w-[92px] focus:w-[140px] transition-[width] duration-200"
+          style={{ color: '#fff' }}
+        />
+        {filter && (
+          <button
+            onClick={() => setFilter('')}
+            className="flex-shrink-0 text-white/50 hover:text-white/80"
+            aria-label="Clear filter"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
+      </div>
 
       {/* Refit control */}
       <button
@@ -555,6 +655,8 @@ function GraphCanvas({
             const phrase = laid.node.phrase ?? laid.node.chat.title ?? 'Untitled'
             const label = phrase.length > 22 ? phrase.slice(0, 22) + '…' : phrase
             const depthDim = laid.depth >= 2 && !focused
+            // When filtering, fade nodes that don't match the query.
+            const filteredOut = !!q && !isMatch(laid)
 
             return (
               <g
@@ -562,6 +664,8 @@ function GraphCanvas({
                 className="dkg-node"
                 style={{
                   cursor: 'pointer',
+                  opacity: filteredOut ? 0.16 : 1,
+                  transition: reduce ? undefined : 'opacity 0.25s ease',
                   animation: reduce ? undefined : `dkgRise 0.6s cubic-bezier(0.16,1,0.3,1) ${0.05 + laid.index * 0.05}s both`,
                 }}
                 onPointerUp={(e) => { e.stopPropagation(); handleActivate(laid) }}
@@ -1135,6 +1239,16 @@ function StyleBlock() {
         backdrop-filter: blur(8px);
       }
       .dkg-fit:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+      .dkg-search {
+        background: rgba(255,255,255,0.07);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 999px;
+        padding: 5px 10px;
+        backdrop-filter: blur(8px);
+      }
+      .dkg-search:focus-within { border-color: rgba(168,85,247,0.5); background: rgba(255,255,255,0.1); }
+      .dkg-search input::placeholder { color: rgba(255,255,255,0.4); }
 
       /* Detail card — glass over the void */
       .dkg-detail-inner {
