@@ -381,6 +381,43 @@ function App() {
     }
   }
 
+  // ── Conversation forking: "what if I'd asked X instead?" ──────────────────────
+  // Branches the timeline at a message into a new sibling conversation containing
+  // everything through that point, then switches there to continue differently.
+  const handleForkChat = (messageId: string) => {
+    const sourceChat = chatHistory.find(c => c.id === activeChatId)
+    const msgs = sourceChat?.messages?.length ? sourceChat.messages : messages
+    const idx = msgs.findIndex(m => m.id === messageId)
+    if (idx === -1) return
+    haptics.impact('medium')
+
+    // Carry everything up to and including this message; drop drift markers so the
+    // fork starts clean (its own drifts will be tracked independently).
+    const carried: Message[] = msgs.slice(0, idx + 1).map(m => ({
+      ...m,
+      hasDrift: false,
+      driftInfos: undefined,
+    }))
+    const forkId = 'fork-' + Date.now()
+    const baseTitle = sourceChat?.title && sourceChat.title !== 'New Chat' ? sourceChat.title : 'Conversation'
+    const last = carried[carried.length - 1]
+    const forkChat: ChatSession = {
+      id: forkId,
+      title: `Fork: ${baseTitle}`,
+      messages: carried,
+      lastMessage: last ? stripMarkdown(last.text).slice(0, 100) : 'Forked conversation',
+      createdAt: new Date(),
+      metadata: { forkedFrom: activeChatId, forkedAtMessageId: messageId },
+    }
+    chatStore.registerDriftSession(forkChat)
+    switchChat(forkId)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-message-id="${messageId}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 150)
+    toast.success('Forked — continue in a new direction')
+  }
+
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
@@ -3187,6 +3224,16 @@ function App() {
                               >
                                 <Bookmark className={`w-4 h-4 ${savedMessageIds.has(msg.id) ? 'fill-cyan-400' : ''}`} />
                               </button>
+                              {isPlainAI && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleForkChat(msg.id) }}
+                                  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleForkChat(msg.id) }}
+                                  className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-text-muted hover:text-accent-violet hover:bg-dark-elevated/60 active:bg-dark-elevated transition-colors"
+                                  title="Fork conversation from here — explore a different path"
+                                >
+                                  <GitBranch className="w-4 h-4" />
+                                </button>
+                              )}
                               {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}

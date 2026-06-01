@@ -64,6 +64,10 @@ export interface ChatSession {
     parentChatId?: string
     sourceMessageId?: string
     selectedText?: string
+    /** Set on a forked conversation — the chat it was forked from. */
+    forkedFrom?: string
+    /** The message id the fork was taken at. */
+    forkedAtMessageId?: string
   }
 }
 
