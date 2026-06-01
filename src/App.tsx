@@ -21,6 +21,7 @@ import HeaderControls from './components/HeaderControls'
 import MultiModelCarousel from './components/MultiModelCarousel'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
+import SearchModal from './components/SearchModal'
 import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
@@ -78,6 +79,7 @@ function App() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
   const [synthesizing, setSynthesizing] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -618,6 +620,11 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
         e.preventDefault()
         setKnowledgeGraphOpen(!knowledgeGraphOpen)
+      }
+      // ⌘K / Ctrl-K — full-text search across all chats and drifts.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setSearchOpen(v => !v)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -2207,6 +2214,15 @@ function App() {
               )}
 
               <div className="flex items-center gap-2 min-w-0">
+                {/* Search — across every conversation and drift */}
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group shrink-0"
+                  title="Search (⌘K)"
+                >
+                  <Search className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
+                </button>
+
                 {/* Snippet Gallery Button — hidden on mobile */}
                 <button
                   onClick={() => uiStore.setGalleryOpen(true)}
@@ -3592,6 +3608,25 @@ function App() {
           synthesizing={synthesizing}
         />
       )}
+
+      {/* Full-text search across all chats and drifts */}
+      <SearchModal
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        chatHistory={chatHistory}
+        onNavigate={(chatId, messageId) => {
+          setSearchOpen(false)
+          switchChat(chatId)
+          setTimeout(() => {
+            const el = document.querySelector(`[data-message-id="${messageId}"]`)
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              el.classList.add('highlight-message')
+              setTimeout(() => el.classList.remove('highlight-message'), 2000)
+            }
+          }, 150)
+        }}
+      />
 
       {/* Snippet Gallery */}
       <SnippetGallery
