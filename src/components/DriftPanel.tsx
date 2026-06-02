@@ -608,9 +608,14 @@ Rules:
       // History-aware Connect: feed prior same/related-term drifts into the chip
       // prompt so the directions are ones the user has NOT already taken.
       const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
-      const connectChipsPrompt = priorTerms.length
+      // Disambiguation: "Barcelona" inside a Messi conversation means FC Barcelona
+      // the club — not the city. Force the model to read the term through context.
+      const connectDisambiguation = parentContext
+        ? `\n\nCRITICAL — DISAMBIGUATE BY CONTEXT: The user selected "${selectedText}" while reading the conversation below. Interpret "${selectedText}" ONLY in the sense the conversation implies — use the surrounding text to resolve which specific entity is meant (e.g. a football club vs. a city, a person vs. a namesake, a company vs. a common word). Every connection MUST be about that contextual meaning, NOT the most generic/popular meaning of the word.\n\nConversation context:\n${parentContext}`
+        : ''
+      const connectChipsPrompt = (priorTerms.length
         ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
-        : TEMPLATE_SYSTEM_PROMPTS['connect']
+        : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
 
       const baseSystemContent = (templateType === 'connect' && connectQuestion)
         ? `The user is reading about "${selectedText}" and chose to explore this question: "${connectQuestion}". Answer it directly and insightfully. Draw connections back to "${selectedText}" where relevant. Be concise.${parentContext ? `\n\nConversation context:\n${parentContext}` : ''}`
@@ -621,7 +626,9 @@ Rules:
         : (parentContext
             ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
             : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`)
-      const systemContent = (templateType && parentContext)
+      // Connect branches already embed their own context above; only the
+      // non-connect templates need it appended here.
+      const systemContent = (templateType && templateType !== 'connect' && parentContext)
         ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
         : baseSystemContent
 

@@ -337,7 +337,9 @@ Write engaging markdown:
         role: 'user',
         parts: [{ text: `Root topic: "${rootTopic}"\n\nThe branches explored:\n\n${branchText}` }],
       }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 1000 },
+      // gemini-3.5-flash is a thinking model: reasoning tokens count against this
+      // budget, so a low cap truncates the answer mid-sentence. Give it headroom.
+      generationConfig: { temperature: 0.8, maxOutputTokens: 4096 },
     }
 
     const response = await fetch(url, {

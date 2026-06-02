@@ -165,6 +165,26 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
   return [...here, ...node.children.flatMap(collectTopics)]
 }
 
+/** A meaningful label for a drift node: surface the actual connection/question it
+ *  explored (e.g. "Barcelona → Real Madrid") rather than just the selected term. */
+function nodeTopic(chat: ChatSession): string {
+  const term = (chat.metadata?.selectedText || chat.title || 'Drift').replace(/^["']|["']$/g, '').trim()
+  for (const m of chat.messages) {
+    if (!m.isUser) continue
+    const t = m.text.trim()
+    // Connect bridge: 'How does "X" connect to Y?' → the concept Y is what's explored.
+    const bridge = t.match(/connect(?:s|ed)?\s+to\s+(.+?)[?.]?$/i)
+    if (bridge?.[1]) return `${term} → ${bridge[1].trim()}`
+    // A genuine follow-up question (skip the auto-generated template openers).
+    if (
+      !/^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i.test(t)
+    ) {
+      return t.length > 28 ? t.slice(0, 28).trim() + '…' : t
+    }
+  }
+  return term
+}
+
 /** Number duplicate phrases so chips are distinguishable: "guitarist", "guitarist 2" */
 function disambiguateTopics(raw: { phrase: string; chatId: string }[]): { phrase: string; chatId: string }[] {
   const counts = new Map<string, number>()
@@ -395,13 +415,30 @@ function GraphCanvas({
 
   const byId = useMemo(() => new Map(nodes.map(n => [n.node.chat.id, n])), [nodes])
 
-  const handleActivate = (laid: Laid) => {
+  // Per-node display labels: prefer the actual connection/topic each drift
+  // explored, and number any that still collide so siblings stay distinct.
+  const labelById = useMemo(() => {
+    const driftNodes = nodes.filter(n => n.node.chat.metadata?.isDrift)
+    const topics = driftNodes.map(n => ({ phrase: nodeTopic(n.node.chat), chatId: n.node.chat.id }))
+    return new Map(disambiguateTopics(topics).map(t => [t.chatId, t.phrase]))
+  }, [nodes])
+
+  // Tapping a node only previews it — selects + centers so the detail card shows.
+  // Users glance between nodes; opening fully is a deliberate second tap.
+  const handleSelect = (laid: Laid) => {
     if (drag.current?.moved) return
     const id = laid.node.chat.id
     if (id === ALL_ROOT_ID) return  // synthetic global root — not navigable
     haptics.selection()
     onSelect(id)
-    // A drift opens in the focused panel; a full conversation switches the chat.
+    centerOn(laid)
+  }
+
+  // Fully open: a drift opens in the focused panel; a conversation switches the chat.
+  const handleOpen = (laid: Laid) => {
+    const id = laid.node.chat.id
+    if (id === ALL_ROOT_ID) return
+    haptics.selection()
     if (laid.node.chat.metadata?.isDrift && onOpenDrift) onOpenDrift(laid.node.chat)
     else onSwitchChat(id)
   }
@@ -460,7 +497,7 @@ function GraphCanvas({
         case 'Enter':
         case ' ': {
           const cur = selectedId ? byId.get(selectedId) : null
-          if (cur) { e.preventDefault(); handleActivate(cur) }
+          if (cur) { e.preventDefault(); handleOpen(cur) }
           break
         }
       }
@@ -652,8 +689,8 @@ function GraphCanvas({
             const isSelected = id === selectedId
             const focused = isActive || isSelected
             const gi = Math.min(laid.depth, HUES.length - 1)
-            const phrase = laid.node.phrase ?? laid.node.chat.title ?? 'Untitled'
-            const label = phrase.length > 22 ? phrase.slice(0, 22) + '…' : phrase
+            const phrase = labelById.get(id) ?? laid.node.phrase ?? laid.node.chat.title ?? 'Untitled'
+            const label = phrase.length > 24 ? phrase.slice(0, 24) + '…' : phrase
             const depthDim = laid.depth >= 2 && !focused
             // When filtering, fade nodes that don't match the query.
             const filteredOut = !!q && !isMatch(laid)
@@ -668,7 +705,7 @@ function GraphCanvas({
                   transition: reduce ? undefined : 'opacity 0.25s ease',
                   animation: reduce ? undefined : `dkgRise 0.6s cubic-bezier(0.16,1,0.3,1) ${0.05 + laid.index * 0.05}s both`,
                 }}
-                onPointerUp={(e) => { e.stopPropagation(); handleActivate(laid) }}
+                onPointerUp={(e) => { e.stopPropagation(); handleSelect(laid) }}
               >
                 {/* wide ambient halo */}
                 <circle
@@ -756,7 +793,7 @@ function GraphCanvas({
         <DetailCard
           laid={byId.get(selectedId)!}
           isMobile={isMobile}
-          onOpen={() => handleActivate(byId.get(selectedId)!)}
+          onOpen={() => handleOpen(byId.get(selectedId)!)}
           onDismiss={() => onSelect('')}
         />
       )}
@@ -771,7 +808,7 @@ function DetailCard({
 }: { laid: Laid; isMobile: boolean; onOpen: () => void; onDismiss: () => void }) {
   const h = hueAt(laid.depth)
   const isDrift = laid.depth > 0
-  const title = laid.node.chat.metadata?.selectedText || laid.node.chat.title || 'Untitled'
+  const title = isDrift ? nodeTopic(laid.node.chat) : (laid.node.chat.title || 'Untitled')
   const preview = lastAiPreview(laid.node.chat)
   const ts = laid.node.chat.createdAt ? timeAgo(laid.node.chat.createdAt) : null
   const msgs = laid.node.chat.messages.length
@@ -779,7 +816,10 @@ function DetailCard({
   return (
     <div
       className="dkg-detail absolute z-30 left-1/2 -translate-x-1/2"
-      style={{ bottom: isMobile ? 14 : 16, width: isMobile ? 'calc(100% - 24px)' : 340 }}
+      style={{
+        bottom: isMobile ? 'calc(env(safe-area-inset-bottom) + 16px)' : 16,
+        width: isMobile ? 'calc(100% - 24px)' : 340,
+      }}
       onPointerDown={e => e.stopPropagation()}
       onPointerUp={e => e.stopPropagation()}
     >
@@ -938,14 +978,8 @@ export default function DriftKnowledgeGraph({
 }: Props) {
   const isMobile = useIsMobile()
 
-  // Scope: just this conversation's tree, or a constellation of everything.
-  const [scope, setScope] = useState<'chat' | 'all'>('chat')
-
-  // How many distinct top-level conversations exist (gates the "All" toggle).
-  const conversationCount = useMemo(
-    () => chatHistory.filter(c => !c.metadata?.isDrift && !c.metadata?.parentChatId && (c.messages.length > 0)).length,
-    [chatHistory],
-  )
+  // The map always shows just the current conversation's tree.
+  const [scope] = useState<'chat' | 'all'>('chat')
 
   const rootId = activeChatId ? findRootId(activeChatId, chatHistory) : null
   const treeChats = rootId ? collectTree(rootId, chatHistory, getTempMessages) : []
@@ -971,23 +1005,6 @@ export default function DriftKnowledgeGraph({
   useEffect(() => { setSelectedId(activeChatId) }, [activeChatId])
   const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
 
-  // A small segmented control shared by both layouts.
-  const scopeToggle = conversationCount > 1 ? (
-    <div className="inline-flex items-center rounded-full p-0.5 bg-white/[0.05] border border-white/[0.08]">
-      {(['chat', 'all'] as const).map(s => (
-        <button
-          key={s}
-          onClick={() => { haptics.selection(); setScope(s) }}
-          className={`px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide transition-colors ${
-            scope === s ? 'bg-accent-violet/30 text-white' : 'text-white/45 hover:text-white/70'
-          }`}
-        >
-          {s === 'chat' ? 'This chat' : 'All'}
-        </button>
-      ))}
-    </div>
-  ) : null
-
   // "Bring it home" — synthesize the current conversation's drifts. Chat scope only.
   const synthBar = scope === 'chat' && rootId && driftCount >= 2 && onSynthesize ? (
     <div className="px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
@@ -1007,7 +1024,7 @@ export default function DriftKnowledgeGraph({
     </div>
   ) : null
 
-  const { panelRef, onTouchStart, onTouchMove, onTouchEnd } = useDragClose(onClose, isMobile)
+  const { panelRef } = useDragClose(onClose, isMobile)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -1029,37 +1046,17 @@ export default function DriftKnowledgeGraph({
     <EmptyState isMobile={isMobile} />
   )
 
-  // ── Mobile: full-screen bottom sheet ──
+  // ── Mobile: full-screen view ──
   if (isMobile) {
     return (
       <>
         <StyleBlock />
         <div
-          className="fixed inset-0 z-40"
-          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)' }}
-          onClick={onClose}
-        />
-        <div
           ref={panelRef}
-          className="dkg-sheet fixed left-0 right-0 bottom-0 z-50 flex flex-col"
-          style={{
-            height: '88dvh',
-            borderRadius: '18px 18px 0 0',
-            transition: 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
-          }}
+          className="dkg-sheet fixed inset-0 z-50 flex flex-col"
         >
-          {/* Drag handle */}
-          <div
-            className="flex justify-center pt-3 pb-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-          >
-            <div className="rounded-full" style={{ width: 36, height: 4, background: 'rgba(255,255,255,0.25)' }} />
-          </div>
-
           {/* Header */}
-          <div className="px-4 pt-1.5 pb-3 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
+          <div className="px-4 pb-3 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))', paddingTop: 'calc(env(safe-area-inset-top) + 10px)' }}>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 mb-1">
@@ -1089,7 +1086,6 @@ export default function DriftKnowledgeGraph({
                 )}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                {scopeToggle}
                 <button
                   onClick={onClose}
                   className="flex items-center justify-center rounded-full active:scale-90"
@@ -1102,7 +1098,7 @@ export default function DriftKnowledgeGraph({
             </div>
           </div>
 
-          {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile />}
+          {tree && <TopicsStrip topics={topics} onJump={onSelect} isMobile />}
           {synthBar}
 
           <div className="flex-1 relative overflow-hidden">{graph}</div>
@@ -1150,7 +1146,6 @@ export default function DriftKnowledgeGraph({
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              {scopeToggle}
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg"
@@ -1163,7 +1158,7 @@ export default function DriftKnowledgeGraph({
           </div>
         </div>
 
-        {tree && <TopicsStrip topics={topics} onJump={onSwitchChat} isMobile={false} />}
+        {tree && <TopicsStrip topics={topics} onJump={onSelect} isMobile={false} />}
         {synthBar}
 
         <div className="flex-1 relative overflow-hidden">{graph}</div>

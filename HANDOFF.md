@@ -2,12 +2,43 @@
 
 **Date:** June 2, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 36 (iOS Xcode) / web
-**Status:** Connect reinvented as a relationship-map + bridge-maker, plus a "View as" lens switcher with state preserved across switches. (Bundle: index ~767 kB / gzip ~229 kB.)
+**Build:** 38 (iOS Xcode) / web
+**Status:** Screenshot-driven polish wave — term action bar redesigned, Connect made context-aware, horizontal text-cutoff fixed app-wide, synthesis card + truncation fixed, Drift Map turned into a full-screen tap-to-preview explorer with informative node labels/previews, and "Drift into" chips polished. (Bundle: index ~769 kB / gzip ~229.6 kB.)
 
 ---
 
 ## What Was Done This Session
+
+### 134. Drift Map — informative node preview for Connect drifts (FIX)
+- The map only read `driftStore.getTempConversation`, so Connect-lens drifts (whose Q&A lives in `connectAnswersCache` / parent `driftInfos.connectAnswers`) showed "0 msgs" and a blank preview card. `getTempMessages` now falls back to the connect-answers cache and the parent message's `driftInfos.connectAnswers`, so the node gets real message count + an answer-snippet preview.
+- `DetailCard` title now uses `nodeTopic()` for drift nodes → shows the actual connection ("Juventus → Industrial Turin Identity") instead of the bare term.
+
+### 133. "Drift into" suggestion chips — polish (POLISH)
+- Label moved to its own line (uppercase section header) so wrapped chip rows align cleanly to the left (was inline with the first chip → ragged wrap).
+- Roomier even grid (`gap-2`), larger tap target, subtle shadow, clearer hover/active, and a per-chip `↗` (ArrowUpRight) affordance that brightens on hover. Long terms truncate via `max-w-full` + `truncate`.
+
+### 132. Drift Map — full-screen tap-to-preview explorer (REDESIGN)
+- Mobile map is now **full-screen** (`fixed inset-0`), not an 88dvh bottom-sheet drawer — removed drag handle, rounded top, and dimmed backdrop; header gets a safe-area top inset.
+- **Tap = preview, not jump:** tapping a node only selects + centers it (shows the detail card); navigation is a deliberate second step via the card's "Open this drift / Go to chat" button. Enter/Space still opens fully; arrow keys move + preview. EXPLORED chips also preview (select) instead of navigating away.
+- **Removed the All / This chat scope toggle** — the map is always scoped to the current conversation (`scope` fixed to `'chat'`; toggle + `conversationCount` removed).
+
+### 131. Drift Map — meaningful node labels (FIX)
+- Nodes previously all showed the bare selected term (e.g. three identical "Barcelona"). Added `nodeTopic()` (surfaces the Connect bridge target / first real question, falls back to the term) + a per-node `labelById` map that runs `disambiguateTopics` so siblings stay distinct.
+
+### 130. Drift synthesis — truncation fix (BUG FIX)
+- `synthesizeDrifts` ran `gemini-3.5-flash` (a thinking model) with `maxOutputTokens: 1000`; reasoning tokens consumed the budget and the synthesis cut off mid-sentence (stray unclosed `**`). Raised to 4096 so the ~350-word answer completes and closes its markdown.
+
+### 129. Synthesis message — polished card (POLISH)
+- Synthesis messages (`id` starts with `synth-`) now render in a `.synthesis-card`: violet gradient border, soft glow, gradient title — reads as a deliberate artifact, not a stray message.
+
+### 128. Horizontal text cutoff — app-wide fit fix (BUG FIX)
+- Chat content (incl. synthesis) overflowed the right edge / was cut off. Root cause: the main chat column was `flex-1` without `min-w-0`, letting content widen past the viewport. Added `min-w-0` to the main column, `overflow-x: hidden` + `max-width:100%` on `.chat-messages-container`, and `overflow-wrap: anywhere` / `word-break` on `.ai-message`/prose (with code blocks/tables getting their own scroll). Added `min-w-0` on the message bubble too.
+
+### 127. Connect — context-aware disambiguation (FIX)
+- Connect ignored conversation context: "Barcelona" in a Messi thread returned city-of-Barcelona connections (Gaudí, Modernisme…). Connect prompt now gets a hard "DISAMBIGUATE BY CONTEXT" instruction that forces the term to be read through the surrounding conversation (FC Barcelona the club, not the city). Removed a latent double-append of context for Connect.
+
+### 126. Term selection action bar — professional redesign (POLISH)
+- The iOS selection bar (Drift / Simplify / Deep dive / Connect / Save) was cramped ("Deep dive" wrapped to two lines) with a cyan/violet/blue rainbow. Replaced emoji with consistent Lucide icons (BookOpen / Telescope / Link2), switched templates to a calm uniform icon-over-label layout (no wrap), kept Drift as the single gradient primary, and unified colors/dividers/padding into one polished control. Desktop tooltip updated to icons too.
 
 ### 125. Lens switcher — preserve Connect state across switches (FIX)
 - Cache connect cards + visited-bridge answers per thread-id (`connectCardsCache` + new `connectAnswersCache`). Switching back to a Connect view restores its map AND tapped-connection indicators. Connect targets start with clean messages so bridge prose can't poison the JSON card parser.
@@ -257,8 +288,8 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 35 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass for this wave** — verify synthesis (needs Gemini key + ≥2 drifts), forking continuation, global map with several conversations, map keyboard nav, ⌘K search.
+- [ ] **TestFlight submission** — archive build 38 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass for this wave** — verify the full-screen Drift Map (tap-to-preview, informative Connect node cards), synthesis (full text, no truncation), context-aware Connect, and the redesigned selection bar / "Drift into" chips.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
 - [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
@@ -267,7 +298,7 @@ VITE_GEMINI_API_KEY=your_key_here
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain
 - [ ] **App.tsx refactor** — ~3.5k lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
-- [ ] **Cleanup** — `DriftMapPanel.tsx` is dead code (graph replaced it); `onOpenRelatedDrift` prop now unused in DriftPanel.
+- [ ] **Cleanup** — `DriftMapPanel.tsx` is dead code (graph replaced it); `onOpenRelatedDrift` prop now unused in DriftPanel. Map scope toggle removed (#132) → `buildForest`/forest "All explorations" path is now dormant (scope fixed to `'chat'`); remove if the global map isn't coming back.
 
 ## Completed this session (was pending)
 - ✅ AddModelSheet OpenRouter & Ollama · ✅ Conversation forking · ✅ Full-text search · ✅ Drift synthesis

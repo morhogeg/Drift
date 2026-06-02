@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
@@ -2282,7 +2282,7 @@ function App() {
       {/* Main Chat Area */}
       <div
         className={`
-          flex-1 flex flex-col relative
+          flex-1 min-w-0 flex flex-col relative
           transition-all duration-150 ease-in-out
           ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
           ${(driftOpen || knowledgeGraphOpen) ? 'lg:mr-[480px]' : 'mr-0'}
@@ -2647,6 +2647,7 @@ function App() {
                   (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌') && !prevMsg?.isHiddenContext)
                 )
                 const isPlainAI = !msg.isUser && !isDriftMessage
+                const isSynthesis = isPlainAI && msg.id.startsWith('synth-')
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
@@ -2840,10 +2841,12 @@ function App() {
                       >
                         <div
                           className={`
-                            ${(isPlainAI || isDriftMessage || isSinglePushMessage)
+                            ${isSynthesis
+                              ? 'synthesis-card w-full'
+                              : (isPlainAI || isDriftMessage || isSinglePushMessage)
                               ? 'w-full py-2'
                               : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
-                            } relative
+                            } min-w-0 relative
                             ${(isPlainAI || isDriftMessage || isSinglePushMessage)
                               ? `ai-message text-text-secondary${(isDriftMessage || isSinglePushMessage) ? ' cursor-pointer' : ''}`
                               : msg.isUser
@@ -3242,22 +3245,29 @@ function App() {
                             const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 4)
                             if (nextTerms.length === 0) return null
                             return (
-                              <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
-                                <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-accent-violet/50 mr-0.5">
-                                  <GitBranch className="w-3 h-3" /> Drift into
-                                </span>
-                                {nextTerms.map((term) => (
-                                  <button
-                                    key={term}
-                                    onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
-                                    className="px-2.5 py-1 rounded-full text-[12px] font-medium leading-none max-w-[200px] truncate
-                                      text-accent-violet/90 border border-accent-violet/25 bg-accent-violet/[0.06]
-                                      hover:bg-accent-violet/[0.13] hover:border-accent-violet/45 active:scale-95 transition-all"
-                                    title={`Drift into "${term}"`}
-                                  >
-                                    {term}
-                                  </button>
-                                ))}
+                              <div className="mt-3.5">
+                                <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
+                                  <GitBranch className="w-3 h-3" />
+                                  Drift into
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {nextTerms.map((term) => (
+                                    <button
+                                      key={term}
+                                      onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
+                                      className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                        text-[12.5px] font-medium leading-none text-accent-violet/90
+                                        border border-accent-violet/25 bg-accent-violet/[0.07]
+                                        shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                        hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                        active:scale-[0.97] transition-all duration-150"
+                                      title={`Drift into "${term}"`}
+                                    >
+                                      <span className="truncate">{term}</span>
+                                      <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
                             )
                           })()}
@@ -3741,7 +3751,23 @@ function App() {
               }],
             })
           }}
-          getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
+          getTempMessages={(id) => {
+            const temp = driftStore.getTempConversation(id)
+            if (temp && temp.length) return temp
+            // Connect-lens drifts keep their Q&A in a per-id cache / on the parent's
+            // driftInfos — surface it so the map node has real content + a preview.
+            const answers =
+              connectAnswersCache.current.get(id) ??
+              chatHistory
+                .flatMap(c => c.messages ?? [])
+                .flatMap(m => m.driftInfos ?? [])
+                .find(d => d.driftChatId === id)?.connectAnswers
+            if (answers) {
+              const flat = Object.values(answers).flat()
+              if (flat.length) return flat
+            }
+            return null
+          }}
           onSynthesize={handleSynthesize}
           synthesizing={synthesizing}
         />

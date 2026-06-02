@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Bookmark, GitBranch } from 'lucide-react'
+import { Bookmark, GitBranch, BookOpen, Telescope, Link2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
 type TemplateType = 'simplify' | 'research' | 'connect'
@@ -423,10 +424,10 @@ export default function SelectionTooltip({
     }
   }
 
-  const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; emoji: string }> = [
-    { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',   emoji: '📖' },
-    { type: 'research',  label: 'Deep dive', desc: 'Facts & background',  emoji: '🔍' },
-    { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', emoji: '🔗' },
+  const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; Icon: LucideIcon }> = [
+    { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: BookOpen },
+    { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
+    { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Link2 },
   ]
 
   const handleSave = () => {
@@ -468,52 +469,51 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-center rounded-full bg-[#1c1c1e]/97 backdrop-blur-2xl border border-white/[0.09] shadow-[0_12px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+        <div className="flex items-stretch rounded-2xl bg-[#1c1c1e]/95 backdrop-blur-2xl border border-white/10 shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
           {!tooltip.isUserMessage ? (
             <>
               {/* Primary Drift action — most prominent, pink→violet gradient */}
               <button
                 type="button"
-                className="flex items-center justify-center gap-1.5 px-4 py-[13px] text-[13px] font-semibold
-                           bg-gradient-to-r from-accent-pink to-accent-violet text-white
-                           border-r border-white/[0.07] transition-all duration-150 active:opacity-80 flex-shrink-0"
+                className="flex items-center justify-center gap-1.5 px-3.5 py-3 text-[13px] font-semibold tracking-tight
+                           bg-gradient-to-br from-accent-pink to-accent-violet text-white
+                           transition-all duration-150 active:opacity-80 flex-shrink-0 whitespace-nowrap"
                 onTouchEnd={(e) => { e.preventDefault(); handleDrift() }}
                 onClick={() => handleDrift()}
               >
-                <GitBranch className="w-[15px] h-[15px]" />
+                <GitBranch className="w-[15px] h-[15px]" strokeWidth={2.25} />
                 Drift
               </button>
-              {/* Template actions */}
-              {TEMPLATES.map((t, i) => (
+              {/* Template actions — uniform, calm styling so the bar reads as one control */}
+              {TEMPLATES.map((t) => (
                 <button
                   key={t.type}
                   type="button"
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-[13px] text-[12px] font-medium transition-all duration-150 active:bg-white/[0.08]
-                    ${i < TEMPLATES.length - 1 ? 'border-r border-white/[0.07]' : ''}
-                    ${t.type === 'connect'  ? 'text-cyan-400'   :
-                      t.type === 'simplify' ? 'text-violet-400' :
-                      'text-blue-400'}`}
+                  className="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
+                             text-text-secondary border-l border-white/[0.06]
+                             transition-colors duration-150 active:bg-white/[0.07] active:text-white whitespace-nowrap"
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
-                  <span className="text-[14px] leading-none">{t.emoji}</span>
-                  <span>{t.label}</span>
+                  <t.Icon className="w-[17px] h-[17px] text-text-muted" strokeWidth={1.9} />
+                  <span className="text-[11px] font-medium leading-none">{t.label}</span>
                 </button>
               ))}
-              <div className="w-px h-5 bg-white/[0.07] flex-shrink-0" />
               <button
                 type="button"
-                className="px-4 py-[13px] text-text-muted/60 active:text-white active:bg-white/[0.08] transition-all duration-150 flex-shrink-0"
+                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-white/[0.06]
+                           active:text-white active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
                 onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
                 onClick={handleSave}
+                aria-label="Save to snippets"
               >
-                <Bookmark className="w-[17px] h-[17px]" />
+                <Bookmark className="w-[18px] h-[18px]" strokeWidth={1.9} />
               </button>
             </>
           ) : (
             <button
               type="button"
-              className="flex-1 flex items-center justify-center gap-2 py-[13px] text-[13px] font-medium text-text-secondary active:bg-white/[0.08] transition-all duration-150"
+              className="flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium text-text-secondary active:bg-white/[0.07] transition-colors duration-150"
               onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
               onClick={handleSave}
             >
@@ -597,7 +597,7 @@ export default function SelectionTooltip({
                            transition-all duration-150 cursor-pointer whitespace-nowrap"
               >
                 <span className="flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-text-secondary">
-                  <span>{t.emoji}</span>
+                  <t.Icon className="w-3 h-3" strokeWidth={1.9} />
                   <span>{t.label}</span>
                 </span>
                 <span className="text-[9px] text-text-muted/60 leading-tight">{t.desc}</span>
