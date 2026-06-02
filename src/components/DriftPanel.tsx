@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, Sparkles } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, Waypoints } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, getConnections, type ChatMessage as GeminiMessage, type Connection } from '../services/gemini'
+import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -166,10 +166,6 @@ export default function DriftPanel({
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
   /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
   const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
-  /** Intelligence layer: AI-derived connections (back to context / forward to new directions). */
-  const [connections, setConnections] = useState<Connection[] | null>(null)
-  /** Guards the connections fetch so it fires once per open. */
-  const connectionsFetchedRef = useRef(false)
 
   // --------------------------------------------------------------------------
   // Template helpers
@@ -178,18 +174,20 @@ export default function DriftPanel({
   const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
     'simplify': "You are an expert at making complex ideas simple. Explain the selected text as if to a curious 12-year-old. Use analogies, avoid jargon, and make it memorable.",
     'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
-    'connect': `You are a lateral thinking engine for an exploratory reading app. The user has selected a word or phrase from a conversation and wants to discover surprising intellectual threads to explore.
+    'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
 
-Return ONLY a raw JSON array of 4-5 strings. Each string is a short, thought-provoking question or reframe that opens a genuinely interesting direction. No prose, no markdown, no code fences.
+Return ONLY a raw JSON array of 5-6 strings. Each string is "<relationship> :: <concept>":
+- <relationship> = a short labeled edge, 1-4 words, lowercase (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals").
+- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words; Title Case for proper names).
+- Separator is exactly " :: " (space colon colon space).
 
 Example output for "Julius Caesar":
-["Did Shakespeare use Caesar to warn Elizabeth I about succession?","What does the Rubicon crossing tell us about the psychology of no return?","How did Caesar's calendar reform still shape our daily lives?","Why do assassinations so rarely achieve what their planners intended?","Is charisma a weapon or a vulnerability for leaders?"]
+["assassinated by :: Brutus and the Senate","crossed :: the Rubicon","reformed :: the Roman calendar","archetype for :: modern populist leaders","stands in tension with :: ideals of the Republic"]
 
 Rules:
-- Each item is a question or reframe, 6-12 words.
+- Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
 - Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern.
-- Skip the obvious — nothing the user can already infer from the conversation.
-- Make them feel like doorways, not trivia.
+- Skip the obvious — each edge should open a genuinely interesting bridge.
 - Output raw JSON array of strings only. Any other text breaks the app.`,
   }
 
@@ -235,10 +233,6 @@ Rules:
       // Reset suggestions and per-message highlights
       setDriftSuggestions([])
       setMsgHighlights(new Map())
-
-      // Reset intelligence-layer connections for this open
-      setConnections(null)
-      connectionsFetchedRef.current = false
 
       // Restore or reset Connect state
       connectAnswersRef.current = initialConnectAnswers
@@ -337,27 +331,6 @@ Rules:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateType, isTyping, driftOnlyMessages, selectedText])
 
-  // Intelligence layer: fetch connections once per open (Connect mode chips view).
-  // This is the "leaning in" moment — how the term relates to where the user has
-  // been, plus fresh directions. priorTerms steers the model off explored ground.
-  useEffect(() => {
-    if (!isOpen || templateType !== 'connect' || connectionsFetchedRef.current) return
-    if (!selectedText?.trim()) return
-    connectionsFetchedRef.current = true
-
-    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
-    if (!geminiKey) return
-
-    const ctx = contextMessages.slice(-6).map(m => `${m.isUser ? 'User' : 'Assistant'}: ${m.text}`).join('\n')
-    const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
-
-    getConnections(selectedText, ctx, priorTerms, geminiKey).then(c => {
-      // Only show if the panel is still on the same term.
-      setConnections(c)
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, templateType, selectedText])
-
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
   useEffect(() => {
@@ -374,6 +347,27 @@ Rules:
       chipSessionRef.current = { question: connectQuestion, messages: driftOnlyMessages }
     }
   }, [driftOnlyMessages, connectQuestion])
+
+  // A bridge question frames the connection between the term and a concept —
+  // it doubles as the displayed label and the prompt sent to the model.
+  const bridgeQuestion = (concept: string) => `How does "${selectedText}" connect to ${concept}?`
+
+  // Open (or restore) a focused Connect thread for a given question/bridge.
+  const openConnectThread = (question: string) => {
+    haptics.selection()
+    const cached = connectAnswersRef.current.get(question)
+    setConnectQuestion(question)
+    if (cached) {
+      autoSentRef.current = true
+      setMessages(cached)
+      setDriftOnlyMessages(cached)
+    } else {
+      autoSentRef.current = false
+      const systemMsg: Message = { id: 'drift-system-' + Date.now(), text: question, isUser: false, timestamp: new Date() }
+      setMessages([systemMsg])
+      setDriftOnlyMessages([systemMsg])
+    }
+  }
 
   // When returning to chips view (connectQuestion → null), persist the last chip session.
   // This fires after React commits the batch, so we read from the ref which was already updated.
@@ -1207,9 +1201,9 @@ Rules:
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
           <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
-            {/* Forward-only: one focused list of drift ideas. Provocative questions
-                first, sharper directional angles below — each a tappable doorway
-                that opens a focused thread. No backward-looking sections. */}
+            {/* Relationship map: the term is a hub with labeled edges to related
+                concepts. Tap an edge → the AI draws the bridge between the two,
+                which becomes its own thread. "Connect to anything" adds an edge. */}
             {(isTyping || connectCards === null) ? (
               <div className="flex flex-col gap-2.5">
                 {[1, 2, 3, 4, 5].map(i => (
@@ -1217,71 +1211,62 @@ Rules:
                 ))}
               </div>
             ) : (() => {
-              const openIdea = (text: string) => {
-                haptics.selection()
-                const cached = connectAnswersRef.current.get(text)
-                if (cached) {
-                  // Restore previous conversation — no LLM call needed
-                  setConnectQuestion(text)
-                  autoSentRef.current = true
-                  setMessages(cached)
-                  setDriftOnlyMessages(cached)
-                } else {
-                  // Fresh thread — auto-send the idea
-                  setConnectQuestion(text)
-                  autoSentRef.current = false
-                  const systemMsg: Message = {
-                    id: 'drift-system-' + Date.now(),
-                    text,
-                    isUser: false,
-                    timestamp: new Date(),
-                  }
-                  setMessages([systemMsg])
-                  setDriftOnlyMessages([systemMsg])
-                }
-              }
-              // Merge questions + forward angles into one deduped list of paths.
-              const forwardAngles = (connections ?? []).filter(c => c.kind === 'forward').map(c => c.label)
-              const seen = new Set<string>()
-              const ideas: string[] = []
-              for (const t of [...(connectCards ?? []), ...forwardAngles]) {
-                const key = t.trim().toLowerCase()
-                if (!t.trim() || seen.has(key)) continue
-                seen.add(key)
-                ideas.push(t)
-              }
+              // Each card is "<relationship> :: <concept>" (older cards may be a
+              // bare string — treat the whole thing as the concept).
+              const edges = (connectCards ?? []).map(card => {
+                const idx = card.indexOf('::')
+                return idx === -1
+                  ? { relationship: '', concept: card.trim() }
+                  : { relationship: card.slice(0, idx).replace(/:+$/, '').trim(), concept: card.slice(idx + 2).trim() }
+              }).filter(e => e.concept)
               void connectVisitedVersion // consumed to trigger re-render on cache changes
-              if (ideas.length === 0) {
-                return <p className="text-[13px] text-text-muted/60 text-center mt-8">No paths found.</p>
+              if (edges.length === 0) {
+                return <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
               }
               return (
                 <div>
                   <div className="flex items-center gap-1.5 mb-3">
-                    <Sparkles className="w-3.5 h-3.5 text-accent-discovery/80" />
-                    <p className="text-micro uppercase tracking-widest text-accent-discovery/80">Drift ideas</p>
+                    <Waypoints className="w-3.5 h-3.5 text-accent-discovery/80" />
+                    <p className="text-micro uppercase tracking-widest text-accent-discovery/80">Connections</p>
                   </div>
-                  <Stagger className="flex flex-col gap-2.5" step={0.04}>
-                    {ideas.map((idea, i) => {
-                      const visited = connectAnswersRef.current.has(idea)
-                      return (
-                        <motion.button
-                          key={i}
-                          variants={staggerChild}
-                          onClick={() => openIdea(idea)}
-                          className={`group flex items-start justify-between gap-3 w-full text-left px-4 py-3 rounded-2xl text-[14px] leading-snug active:scale-[0.98] transition-all duration-150
-                            ${visited
-                              ? 'border border-accent-discovery/40 bg-accent-discovery/[0.08] text-text-primary'
-                              : 'border border-white/[0.08] bg-dark-elevated/50 text-text-secondary hover:border-accent-discovery/35 hover:bg-dark-elevated hover:text-text-primary'}`}
-                          title={`Drift into "${idea}"`}
-                        >
-                          <span className="flex-1">{idea}</span>
-                          {visited
-                            ? <span className="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-accent-discovery/80" />
-                            : <ArrowUpRight className="w-4 h-4 text-text-muted/40 group-hover:text-accent-discovery/90 shrink-0 mt-0.5 transition-colors" />}
-                        </motion.button>
-                      )
-                    })}
-                  </Stagger>
+                  {/* Hub */}
+                  <div className="flex items-center gap-2.5 mb-1.5">
+                    <span className="w-3 h-3 rounded-full bg-accent-discovery shrink-0" style={{ boxShadow: '0 0 10px rgba(34,211,238,0.6)' }} />
+                    <span className="text-[15px] font-semibold text-text-primary leading-snug truncate">{selectedText}</span>
+                  </div>
+                  {/* Edges branching from the hub */}
+                  <div className="ml-[5px] border-l border-accent-discovery/20 pl-4">
+                    <Stagger className="flex flex-col gap-2 pt-1" step={0.04}>
+                      {edges.map((e, i) => {
+                        const q = bridgeQuestion(e.concept)
+                        const visited = connectAnswersRef.current.has(q)
+                        return (
+                          <motion.button
+                            key={i}
+                            variants={staggerChild}
+                            onClick={() => openConnectThread(q)}
+                            className={`group relative flex items-center gap-3 w-full text-left px-3.5 py-2.5 rounded-xl active:scale-[0.98] transition-all duration-150 min-h-[50px]
+                              ${visited
+                                ? 'border border-accent-discovery/40 bg-accent-discovery/[0.08]'
+                                : 'border border-white/[0.07] bg-dark-elevated/40 hover:border-accent-discovery/35 hover:bg-dark-elevated'}`}
+                            title={`See how "${selectedText}" connects to ${e.concept}`}
+                          >
+                            {/* tick joining the rail */}
+                            <span className="absolute -left-4 top-1/2 w-4 h-px bg-accent-discovery/20" aria-hidden />
+                            <div className="flex-1 min-w-0">
+                              {e.relationship && (
+                                <span className="block text-[10px] uppercase tracking-wider text-accent-discovery/55 leading-none mb-1">{e.relationship}</span>
+                              )}
+                              <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug">{e.concept}</span>
+                            </div>
+                            {visited
+                              ? <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-accent-discovery/80" />
+                              : <ArrowUpRight className="w-4 h-4 text-text-muted/40 group-hover:text-accent-discovery/90 shrink-0 transition-colors" />}
+                          </motion.button>
+                        )
+                      })}
+                    </Stagger>
+                  </div>
                 </div>
               )
             })()}
@@ -1296,23 +1281,14 @@ Rules:
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Ask your own question…"
+                  placeholder="Connect to anything…"
                   className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-white/[0.08] focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       const val = (e.target as HTMLInputElement).value.trim()
                       if (!val) return
                       ;(e.target as HTMLInputElement).value = ''
-                      setConnectQuestion(val)
-                      autoSentRef.current = false
-                      const systemMsg: Message = {
-                        id: 'drift-system-' + Date.now(),
-                        text: val,
-                        isUser: false,
-                        timestamp: new Date(),
-                      }
-                      setMessages([systemMsg])
-                      setDriftOnlyMessages([systemMsg])
+                      openConnectThread(bridgeQuestion(val))
                     }
                   }}
                 />
@@ -1326,16 +1302,7 @@ Rules:
                       const val = input?.value.trim()
                       if (!val) return
                       if (input) input.value = ''
-                      setConnectQuestion(val)
-                      autoSentRef.current = false
-                      const systemMsg: Message = {
-                        id: 'drift-system-' + Date.now(),
-                        text: val,
-                        isUser: false,
-                        timestamp: new Date(),
-                      }
-                      setMessages([systemMsg])
-                      setDriftOnlyMessages([systemMsg])
+                      openConnectThread(bridgeQuestion(val))
                     }}
                   >
                     <ArrowUp className="w-4 h-4" />
