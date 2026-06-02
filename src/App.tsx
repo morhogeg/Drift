@@ -108,6 +108,9 @@ function App() {
   const connectStateRef = useRef<{ question: string | null; cards: string[] | null }>({ question: null, cards: null })
   // Persists generated Connect chips per driftChatId so re-opening a Connect drift shows chips instantly
   const connectCardsCache = useRef<Map<string, string[]>>(new Map())
+  // Per-driftChatId cache of visited-bridge answers — survives lens switches so
+  // returning to a Connect view keeps its "you tapped this" indicators.
+  const connectAnswersCache = useRef<Map<string, Record<string, Message[]>>>(new Map())
   // Per-term lens registry: baseKey ("msgId::term") → (template → driftChatId).
   // Lets the in-panel "View as" switcher keep a separate thread per lens and
   // return to the original one, without touching the inline-link / map model.
@@ -347,10 +350,20 @@ function App() {
     let tgtId = reg.get(tgtTpl)
     if (!tgtId) { tgtId = `${reg.get(curTpl)}__${tgtTpl}`; reg.set(tgtTpl, tgtId) }
 
-    const existing =
-      driftStore.getTempConversation(tgtId)
-      ?? chatHistory.find(c => c.id === tgtId)?.messages
-      ?? []
+    // Restore the target thread's Connect state so its map + visited-bridge
+    // indicators come back exactly as the user left them.
+    const di = (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      .flatMap(m => m.driftInfos ?? [])
+      .find(d => d.driftChatId === tgtId)
+    const tgtCards = connectCardsCache.current.get(tgtId) ?? di?.connectCards
+    const tgtAnswers = connectAnswersCache.current.get(tgtId) ?? di?.connectAnswers
+
+    // For a Connect lens the chips view rebuilds from cached cards; passing the
+    // (prose) bridge conversation as messages would poison the JSON card parser,
+    // so start it clean and let initialConnectCards/Answers restore the map.
+    const existing = template === 'connect'
+      ? []
+      : (driftStore.getTempConversation(tgtId) ?? chatHistory.find(c => c.id === tgtId)?.messages ?? [])
 
     haptics.impact('light')
     connectStateRef.current = { question: null, cards: null }
@@ -363,6 +376,8 @@ function App() {
       existingMessages: existing,
       templateType: template,
       ancestry: ctx.ancestry,
+      connectCards: tgtCards?.length ? tgtCards : undefined,
+      connectAnswers: tgtAnswers && Object.keys(tgtAnswers).length ? tgtAnswers : undefined,
     })
   }
 
@@ -3581,6 +3596,9 @@ function App() {
         onConnectAnswerSaved={(question, answerMessages) => {
           if (!driftContext?.driftChatId) return
           const driftId = driftContext.driftChatId
+          // Cache by id (works for original + composite lens threads alike).
+          const prevCache = connectAnswersCache.current.get(driftId) ?? {}
+          connectAnswersCache.current.set(driftId, { ...prevCache, [question]: answerMessages })
           const currentChat = chatHistory.find(c => c.id === activeChatId)
           const currentMsgs = currentChat?.messages ?? messages
           const updated = currentMsgs.map(msg => {
