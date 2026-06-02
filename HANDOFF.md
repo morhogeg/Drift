@@ -2,12 +2,21 @@
 
 **Date:** June 2, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 40 (iOS Xcode) / web
-**Status:** Two waves. (A) Screenshot polish — term action bar, context-aware Connect, app-wide text-fit, synthesis card + truncation, full-screen tap-to-preview Drift Map, "Drift into" chips. (B) Reliability — Gemini output now matches the user's language, Connect lens-switch no longer loses cards, the map opens the real saved drift (no re-fetch), re-opening any explored term+lens never re-calls the LLM, and a scoped error boundary stops the map from crashing the whole app. (Bundle: index ~771 kB / gzip ~230 kB.)
+**Build:** 41 (iOS Xcode) / web
+**Status:** Three waves. (A) Screenshot polish — term action bar, context-aware Connect, app-wide text-fit, synthesis card + truncation, full-screen tap-to-preview Drift Map, "Drift into" chips. (B) Reliability — Gemini output matches user language, Connect lens-switch preserves cards, map opens real drifts (no re-fetch), re-opens never re-call, scoped error boundary stops map crashes. (C) Connect redesign — relationship typing (5 semantic kinds + icons), alive hub/edges, RTL mirroring, type legend. (Bundle: index ~776.5 kB / gzip ~231.9 kB.)
 
 ---
 
 ## What Was Done This Session
+
+### 140. Connect — relationship taxonomy + living map redesign (REDESIGN)
+- Reworked the Connect lens card list (`DriftPanel.tsx:1290–1380`) from a flat uniform list into a **semantic relationship map** with live visual distinction:
+  - **Relationship typing (language-agnostic):** Updated the Connect prompt to return `"<type> :: <relationship> :: <concept>"` where `<type>` is a language-invariant keyword (`origin·identity·influence·tension·history`) classifying the KIND of link. New module-scope `CONNECT_TYPES` registry maps each kind → hue + lucide icon. Parser remains backward-compatible with legacy 2-part (`"relationship :: concept"`) and bare-concept cached cards.
+  - **Color + icon chips:** Each card now displays a leading icon chip (Landmark / Fingerprint / Sparkles / Swords / Clock) in its kind's hue (`origin`=#34d399 green, `identity`=#22d3ee cyan, `influence`=#a78bfa purple, `tension`=#fb923c warm amber, `history`=#fbbf24 yellow). `tension` edges use a dashed connector so opposition visually contrasts against the cool field. The type legend appears in the footer so the user understands the taxonomy.
+  - **Alive hub + edges:** Hub node now breathes (`animate-breathe`); each edge has a glowing type-colored synapse dot on the rail (`box-shadow: 0 0 8px ${glow}`, `hover:scale-150`). Explored edges light up in their type color (the "where you've been" trail).
+  - **RTL fix:** Whole block uses `dir={getTextDirection(selectedText)}` + logical Tailwind props (`border-s`/`ps-5`/`-start-*`/`text-start`/`ms-[6px]`) so the rail + arrows mirror for Hebrew and other RTL languages. Arrow icon swaps to `ArrowUpLeft` when `dir === 'rtl'`. Confirmed all logical utilities compiled into the bundle CSS.
+  - **Dead space:** First-visit hint line ("Tap a connection to explore the bridge") + inline type legend (`presentKinds` footer chips) fill the lower area.
+- Build + `npx cap sync ios` ✅; tsc + Vite clean; logical properties compile correctly. Not yet eyeballed on-device (needs a live Gemini call to populate cards with typed responses).
 
 ### 139. Drift Map — scoped error boundary + data hardening (BUG FIX / RESILIENCE)
 - Intermittent WebKit-only crash on map open (`TypeError: null is not an object (evaluating 'O.current…')`) was hitting the APP-ROOT error boundary → full-page "Something went wrong / Refresh". Wrapped `<DriftKnowledgeGraph>` in a scoped `ErrorBoundary` (`fallback={null}`, `onError` closes the map) so a map failure can no longer take down the whole app — it auto-recovers and a re-tap remounts fresh. `ErrorBoundary` extended with optional `fallback`/`onError` and now logs the component stack via `componentDidCatch`.
@@ -307,15 +316,15 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 38 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass for this wave** — verify the full-screen Drift Map (tap-to-preview, informative Connect node cards), synthesis (full text, no truncation), context-aware Connect, and the redesigned selection bar / "Drift into" chips.
+- [ ] **TestFlight submission** — archive build 41 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass for this wave** — verify the type-classified Connect cards (icons + hues + legend), the breathing hub, the RTL mirroring (test with Hebrew), and all the visual polish from the previous wave (full-screen Drift Map tap-to-preview, synthesis full text, context-aware Connect, redesigned selection bar / "Drift into" chips). **Key:** live Gemini call is needed to populate Connect with typed responses; check that the LLM spreads the type tokens correctly.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
 - [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
 - [ ] **Security: Gemini key client-side** — key is bundled in the web build; move behind a proxy before any public release. (Deferred by request.)
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain
-- [ ] **App.tsx refactor** — ~3.5k lines, could extract more hooks
+- [ ] **App.tsx refactor** — ~3.9k lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
 - [ ] **Cleanup** — `DriftMapPanel.tsx` is dead code (graph replaced it); `onOpenRelatedDrift` prop now unused in DriftPanel. Map scope toggle removed (#132) → `buildForest`/forest "All explorations" path is now dormant (scope fixed to `'chat'`); remove if the global map isn't coming back.
 

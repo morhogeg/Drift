@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, Waypoints } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, type LucideIcon } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
@@ -15,6 +15,23 @@ import { useVoiceInput } from '../hooks/useVoiceInput'
 import { Stagger, staggerChild } from './motion'
 import { haptics } from '../lib/haptics'
 import { motion } from 'framer-motion'
+
+// ── Connect taxonomy ──────────────────────────────────────────────────────
+// Each connection edge is classified (by the LLM, language-agnostically) into
+// one of these kinds, so the user can scan *meaning* — ownership vs. influence
+// vs. opposition — at a glance instead of reading every label. Each kind owns a
+// hue + icon; `tension` (opposition) is deliberately warm so it pops against
+// the cool field. Unknown / legacy 2-part cards fall back to `link`.
+interface ConnectKind { label: string; icon: LucideIcon; color: string; glow: string }
+const CONNECT_TYPES: Record<string, ConnectKind> = {
+  origin:    { label: 'Origin',    icon: Landmark,    color: '#34d399', glow: 'rgba(52,211,153,0.55)' },
+  identity:  { label: 'Identity',  icon: Fingerprint, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' },
+  influence: { label: 'Influence', icon: Sparkles,    color: '#a78bfa', glow: 'rgba(167,139,250,0.55)' },
+  tension:   { label: 'Tension',   icon: Swords,      color: '#fb923c', glow: 'rgba(251,146,60,0.55)' },
+  history:   { label: 'History',   icon: Clock,       color: '#fbbf24', glow: 'rgba(251,191,36,0.55)' },
+}
+const CONNECT_FALLBACK: ConnectKind = { label: 'Link', icon: Waypoints, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' }
+const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? CONNECT_FALLBACK
 
 interface Message {
   id: string
@@ -179,15 +196,22 @@ export default function DriftPanel({
     'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
     'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
 
-Return ONLY a raw JSON array of 5-6 strings. Each string is "<relationship> :: <concept>":
-- <relationship> = a short labeled edge, 1-4 words, lowercase (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals").
-- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words; Title Case for proper names).
-- Separator is exactly " :: " (space colon colon space).
+Return ONLY a raw JSON array of 5-6 strings. Each string is "<type> :: <relationship> :: <concept>":
+- <type> = exactly ONE of these English keywords (always English, regardless of output language) classifying the KIND of link:
+    • origin    — where it comes from / who owns, founded, governs, or created it
+    • identity  — what it represents, embodies, or symbolizes
+    • influence — what shaped it, or what it shaped (inspired by, precursor to, archetype for, echoes)
+    • tension   — what it opposes, contrasts with, rivals, or conflicts with
+    • history   — a dated event or historical milestone tied to it
+- <relationship> = a short labeled edge, 1-4 words (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals"). Write it in the SAME LANGUAGE as the surrounding conversation.
+- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words; Title Case for proper names). Same language as the conversation.
+- Separator is exactly " :: " (space colon colon space). There are exactly TWO separators per string.
 
 Example output for "Julius Caesar":
-["assassinated by :: Brutus and the Senate","crossed :: the Rubicon","reformed :: the Roman calendar","archetype for :: modern populist leaders","stands in tension with :: ideals of the Republic"]
+["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
 
 Rules:
+- Use a SPREAD of types — don't make them all the same kind. Aim for at least 3 distinct types across the set.
 - Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
 - Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern.
 - Skip the obvious — each edge should open a genuinely interesting bridge.
@@ -1264,62 +1288,112 @@ Rules:
                 ))}
               </div>
             ) : (() => {
-              // Each card is "<relationship> :: <concept>" (older cards may be a
-              // bare string — treat the whole thing as the concept).
+              // Each card is "<type> :: <relationship> :: <concept>". Legacy cards
+              // may be "<relationship> :: <concept>" (no type) or a bare concept —
+              // parse defensively so old cached drifts still render.
               const edges = (connectCards ?? []).map(card => {
-                const idx = card.indexOf('::')
-                return idx === -1
-                  ? { relationship: '', concept: card.trim() }
-                  : { relationship: card.slice(0, idx).replace(/:+$/, '').trim(), concept: card.slice(idx + 2).trim() }
+                const parts = card.split('::').map(s => s.trim()).filter(Boolean)
+                if (parts.length >= 3) {
+                  return { typeKey: parts[0].toLowerCase(), relationship: parts[1].replace(/:+$/, ''), concept: parts.slice(2).join(' :: ') }
+                }
+                if (parts.length === 2) {
+                  return { typeKey: '', relationship: parts[0].replace(/:+$/, ''), concept: parts[1] }
+                }
+                return { typeKey: '', relationship: '', concept: parts[0] ?? '' }
               }).filter(e => e.concept)
               void connectVisitedVersion // consumed to trigger re-render on cache changes
               if (edges.length === 0) {
                 return <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
               }
+              const dir = getTextDirection(selectedText)
+              const Arrow = dir === 'rtl' ? ArrowUpLeft : ArrowUpRight
+              const anyVisited = edges.some(e => connectAnswersRef.current.has(bridgeQuestion(e.concept)))
+              const presentKinds = [...new Set(edges.map(e => e.typeKey).filter(k => k in CONNECT_TYPES))]
               return (
-                <div>
+                <div dir={dir}>
                   <div className="flex items-center gap-1.5 mb-3">
                     <Waypoints className="w-3.5 h-3.5 text-accent-discovery/80" />
                     <p className="text-micro uppercase tracking-widest text-accent-discovery/80">Connections</p>
                   </div>
-                  {/* Hub */}
-                  <div className="flex items-center gap-2.5 mb-1.5">
-                    <span className="w-3 h-3 rounded-full bg-accent-discovery shrink-0" style={{ boxShadow: '0 0 10px rgba(34,211,238,0.6)' }} />
-                    <span className="text-[15px] font-semibold text-text-primary leading-snug truncate">{selectedText}</span>
+                  {/* Hub — a living node the edges emanate from */}
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <span className="relative flex items-center justify-center shrink-0 w-3.5 h-3.5">
+                      <span className="absolute -inset-1 rounded-full border border-accent-discovery/30 animate-breathe" aria-hidden />
+                      <span className="w-3 h-3 rounded-full bg-accent-discovery" style={{ boxShadow: '0 0 14px rgba(34,211,238,0.7)' }} />
+                    </span>
+                    <span className="text-[15px] font-semibold text-text-primary leading-snug truncate" dir={dir}>{selectedText}</span>
                   </div>
-                  {/* Edges branching from the hub */}
-                  <div className="ml-[5px] border-l border-accent-discovery/20 pl-4">
+                  {/* Edges branching from the hub. Logical props (border-s / ps /
+                      -start) mirror automatically for RTL languages like Hebrew. */}
+                  <div className="ms-[6px] border-s ps-5" style={{ borderColor: 'rgba(34,211,238,0.18)' }}>
                     <Stagger className="flex flex-col gap-2 pt-1" step={0.04}>
                       {edges.map((e, i) => {
                         const q = bridgeQuestion(e.concept)
                         const visited = connectAnswersRef.current.has(q)
+                        const k = connectKind(e.typeKey)
+                        const Icon = k.icon
+                        const isTension = e.typeKey === 'tension'
                         return (
                           <motion.button
                             key={i}
                             variants={staggerChild}
                             onClick={() => openConnectThread(q)}
-                            className={`group relative flex items-center gap-3 w-full text-left px-3.5 py-2.5 rounded-xl active:scale-[0.98] transition-all duration-150 min-h-[50px]
-                              ${visited
-                                ? 'border border-accent-discovery/40 bg-accent-discovery/[0.08]'
-                                : 'border border-white/[0.07] bg-dark-elevated/40 hover:border-accent-discovery/35 hover:bg-dark-elevated'}`}
+                            className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
+                            style={{
+                              borderColor: visited ? `${k.color}66` : 'rgba(255,255,255,0.07)',
+                              background: visited ? `${k.color}14` : 'rgba(26,26,26,0.4)',
+                            }}
                             title={`See how "${selectedText}" connects to ${e.concept}`}
                           >
-                            {/* tick joining the rail */}
-                            <span className="absolute -left-4 top-1/2 w-4 h-px bg-accent-discovery/20" aria-hidden />
-                            <div className="flex-1 min-w-0">
+                            {/* connector + glowing synapse node sitting on the rail */}
+                            <span
+                              className={`absolute top-1/2 -translate-y-1/2 -start-5 w-5 ${isTension ? 'border-t border-dashed' : 'h-px'}`}
+                              style={isTension ? { borderColor: `${k.color}88` } : { background: `${k.color}66` }}
+                              aria-hidden
+                            />
+                            <span
+                              className="absolute top-1/2 -translate-y-1/2 -start-[23px] w-1.5 h-1.5 rounded-full transition-transform duration-200 group-hover:scale-150"
+                              style={{ background: k.color, boxShadow: `0 0 8px ${k.glow}` }}
+                              aria-hidden
+                            />
+                            {/* type icon chip */}
+                            <span
+                              className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                              style={{ background: `${k.color}1a`, color: k.color }}
+                            >
+                              <Icon className="w-[18px] h-[18px]" strokeWidth={2} />
+                            </span>
+                            <div className="flex-1 min-w-0" dir={getTextDirection(e.concept)}>
                               {e.relationship && (
-                                <span className="block text-[10px] uppercase tracking-wider text-accent-discovery/55 leading-none mb-1">{e.relationship}</span>
+                                <span className="block text-[10px] tracking-wider leading-none mb-1 truncate" style={{ color: `${k.color}cc` }}>{e.relationship}</span>
                               )}
-                              <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug">{e.concept}</span>
+                              <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug transition-colors">{e.concept}</span>
                             </div>
                             {visited
-                              ? <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-accent-discovery/80" />
-                              : <ArrowUpRight className="w-4 h-4 text-text-muted/40 group-hover:text-accent-discovery/90 shrink-0 transition-colors" />}
+                              ? <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 6px ${k.glow}` }} aria-hidden />
+                              : <Arrow className="w-4 h-4 text-text-muted/40 group-hover:text-text-secondary shrink-0 transition-colors" />}
                           </motion.button>
                         )
                       })}
                     </Stagger>
                   </div>
+                  {/* Footer: first-visit hint, then a legend of the kinds present */}
+                  {!anyVisited && (
+                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">Tap a connection to explore the bridge between them.</p>
+                  )}
+                  {presentKinds.length > 0 && (
+                    <div className="mt-4 ps-5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {presentKinds.map(key => {
+                        const k = CONNECT_TYPES[key]
+                        return (
+                          <span key={key} className="inline-flex items-center gap-1.5 text-[10px] text-text-muted/70">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 5px ${k.glow}` }} aria-hidden />
+                            {k.label}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })()}
