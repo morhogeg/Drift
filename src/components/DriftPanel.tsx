@@ -81,6 +81,8 @@ interface DriftPanelProps {
   currentDriftChatId?: string
   /** Walk sideways to a sibling drift without leaving the panel. */
   onNavigateToSibling?: (sib: SiblingDrift) => void
+  /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
+  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | undefined) => void
 }
 
 export interface SiblingDrift {
@@ -124,6 +126,7 @@ export default function DriftPanel({
   siblingDrifts,
   currentDriftChatId,
   onNavigateToSibling,
+  onSwitchLens,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -1146,6 +1149,35 @@ Rules:
             )
           })()}
         </header>
+
+        {/* "View as" lens switcher — re-view the same term through a different lens
+            without returning to the chat. Each lens keeps its own thread. Hidden in
+            Connect's bridge sub-mode (you're inside an answer there). */}
+        {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+            <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
+            {([
+              { tpl: undefined, label: 'Drift' },
+              { tpl: 'simplify', label: 'Simplify' },
+              { tpl: 'research', label: 'Deep dive' },
+              { tpl: 'connect', label: 'Connect' },
+            ] as const).map((l) => {
+              const active = (l.tpl ?? undefined) === (templateType ?? undefined)
+              return (
+                <button
+                  key={l.label}
+                  onClick={() => { if (!active) onSwitchLens(l.tpl) }}
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
+                    ${active
+                      ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
+                      : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20'}`}
+                >
+                  {l.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {/* Sibling switcher — walk sideways between terms branched from the same
             parent, without going back to the map. Only shown when siblings exist. */}

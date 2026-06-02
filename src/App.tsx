@@ -108,6 +108,10 @@ function App() {
   const connectStateRef = useRef<{ question: string | null; cards: string[] | null }>({ question: null, cards: null })
   // Persists generated Connect chips per driftChatId so re-opening a Connect drift shows chips instantly
   const connectCardsCache = useRef<Map<string, string[]>>(new Map())
+  // Per-term lens registry: baseKey ("msgId::term") → (template → driftChatId).
+  // Lets the in-panel "View as" switcher keep a separate thread per lens and
+  // return to the original one, without touching the inline-link / map model.
+  const lensRegistryRef = useRef<Map<string, Map<string, string>>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
@@ -319,6 +323,46 @@ function App() {
       existingMessages: existing,
       templateType: sib.templateType,
       ancestry,
+    })
+  }
+
+  // ── View-as lens switcher ─────────────────────────────────────────────────────
+  // Re-view the SAME term through a different lens (Drift / Simplify / Deep dive /
+  // Connect) without going back to the chat. Each lens keeps its own thread; the
+  // first lens (the one opened from chat) is preserved at its original id.
+  const handleSwitchLens = (template: DriftContext['templateType']) => {
+    const ctx = driftStore.driftContext
+    if (!ctx?.driftChatId || !ctx.selectedText) return
+
+    const baseKey = `${ctx.sourceMessageId}::${ctx.selectedText}`
+    let reg = lensRegistryRef.current.get(baseKey)
+    if (!reg) { reg = new Map(); lensRegistryRef.current.set(baseKey, reg) }
+
+    const curTpl = ctx.templateType ?? 'drift'
+    if (!reg.has(curTpl)) reg.set(curTpl, ctx.driftChatId)   // remember the current thread
+
+    const tgtTpl = template ?? 'drift'
+    if (tgtTpl === curTpl) return
+
+    let tgtId = reg.get(tgtTpl)
+    if (!tgtId) { tgtId = `${reg.get(curTpl)}__${tgtTpl}`; reg.set(tgtTpl, tgtId) }
+
+    const existing =
+      driftStore.getTempConversation(tgtId)
+      ?? chatHistory.find(c => c.id === tgtId)?.messages
+      ?? []
+
+    haptics.impact('light')
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText: ctx.selectedText,
+      sourceMessageId: ctx.sourceMessageId,
+      contextMessages: ctx.contextMessages,
+      highlightMessageId: ctx.highlightMessageId,
+      driftChatId: tgtId,
+      existingMessages: existing,
+      templateType: template,
+      ancestry: ctx.ancestry,
     })
   }
 
@@ -3563,6 +3607,7 @@ function App() {
         siblingDrifts={siblingDrifts}
         currentDriftChatId={driftContext?.driftChatId}
         onNavigateToSibling={navigateToSiblingDrift}
+        onSwitchLens={handleSwitchLens}
       />
 
       {/* Settings Modal */}
