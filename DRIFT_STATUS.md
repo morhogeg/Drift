@@ -1,17 +1,15 @@
 # Drift — Quick Status
 
-**Date:** June 2, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 35 (iOS + web)
+**Date:** June 2, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 36 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ iOS bundles a copy of `dist/`. After ANY web change you MUST run `npm run build && npx cap sync ios` before Run/Archive in Xcode — a clean+rebuild in Xcode alone keeps the stale bundle.
 
-## Last Session (Jun 2) — exploration + navigation feature wave
-- **Connect view → forward-only**: dropped the two backward sections; one unified "Drift ideas" list (questions + angles), tappable doorways with ↗ + visited state.
-- **Global "All explorations" map**: scope toggle in the Drift Map; synthetic super-root forest of every conversation.
-- **Drift synthesis**: Synthesize bar in the map weaves all of a conversation's drifts into one summary, posted back on the chat (`synthesizeDrifts` in gemini.ts).
-- **Full-text search** (⌘K): command palette across every message in every chat/drift.
-- **Map keyboard nav + filter**; **"Drift into" suggested-term chips** under AI answers; **conversation forking** (fork button on AI messages).
-- Earlier in session: lateral sibling switcher, always-visible breadcrumb, model-agnostic AddModelSheet (Gemini/OpenRouter/Ollama/Demo), reopen-pill fix.
+## Last Session (Jun 2) — Connect reinvented + lens switcher
+- **Connect = relationship map + bridge-maker**: the term is a hub with labeled edges to related concepts; tap an edge → AI draws the bridge (its own thread). "Connect to anything…" bridges to any typed concept. Prompt returns `"relationship :: concept"` pairs.
+- **"View as" lens switcher** in the drift panel: re-view the same term through Drift / Simplify / Deep dive / Connect without leaving the panel; each lens keeps its own in-session thread (`lensRegistryRef`).
+- **State preserved across lens switches**: connect map + visited-bridge dots restore (per-id caches).
+- Earlier in session: global "All explorations" map, drift synthesis, full-text search (⌘K), map keyboard nav + filter, "Drift into" suggested-term chips, conversation forking, sibling switcher, always-visible breadcrumb, model-agnostic AddModelSheet, reopen-pill fix.
 
 ## Pending (priority order)
 - [ ] TestFlight: archive build 35 in Xcode → App Store Connect

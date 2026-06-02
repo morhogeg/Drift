@@ -2,14 +2,24 @@
 
 **Date:** June 2, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 35 (iOS Xcode) / web
-**Status:** Exploration + navigation feature wave — global map, drift synthesis, full-text search, map keyboard nav, suggested-term chips, conversation forking, and a forward-only Connect view. (Bundle: index ~765 kB / gzip ~229 kB.)
+**Build:** 36 (iOS Xcode) / web
+**Status:** Connect reinvented as a relationship-map + bridge-maker, plus a "View as" lens switcher with state preserved across switches. (Bundle: index ~767 kB / gzip ~229 kB.)
 
 ---
 
 ## What Was Done This Session
 
-### 122. Connect view — forward-only "Drift ideas" list (REDESIGN)
+### 125. Lens switcher — preserve Connect state across switches (FIX)
+- Cache connect cards + visited-bridge answers per thread-id (`connectCardsCache` + new `connectAnswersCache`). Switching back to a Connect view restores its map AND tapped-connection indicators. Connect targets start with clean messages so bridge prose can't poison the JSON card parser.
+
+### 124. Drift panel — "View as" lens switcher (NEW)
+- A "View as" strip in the panel header re-views the SAME term through any lens (Drift / Simplify / Deep dive / Connect) without returning to the chat. Fixes terms being locked to their first action. Each lens keeps its own in-session thread via a per-term registry (`lensRegistryRef`, baseKey `msgId::term` → template → driftChatId); the original chat-linked thread is preserved at its id. Hidden inside Connect's bridge sub-mode.
+
+### 123. Connect view → relationship map + bridge-maker (REDESIGN)
+- Connect is no longer "more suggestions" (which duplicated the drift screen). The term is a hub with labeled relationship edges to related concepts; tapping an edge opens a thread where the AI draws the bridge between the two. "Connect to anything…" input bridges to any typed concept.
+- Connect system prompt now returns `"<relationship> :: <concept>"` pairs (connectCards stays `string[]`; old bare-string cards still render). Bridge questions ride the existing `connectQuestion` flow (display + prompt). Removed dead `getConnections`/`connections` machinery.
+
+### 122. Connect view — forward-only "Drift ideas" list (REDESIGN, superseded by #123)
 - Removed both backward-looking sections ("You explored this before" + "How this relates to where you've been"). Connect is now purely about where to go next.
 - Merged "Directions you could drift" + "Explore from here" into ONE deduped list of tappable doorways (questions first, sharper angles below), each opening a focused thread, with `↗` → cyan visited-dot. Prior-drift context still feeds the AI prompt; it's just no longer shown as a block.
 - Removed now-unused imports/props (`Reveal`, `History`, `Compass`, `CornerUpLeft`, `onOpenRelatedDrift` destructure).
