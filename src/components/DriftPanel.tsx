@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, Compass, CornerUpLeft, History, ArrowUpRight } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, Compass, CornerUpLeft, History, ArrowUpRight, Sparkles } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
@@ -1259,17 +1259,18 @@ Rules:
               return (
                 <Reveal className="mb-5" delay={0.05} data-drift-connection-block="ai-connections">
                   {backs.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <CornerUpLeft className="w-3 h-3 text-accent-discovery/70" />
-                        <p className="text-micro uppercase tracking-widest text-accent-discovery/70">How this relates to where you've been</p>
+                    <div className="mb-5">
+                      <div className="flex items-center gap-1.5 mb-2.5">
+                        <CornerUpLeft className="w-3 h-3 text-accent-violet/70" />
+                        <p className="text-micro uppercase tracking-widest text-accent-violet/70">How this relates to where you've been</p>
                       </div>
-                      <Stagger className="flex flex-col gap-1.5" step={0.04}>
+                      {/* Reflections, not actions — quiet left-ruled notes. */}
+                      <Stagger className="flex flex-col gap-2.5" step={0.04}>
                         {backs.map((c, i) => (
                           <motion.div
                             key={`back-${i}`}
                             variants={staggerChild}
-                            className="drift-connection-back text-meta leading-snug text-text-secondary px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.02]"
+                            className="drift-connection-back text-meta leading-snug text-text-muted pl-3 border-l-2 border-accent-violet/30"
                           >
                             {c.label}
                           </motion.div>
@@ -1306,16 +1307,20 @@ Rules:
             })()}
 
             {(isTyping || connectCards === null) ? (
-              <div className="flex flex-col gap-2.5">
+              <div className={`flex flex-col gap-2.5 ${connections && connections.length > 0 ? 'pt-5 mt-1 border-t border-white/[0.07]' : ''}`}>
                 {[1,2,3,4,5].map(i => (
-                  <div key={i} className="h-12 rounded-2xl bg-white/[0.04] animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
+                  <div key={i} className="h-14 rounded-2xl bg-white/[0.04] animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
                 ))}
               </div>
             ) : connectCards.length === 0 ? (
               <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
             ) : (
-              <div className="flex flex-col gap-2.5">
-                <p className="text-[10px] text-text-muted/40 uppercase tracking-widest mb-1">Explore from here</p>
+              <div className={`flex flex-col gap-2.5 ${connections && connections.length > 0 ? 'pt-5 mt-1 border-t border-white/[0.07]' : ''}`}>
+                {/* The hero menu — AI-curated questions. Heaviest cards + numbered. */}
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Sparkles className="w-3 h-3 text-text-secondary" />
+                  <p className="text-micro uppercase tracking-widest text-text-secondary">Explore from here</p>
+                </div>
                 {connectCards.map((question, i) => {
                   const visited = connectAnswersRef.current.has(question)
                   void connectVisitedVersion // consumed to trigger re-render
@@ -1344,13 +1349,17 @@ Rules:
                         setDriftOnlyMessages([systemMsg])
                       }
                     }}
-                    className={`text-left w-full flex items-start justify-between gap-2 px-4 py-3 rounded-2xl text-[14px] leading-snug active:scale-[0.98] transition-all duration-150
+                    className={`group text-left w-full flex items-start gap-3 px-3.5 py-3 rounded-2xl text-[14px] leading-snug active:scale-[0.98] transition-all duration-150
                       ${visited
-                        ? 'border border-cyan-400/30 bg-cyan-500/[0.08] text-text-primary'
-                        : 'border border-cyan-500/15 bg-cyan-500/[0.04] text-text-secondary hover:border-cyan-400/35 hover:text-text-primary hover:bg-cyan-500/[0.09]'}`}
+                        ? 'border border-cyan-400/35 bg-cyan-500/[0.08] text-text-primary'
+                        : 'border border-white/[0.08] bg-dark-elevated/60 text-text-secondary hover:border-cyan-400/30 hover:bg-dark-elevated hover:text-text-primary'}`}
                   >
-                    <span>{question}</span>
-                    {visited && <span className="flex-shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400/70" />}
+                    <span className={`flex-shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold tabular-nums
+                      ${visited ? 'bg-cyan-400/20 text-cyan-300' : 'bg-white/[0.06] text-text-muted group-hover:text-cyan-300/80'}`}>
+                      {i + 1}
+                    </span>
+                    <span className="flex-1">{question}</span>
+                    {visited && <span className="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-cyan-400/70" />}
                   </button>
                 })}
 
