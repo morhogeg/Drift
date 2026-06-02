@@ -192,8 +192,20 @@ export default function DriftPanel({
   // --------------------------------------------------------------------------
 
   const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
-    'simplify': "You are an expert at making complex ideas simple. Explain the selected text as if to a curious 12-year-old. Use analogies, avoid jargon, and make it memorable.",
-    'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
+    'simplify': `You make hard ideas suddenly click. The user selected a term while reading and wants it made simple — but they are a smart adult, so never be condescending or babyish.
+
+- Interpret the term in the sense the surrounding conversation implies (disambiguate by context — don't explain the generic dictionary meaning if the conversation means something specific).
+- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences.
+- Strip the jargon, but if a key technical word matters, name it once and translate it.
+- Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
+- Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
+    'research': `You are a sharp domain expert giving an authoritative deep dive on a term the user selected mid-reading. This is NOT a Wikipedia dump and NOT a beginner explainer — assume an intelligent reader who wants depth, nuance, and the things a non-expert would miss.
+
+- Interpret the term in the sense the surrounding conversation implies; disambiguate by context.
+- Go past the obvious: give the mechanism, the history that actually shaped it, the live debates or open questions, and why it matters. Prefer specific names, dates, figures, and concrete examples over vague generalities.
+- Be accurate. If something is contested or uncertain, say so plainly rather than asserting it. Do not invent specifics — when unsure, use Google Search grounding if available, otherwise hedge honestly.
+- Structure for skimming: a strong opening line, then tight paragraphs or a few headed sections. No padding.
+- Add genuine NEW value beyond what the conversation already showed.`,
     'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
 
 Return ONLY a raw JSON array of 5-6 strings. Each string is "<type> :: <relationship> :: <concept>":
@@ -204,17 +216,19 @@ Return ONLY a raw JSON array of 5-6 strings. Each string is "<type> :: <relation
     • tension   — what it opposes, contrasts with, rivals, or conflicts with
     • history   — a dated event or historical milestone tied to it
 - <relationship> = a short labeled edge, 1-4 words (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals"). Write it in the SAME LANGUAGE as the surrounding conversation.
-- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words; Title Case for proper names). Same language as the conversation.
+- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words). Write it in the SAME language AND script as the conversation, transliterating any foreign proper name into that script (for a Hebrew chat: "Johan Cruyff" → "יוהאן קרויף", "Real Madrid" → "ריאל מדריד" — never leave it in Latin letters).
 - Separator is exactly " :: " (space colon colon space). There are exactly TWO separators per string.
 
 Example output for "Julius Caesar":
 ["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
 
 Rules:
-- Use a SPREAD of types — don't make them all the same kind. Aim for at least 3 distinct types across the set.
+- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include at least one "tension" (something it opposes/rivals) wherever one honestly exists.
+- Each <concept> must be a SPECIFIC, real, verifiable thing (a named person, place, event, work, or named idea) — not a vague category ("various philosophers", "modern society") and not a near-synonym of the term itself.
 - Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
-- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern.
-- Skip the obvious — each edge should open a genuinely interesting bridge.
+- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern. Reach for the link a thoughtful reader would NOT immediately predict.
+- Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
+- Do not invent facts. If you are not confident the connection is real, choose a different one.
 - Output raw JSON array of strings only. Any other text breaks the app.`,
   }
 
@@ -288,7 +302,7 @@ Rules:
       } else if (!templateType && !(existingMessages && existingMessages.length > 0)) {
         const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
         if (geminiKey) {
-          const ctx = contextMessages.slice(-3).map(m => m.text).join(' ')
+          const ctx = contextMessages.slice(-4).map(m => `${m.isUser ? 'User' : 'Assistant'}: ${m.text}`).join('\n')
           getDriftSuggestions(selectedText, ctx, geminiKey).then(s => {
             setDriftSuggestions(s)
           })
@@ -636,10 +650,12 @@ Rules:
         msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Finding connections for') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Deep dive into this') && !msg.text.startsWith('Show me what this connects to') && msg.id !== newMessage.id
       )
       
-      // Build context string from parent conversation (last ~6 messages)
-      const parentContext = contextMessages.slice(-6).map(msg =>
-        `${msg.isUser ? 'User' : 'Assistant'}: ${msg.text}`
-      ).join('\n')
+      // Build context string from parent conversation (last ~8 messages). Cap each
+      // message so one very long answer can't crowd out the rest of the context.
+      const parentContext = contextMessages.slice(-8).map(msg => {
+        const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
+        return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
+      }).join('\n')
 
       // Use template system prompt if set, otherwise use default context-aware prompt
       // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
@@ -656,14 +672,14 @@ Rules:
         : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
 
       const baseSystemContent = (templateType === 'connect' && connectQuestion)
-        ? `The user is reading about "${selectedText}" and chose to explore this question: "${connectQuestion}". Answer it directly and insightfully. Draw connections back to "${selectedText}" where relevant. Be concise.${parentContext ? `\n\nConversation context:\n${parentContext}` : ''}`
+        ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
         : (templateType === 'connect')
         ? connectChipsPrompt
         : templateType
         ? TEMPLATE_SYSTEM_PROMPTS[templateType]
         : (parentContext
-            ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
-            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`)
+            ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
+            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
       // Connect branches already embed their own context above; only the
       // non-connect templates need it appended here.
       const systemContent = (templateType && templateType !== 'connect' && parentContext)
@@ -821,12 +837,20 @@ Rules:
       setMessage('')
     }
 
-    // Build API messages with system context
+    // Build API messages with system context. Mirror the single-model path:
+    // ground the answer in the parent conversation so each model disambiguates
+    // "${selectedText}" the same way the user means it.
+    const compareContext = contextMessages.slice(-8).map(msg => {
+      const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
+      return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
+    }).join('\n')
     const baseConversation = workingDrift.filter(msg => !msg.text.startsWith('What would you like to know about'))
     const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
       {
         role: 'system',
-        content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+        content: compareContext
+          ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${compareContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies. Don't repeat the basic definition they can already see; add NEW value — the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate; don't invent facts.`
+          : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`
       },
       ...baseConversation.map(msg => ({ role: msg.isUser ? 'user' as const : 'assistant' as const, content: msg.text }))
     ]

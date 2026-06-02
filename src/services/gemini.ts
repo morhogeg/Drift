@@ -22,7 +22,7 @@ export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
  * English because the system prompts themselves are English.
  */
 export const LANGUAGE_DIRECTIVE =
-  'LANGUAGE: Write ALL output in the same language as the user\'s text / the source content provided (e.g. Hebrew→Hebrew, English→English, Arabic→Arabic). This applies to every string you produce — responses, suggestions, questions, labels, and JSON string values alike. Keep proper nouns and brand names in their original script.'
+  'LANGUAGE: Write ALL output in the same language as the user\'s text / the source content provided (e.g. Hebrew→Hebrew, English→English, Arabic→Arabic). This applies to every string you produce — responses, suggestions, questions, labels, and JSON string values alike. Names too: write people, places, teams, works and every other proper noun in that language\'s OWN script, transliterating foreign names into it (for a Hebrew chat: "Johan Cruyff"→"יוהאן קרויף", "Real Madrid"→"ריאל מדריד", "Catalan nationalism"→"לאומיות קטלאנית"). Do NOT leave Latin-script words sitting inside otherwise Hebrew/Arabic/Cyrillic/etc. text. Only code, file paths, URLs, math symbols and units keep their original form.'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -129,14 +129,24 @@ export async function getSuggestedHighlights(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are a reading guide. Given a text, identify 2-4 short phrases (3-8 words each) that would be most interesting to explore further. The phrases MUST be verbatim substrings copied exactly from the text (same language, same wording). Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]\n\n${LANGUAGE_DIRECTIVE}`,
+          text: `You are a reading guide for a curious thinker. Given a passage, pick the 2-4 phrases that are the richest DOORWAYS — a named entity, a specific concept, a term of art, a surprising claim — each of which could open a whole new line of inquiry if the reader pulled on it.
+
+Hard rules:
+- Each phrase MUST be a verbatim substring copied EXACTLY from the text (same language, same script, same wording, including casing). If it isn't an exact substring, do not return it.
+- Prefer the specific and the proper-named over the generic: choose "the Antikythera mechanism" over "ancient technology", "wave function collapse" over "physics". Pick proper nouns, technical terms, and load-bearing concepts — NOT ordinary verbs, connective phrases, or whole clauses.
+- 1-5 words each. Never a full sentence. No duplicates and no phrases that nest inside each other.
+- If the text is too thin to offer good doorways, return fewer (even just 1) rather than padding with generic phrases.
+
+Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]
+
+${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
         role: 'user',
-        parts: [{ text: `Identify the most exploration-worthy phrases in this text:\n\n${responseText.substring(0, 2000)}` }],
+        parts: [{ text: `Pick the most exploration-worthy doorway phrases (verbatim substrings) from this text:\n\n${responseText.substring(0, 2400)}` }],
       }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 256 },
+      generationConfig: { temperature: 0.3, maxOutputTokens: 256 },
     }
 
     const response = await fetch(url, {
@@ -189,14 +199,24 @@ export async function getDriftSuggestions(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `Generate exactly 2 short, curiosity-sparking questions a user might ask to explore the given phrase. Each question must be under 9 words. Return ONLY a JSON array of 2 strings. No explanations. Example: ["Why does this matter today?", "What are real-world examples?"]\n\n${LANGUAGE_DIRECTIVE}`,
+          text: `The user is reading a conversation and marked a phrase to explore. Generate exactly 2 short questions that pull them somewhere genuinely interesting about THAT phrase, read in the sense the surrounding context implies.
+
+Rules:
+- Read the phrase through the context: if the context is about Lionel Messi, "Barcelona" is the football club, not the city — your questions must reflect the contextual meaning.
+- Be SPECIFIC to this phrase, not a template. BAD (generic, banned): "Why does this matter today?", "What are real-world examples?", "How does this work?". GOOD: questions that name a tension, a surprising angle, a mechanism, an origin, or a consequence tied to this exact thing.
+- Make the two questions distinct from each other — different angles, not rephrasings.
+- Under 9 words each. No trailing fluff.
+
+Return ONLY a JSON array of 2 strings. No explanations.
+
+${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
         role: 'user',
-        parts: [{ text: `Phrase: "${selectedText}"\nContext: ${contextSnippet.substring(0, 400)}` }],
+        parts: [{ text: `Phrase to explore: "${selectedText}"\n\nSurrounding conversation (use it to disambiguate the phrase):\n${contextSnippet.substring(0, 700)}` }],
       }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 128 },
+      generationConfig: { temperature: 0.85, maxOutputTokens: 128 },
     }
 
     const response = await fetch(url, {
@@ -262,13 +282,13 @@ export async function getConnections(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are the connective intelligence of a thinking app. The user marked a term mid-conversation. Surface how it connects to where they have been and where they could go next.
+          text: `You are the connective intelligence of a thinking app. The user marked a term mid-conversation. Read the term in the sense the conversation implies (disambiguate by context — "Barcelona" in a Messi thread is the club, not the city), then surface how it connects to where they have been and where they could go next.
 
 Return ONLY a raw JSON array of 4-5 objects. Each object: {"label": string, "kind": "back" | "forward"}.
-- "back": a link to something already in the conversation context — name the relationship, not the fact ("echoes the tension you raised about X").
-- "forward": a fresh direction worth drifting into next — a doorway, not trivia.
-- label is 5-11 words, concrete, no trailing punctuation.
-- Aim for ~2 "back" and ~2-3 "forward". If there is no real context, return all "forward".
+- "back": a link to something ALREADY in the conversation context — name the RELATIONSHIP, do not restate the fact ("echoes the tension you raised about X", "is the flip side of Y you discussed"). It must reference real content from the context, not a guess.
+- "forward": a fresh direction worth drifting into next — a doorway that opens new ground, not trivia or a definition. Favor cross-domain leaps (history↔psychology, science↔culture, ancient↔modern) and non-obvious links the user wouldn't immediately think of.
+- label is 5-11 words, concrete and specific (name the actual person/event/idea), no trailing punctuation, no hedging ("maybe", "perhaps").
+- Aim for ~2 "back" and ~2-3 "forward". If the context is thin or absent, return all "forward".
 - No prose, no markdown, no code fences. Any other text breaks the app.
 
 ${LANGUAGE_DIRECTIVE}`,
@@ -276,7 +296,7 @@ ${LANGUAGE_DIRECTIVE}`,
       },
       contents: [{
         role: 'user',
-        parts: [{ text: `Term: "${term}"\nConversation context:\n${contextSnippet.substring(0, 1200)}${priorLine}` }],
+        parts: [{ text: `Marked term: "${term}"\nConversation context (use it to disambiguate the term and to ground the "back" links):\n${contextSnippet.substring(0, 2000)}${priorLine}` }],
       }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 320 },
     }
@@ -333,12 +353,13 @@ export async function synthesizeDrifts(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are the synthesizing intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts"). Weave the key insights from those branches into ONE cohesive, illuminating synthesis.
+          text: `You are the synthesizing intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts") — these branches ARE the shape of their curiosity. Weave the key insights into ONE cohesive, illuminating synthesis that tells them something they could not see from any single branch.
 
 Write engaging markdown:
-- Open with a single bold takeaway sentence.
-- Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they relate, reinforce, or tension each other. Reference branch topics naturally.
-- Do NOT summarize each branch in isolation; surface the through-line and any surprising links.
+- Open with a single bold takeaway sentence — the one idea that ties the exploration together.
+- Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they reinforce, complicate, or stand in tension with each other. Reference branch topics by name, naturally.
+- Do NOT summarize each branch in isolation; surface the through-line and the surprising links the user may have missed.
+- Be honest: if two branches don't genuinely connect, say what each contributes rather than forcing a false link. Never invent facts not present in the branches.
 - End with one open question worth exploring next, prefixed "**Next:**".
 - Keep it under ~350 words. No preamble like "Here is the synthesis".
 

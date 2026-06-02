@@ -3829,17 +3829,27 @@ function App() {
             const templateType = di?.templateType
               ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
 
-            // For a Connect lens the chips view rebuilds from cached cards; passing the
-            // (prose) bridge conversation as messages would poison the JSON card parser,
-            // so start it clean and let connectCards/connectAnswers restore the map.
-            const existing: Message[] = templateType === 'connect'
-              ? []
-              : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
+            // The drift's own conversation (chat history → temp store → node payload).
+            const driftMsgs: Message[] =
+              ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
                   ? chatHistory.find(c => c.id === driftChatId)!.messages
                   : null)
                 ?? driftStore.getTempConversation(driftChatId)
                 ?? (driftChat.messages?.length ? driftChat.messages : null)
                 ?? [])
+
+            // A Connect *bridge* node is itself a focused Q&A thread ("How does X
+            // connect to Y?") — NOT the connections list. Detect its question and
+            // open the thread on its answer (connectQuestion set → chip-chat view),
+            // instead of dropping back to the cards screen.
+            const bridgeUserMsg = driftMsgs.find(m => m.isUser && /connect(?:s|ed)?\s+to\s+.+/i.test(m.text))
+            const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
+
+            // The connections-LIST drift rebuilds its chips from cached cards, and
+            // passing the (prose) conversation as messages would poison the JSON card
+            // parser — so start it clean. A bridge thread (or any non-Connect drift)
+            // keeps its real messages so the actual conversation shows.
+            const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
 
             // Open drift panel directly — restores the already-generated content with
             // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
@@ -3851,6 +3861,7 @@ function App() {
               driftChatId,
               existingMessages: existing,
               templateType,
+              connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
               connectCards: cachedCards?.length ? cachedCards : undefined,
               connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
               ancestry: [{

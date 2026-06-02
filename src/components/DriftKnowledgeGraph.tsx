@@ -161,26 +161,61 @@ function totalMessages(node: TreeNode): number {
 }
 
 function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
-  const here = node.phrase ? [{ phrase: node.phrase, chatId: node.chat.id }] : []
+  // Use the meaningful topic (connection / question / answer gist), not the bare
+  // selected term — otherwise N lenses on one term all read "Barcelona".
+  const here = node.phrase ? [{ phrase: nodeTopic(node.chat), chatId: node.chat.id }] : []
   return [...here, ...node.children.flatMap(collectTopics)]
 }
 
-/** A meaningful label for a drift node: surface the actual connection/question it
- *  explored (e.g. "Barcelona → Real Madrid") rather than just the selected term. */
+// The auto-generated lens openers — these aren't real questions, so they never
+// make a good node label.
+const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i
+
+function clipLabel(s: string, n: number): string {
+  const t = s.trim()
+  return t.length > n ? t.slice(0, n).trim() + '…' : t
+}
+
+/** A short human topic pulled from an AI answer: first clause, markdown stripped.
+ *  Returns '' for JSON/structured payloads (e.g. Connect cards) so callers fall back. */
+function answerGist(text: string): string {
+  const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  if (!clean || clean.startsWith('[') || clean.startsWith('{')) return ''
+  const prose = clean.replace(/[#*`_>[\]]/g, '').replace(/\s+/g, ' ').trim()
+  if (!prose) return ''
+  // First sentence-ish chunk (no regex lookbehind — must stay iOS 15 safe).
+  const chunk = prose.split(/[.!?\n]/)[0] || prose
+  return clipLabel(chunk, 38)
+}
+
+/** A meaningful label for a drift node. Priority: the Connect bridge it explored
+ *  ("Barcelona → Cruyff"), then a genuine user question, then the gist of the first
+ *  real answer (so Simplify/Deep-dive lenses on one term stay distinct & informative),
+ *  and only the bare term as a last resort. */
 function nodeTopic(chat: ChatSession): string {
   const term = (chat.metadata?.selectedText || chat.title || 'Drift').replace(/^["']|["']$/g, '').trim()
-  for (const m of (chat.messages ?? [])) {
+  const msgs = chat.messages ?? []
+
+  // 1) Connect bridge: a user "…connect to Y" → "term → Y".
+  for (const m of msgs) {
+    if (!m.isUser) continue
+    const bridge = m.text.trim().match(/connect(?:s|ed)?\s+to\s+(.+?)[?.]?$/i)
+    if (bridge?.[1]) return `${term} → ${bridge[1].trim()}`
+  }
+  // 2) A genuine user follow-up question (not a template opener).
+  for (const m of msgs) {
     if (!m.isUser) continue
     const t = m.text.trim()
-    // Connect bridge: 'How does "X" connect to Y?' → the concept Y is what's explored.
-    const bridge = t.match(/connect(?:s|ed)?\s+to\s+(.+?)[?.]?$/i)
-    if (bridge?.[1]) return `${term} → ${bridge[1].trim()}`
-    // A genuine follow-up question (skip the auto-generated template openers).
-    if (
-      !/^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i.test(t)
-    ) {
-      return t.length > 28 ? t.slice(0, 28).trim() + '…' : t
-    }
+    if (t && !TEMPLATE_OPENER_RE.test(t)) return clipLabel(t, 32)
+  }
+  // 3) Template-lens drift (only the bare term distinguishes it) → surface the
+  //    gist of the first real answer so the node says what it actually explored.
+  for (const m of msgs) {
+    if (m.isUser || m.id?.startsWith('drift-system-')) continue
+    if (m.text && TEMPLATE_OPENER_RE.test(m.text.trim())) continue
+    const gist = answerGist(m.text ?? '')
+    if (gist) return gist
+    break
   }
   return term
 }
@@ -556,31 +591,34 @@ function GraphCanvas({
         </svg>
       )}
 
-      {/* Filter box — type to find a node; Enter jumps to the first match */}
+      {/* Filter box — type to find a node; Enter jumps to the first match.
+          Fixed-height pill, aligned with the recenter button; stable width (no
+          focus jump); dir="auto" so Hebrew/Arabic queries align correctly. */}
       <div
-        className="dkg-search absolute z-20 flex items-center gap-1.5"
-        style={{ top: 10, left: 10 }}
+        className="dkg-search absolute z-20 flex items-center gap-2"
+        style={{ top: 10, left: 10, height: 34 }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <Search className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }} />
+        <Search className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); jumpToFirstMatch() } }}
           placeholder="Filter…"
+          dir="auto"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className="bg-transparent text-[12px] focus:outline-none w-[92px] focus:w-[140px] transition-[width] duration-200"
+          className="bg-transparent text-[13px] focus:outline-none w-[124px]"
           style={{ color: '#fff' }}
         />
         {filter && (
           <button
             onClick={() => setFilter('')}
-            className="flex-shrink-0 text-white/50 hover:text-white/80"
+            className="flex-shrink-0 -ml-0.5 flex items-center justify-center w-5 h-5 rounded-full text-white/55 hover:text-white hover:bg-white/10"
             aria-label="Clear filter"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -589,7 +627,7 @@ function GraphCanvas({
       <button
         onClick={(e) => { e.stopPropagation(); fit() }}
         className="dkg-fit absolute z-20 flex items-center justify-center rounded-full active:scale-90"
-        style={{ top: 10, right: 10, width: 32, height: 32 }}
+        style={{ top: 10, right: 10, width: 34, height: 34 }}
         title="Recenter"
         aria-label="Recenter map"
       >
@@ -1239,7 +1277,7 @@ function StyleBlock() {
         background: rgba(255,255,255,0.07);
         border: 1px solid rgba(255,255,255,0.12);
         border-radius: 999px;
-        padding: 5px 10px;
+        padding: 0 12px;
         backdrop-filter: blur(8px);
       }
       .dkg-search:focus-within { border-color: rgba(168,85,247,0.5); background: rgba(255,255,255,0.1); }

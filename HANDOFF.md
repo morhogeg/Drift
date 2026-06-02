@@ -2,12 +2,29 @@
 
 **Date:** June 2, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 41 (iOS Xcode) / web
-**Status:** Three waves. (A) Screenshot polish — term action bar, context-aware Connect, app-wide text-fit, synthesis card + truncation, full-screen tap-to-preview Drift Map, "Drift into" chips. (B) Reliability — Gemini output matches user language, Connect lens-switch preserves cards, map opens real drifts (no re-fetch), re-opens never re-call, scoped error boundary stops map crashes. (C) Connect redesign — relationship typing (5 semantic kinds + icons), alive hub/edges, RTL mirroring, type legend. (Bundle: index ~776.5 kB / gzip ~231.9 kB.)
+**Build:** 42 (iOS Xcode) / web
+**Status:** Four waves. (A) Screenshot polish. (B) Reliability — Gemini language match, Connect lens-switch preserves cards, map opens real drifts, scoped error boundary. (C) Connect redesign — relationship typing (5 kinds + icons), alive hub/edges, RTL mirroring, legend. (D) Content-quality + map-quality wave — transliteration of proper nouns into chat script, map bridge-node opens its conversation (not cards), meaningful map node/pill labels, filter-field redesign, and a full rewrite of every generation prompt (Connect/Simplify/Deep dive/highlights/suggestions/synthesis) for context-grounding + intent-fidelity. (Bundle: index ~783 kB / gzip ~234 kB.)
 
 ---
 
 ## What Was Done This Session
+
+### 144. Content-generation quality — full prompt rewrite (QUALITY)
+- Audited and rewrote every AI-generation surface for context-grounding, user-intent fidelity, and anti-generic output, within the existing parse contracts:
+  - **`gemini.ts`**: `getSuggestedHighlights` (pick rich "doorway" phrases — proper nouns / terms of art / load-bearing concepts, strict verbatim-substring, temp 0.3, ban generic verbs & whole clauses), `getDriftSuggestions` (context-grounded, banned its own generic example templates, demands two distinct angles, role-labeled last-4 context), `getConnections` (disambiguation + grounded "back" links + cross-domain, context budget 1200→2000), `synthesizeDrifts` (honesty guard — don't force false connective tissue / invent facts).
+  - **`DriftPanel.tsx`**: rewrote `TEMPLATE_SYSTEM_PROMPTS['simplify']` (one vivid analogy, smart-adult tone, aim for the "aha", ~120 words) and `['research']` (Deep dive — expert depth, mechanism/history/live-debates, specific names+dates, honest about contested points, skimmable); sharpened the Connect Rules (specific verifiable concepts, ≥1 tension, no duplicates/near-synonyms, no hallucination); rewrote the Connect bridge-answer prompt to demand the actual *link* (through-line / shared mechanism / influence / tension), lead with the surprising part, keep the term in frame; widened `parentContext` 6→8 messages with a 1200-char per-message cap.
+  - **Latent bug fixed**: the multi-model *compare* path ignored `parentContext` entirely and used the weakest generic prompt → ungrounded answers that could disambiguate the term differently per model. Now uses the same context-grounded prompt as the single-model path.
+
+### 143. Map — meaningful node & pill labels, not "Barcelona 1/2/3" (FIX)
+- `nodeTopic` rewritten with a real priority chain: Connect bridge (`term → Y`) → genuine user question → **gist of the first real answer** (markdown/JSON stripped, first clause, iOS-15-safe: no regex lookbehind) → bare term only as last resort. So multiple lenses on one term (Simplify / Deep dive / Connect) now read by what they actually explored instead of a meaningless counter.
+- `collectTopics` (the EXPLORED strip) now uses `nodeTopic` too, so the top-of-map pills are meaningful as well. `disambiguateTopics` kept as a final safety net. Graph labels truncate at 24, pills at 20, detail card wraps.
+
+### 142. Map — filter field redesign (POLISH)
+- Fixed-height pill (34px) aligned with the recenter button; stable width (removed the jarring focus-expand); `dir="auto"` so Hebrew/Arabic queries align RTL; cleaner clear-button hit target. `.dkg-search` padding + recenter button bumped to match heights.
+
+### 141. Language — transliterate proper nouns + map bridge open (BUG FIX)
+- **Transliteration**: `LANGUAGE_DIRECTIVE` (`gemini.ts`) used to say "keep proper nouns in their original script" — that's why a Hebrew chat showed "Johan Cruyff"/"Real Madrid"/"Catalan Nationalism" in Latin. Now it requires writing every proper noun in the conversation's OWN script (Hebrew chat → "יוהאן קרויף", "ריאל מדריד", "לאומיות קטלאנית"), only code/URLs/units stay Latin. Connect `<concept>` rule updated to match.
+- **Map bridge open**: the Drift Map's "Open this drift" on a Connect *bridge* node ("ברצלונה → Johan Cruyff") dropped back to the connections cards screen instead of the bridge conversation. `onOpenDrift` (`App.tsx`) now detects a bridge thread (a user "…connect to Y" message in the node), passes its real messages + `connectQuestion` so DriftPanel opens the chip-chat answer view; the connections-LIST drift still opens clean (cards). Added `Message[]` resolution that's shared between the two paths.
 
 ### 140. Connect — relationship taxonomy + living map redesign (REDESIGN)
 - Reworked the Connect lens card list (`DriftPanel.tsx:1290–1380`) from a flat uniform list into a **semantic relationship map** with live visual distinction:
@@ -316,8 +333,8 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 41 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass for this wave** — verify the type-classified Connect cards (icons + hues + legend), the breathing hub, the RTL mirroring (test with Hebrew), and all the visual polish from the previous wave (full-screen Drift Map tap-to-preview, synthesis full text, context-aware Connect, redesigned selection bar / "Drift into" chips). **Key:** live Gemini call is needed to populate Connect with typed responses; check that the LLM spreads the type tokens correctly.
+- [ ] **TestFlight submission** — archive build 42 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass for this wave** — in a Hebrew chat verify: (1) Connect concepts now render in Hebrew script (no Latin proper nouns); (2) map node/pill labels are meaningful (no "Barcelona 1/2/3"); (3) map "Open this drift" on a bridge node opens the bridge conversation, not the cards screen; (4) filter field placement/usability; (5) overall content quality of Connect edges + bridge answers, Simplify, and Deep dive (sharper, context-grounded, non-generic). Also re-verify the prior wave: typed Connect cards (icons/hues/legend), breathing hub, RTL mirroring.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
 - [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
