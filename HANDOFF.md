@@ -1,13 +1,51 @@
 # Drift — Session Handoff
 
-**Date:** March 13, 2026
-**Branch:** `feature/list-anchors-links`
-**Build:** 34 (iOS Xcode) / 34 (web)
-**Status:** Mobile Drift Tree — duplicate chip fix, compact design, and working drift-open-from-card.
+**Date:** June 2, 2026
+**Branch:** `feature/apple-level-overhaul`
+**Build:** 35 (iOS Xcode) / web
+**Status:** Exploration + navigation feature wave — global map, drift synthesis, full-text search, map keyboard nav, suggested-term chips, conversation forking, and a forward-only Connect view. (Bundle: index ~765 kB / gzip ~229 kB.)
 
 ---
 
 ## What Was Done This Session
+
+### 122. Connect view — forward-only "Drift ideas" list (REDESIGN)
+- Removed both backward-looking sections ("You explored this before" + "How this relates to where you've been"). Connect is now purely about where to go next.
+- Merged "Directions you could drift" + "Explore from here" into ONE deduped list of tappable doorways (questions first, sharper angles below), each opening a focused thread, with `↗` → cyan visited-dot. Prior-drift context still feeds the AI prompt; it's just no longer shown as a block.
+- Removed now-unused imports/props (`Reveal`, `History`, `Compass`, `CornerUpLeft`, `onOpenRelatedDrift` destructure).
+
+### 121. Conversation forking (NEW)
+- Fork button (GitBranch) on AI messages → `handleForkChat`: creates a new sibling conversation carrying everything through that point (drift markers cleared), switches to it. `metadata.forkedFrom` / `forkedAtMessageId` link back. "What if I'd asked X instead?"
+
+### 120. Suggested next terms — "Drift into" chips (NEW)
+- Chip row under each AI answer from unexplored `suggestedHighlights` (already highlighted inline; now also explicit one-tap drift chips).
+
+### 119. Drift Map — keyboard navigation + filter box (NEW)
+- Arrow keys walk node→node spatially, Enter/Space opens, view re-centers on selection. Floating filter input dims non-matching nodes; Enter jumps to first match.
+
+### 118. Full-text search across all chats + drifts (NEW)
+- `SearchModal.tsx` command palette (⌘K): searches every message in every conversation/drift, ranked, keyboard-navigable, jumps + highlights. Header search button added.
+
+### 117. Drift synthesis — "bring it home" (NEW)
+- `synthesizeDrifts()` in gemini.ts weaves every descendant drift of a conversation into one markdown synthesis. Synthesize bar in the Drift Map (chat scope, ≥2 drifts) posts it back on the conversation and scrolls to it.
+
+### 116. Global "All explorations" map (NEW)
+- `DriftKnowledgeGraph` scope toggle **This chat / All**; "All" builds a synthetic super-root forest (`buildForest`) of every conversation. Node activation now keys off `isDrift` (drift→panel, chat→switch), not depth.
+
+### 115. Model-agnostic Add Model flow (REDESIGN)
+- `AddModelSheet` rebuilt provider-first: pick provider (Gemini / OpenRouter / Ollama / Demo) → connect (API key or server URL, validated) → choose model(s). OpenRouter & Ollama fetch live model lists (searchable) + accept custom IDs. Outputs generic `ModelPreset[]`. Aligned provider dot colors across picker/pill/settings.
+
+### 114. Always-visible breadcrumb in main header (NEW)
+- When the active chat is a drift, the header shows the full path `root › term › term` (was only inside the drift panel); each crumb taps to that chat and scrolls to the branch point.
+
+### 113. Lateral term-walking — sibling switcher (NEW)
+- Sibling strip under the drift-panel header: prev/next + scrollable pills of every term branched from the same parent; walk term→term in place, active pill auto-scrolls into view.
+
+### 112. Reopen-last-drift pill scoped to active chat (BUG FIX)
+- The header reopen pill leaked a stale drift from another conversation onto a fresh chat. Now gated on `lastDrift.parentChatId === activeChatId`.
+
+### 111. iOS bundle staleness resolved (INFRA)
+- Confirmed iOS loads bundled `dist/` (no live-reload server). Stale May 31 bundle was being rebuilt by Xcode; `npm run build && npx cap sync ios` now required after web changes. Build bumped to 35.
 
 ### 110. Drift Tree — card tap opens existing drift correctly on mobile (BUG FIX)
 - Replaced `handleStartDrift` (designed for new drifts) with a direct `driftStore.openDrift()` call when opening from tree card — bypasses the complex message-index-finding logic that was producing blank panels.
@@ -209,15 +247,17 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 32 in Xcode → upload to App Store Connect.
-- [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
+- [ ] **TestFlight submission** — archive build 35 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass for this wave** — verify synthesis (needs Gemini key + ≥2 drifts), forking continuation, global map with several conversations, map keyboard nav, ⌘K search.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
-- [ ] **Conversation forking** — fork the entire main chat at any message point ("what if I'd asked X instead?"). Extends the Drift metaphor to the main thread.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
-- [ ] **Full-text search** — search across ALL message content in ALL chats (not just sidebar title filter).
-- [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF.
-- [ ] **Drift synthesis** — "Synthesize branches" button in Drift Map — merges all branch insights into one summary.
+- [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
+- [ ] **Security: Gemini key client-side** — key is bundled in the web build; move behind a proxy before any public release. (Deferred by request.)
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain
-- [ ] **App.tsx refactor** — ~3000 lines, could extract more hooks
+- [ ] **App.tsx refactor** — ~3.5k lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
+- [ ] **Cleanup** — `DriftMapPanel.tsx` is dead code (graph replaced it); `onOpenRelatedDrift` prop now unused in DriftPanel.
+
+## Completed this session (was pending)
+- ✅ AddModelSheet OpenRouter & Ollama · ✅ Conversation forking · ✅ Full-text search · ✅ Drift synthesis
