@@ -150,7 +150,7 @@ function buildTree(chats: ChatSession[], rootId: string): TreeNode | null {
 }
 
 function lastAiPreview(chat: ChatSession): string | undefined {
-  const last = [...chat.messages].reverse().find(m => !m.isUser)
+  const last = [...(chat.messages ?? [])].reverse().find(m => !m.isUser)
   if (!last?.text) return undefined
   const clean = last.text.replace(/[#*`[\]\n]/g, ' ').replace(/\s+/g, ' ').trim()
   return clean.length > 120 ? clean.slice(0, 120) + '…' : clean
@@ -169,7 +169,7 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
  *  explored (e.g. "Barcelona → Real Madrid") rather than just the selected term. */
 function nodeTopic(chat: ChatSession): string {
   const term = (chat.metadata?.selectedText || chat.title || 'Drift').replace(/^["']|["']$/g, '').trim()
-  for (const m of chat.messages) {
+  for (const m of (chat.messages ?? [])) {
     if (!m.isUser) continue
     const t = m.text.trim()
     // Connect bridge: 'How does "X" connect to Y?' → the concept Y is what's explored.

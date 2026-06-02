@@ -2,12 +2,31 @@
 
 **Date:** June 2, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 38 (iOS Xcode) / web
-**Status:** Screenshot-driven polish wave — term action bar redesigned, Connect made context-aware, horizontal text-cutoff fixed app-wide, synthesis card + truncation fixed, Drift Map turned into a full-screen tap-to-preview explorer with informative node labels/previews, and "Drift into" chips polished. (Bundle: index ~769 kB / gzip ~229.6 kB.)
+**Build:** 40 (iOS Xcode) / web
+**Status:** Two waves. (A) Screenshot polish — term action bar, context-aware Connect, app-wide text-fit, synthesis card + truncation, full-screen tap-to-preview Drift Map, "Drift into" chips. (B) Reliability — Gemini output now matches the user's language, Connect lens-switch no longer loses cards, the map opens the real saved drift (no re-fetch), re-opening any explored term+lens never re-calls the LLM, and a scoped error boundary stops the map from crashing the whole app. (Bundle: index ~771 kB / gzip ~230 kB.)
 
 ---
 
 ## What Was Done This Session
+
+### 139. Drift Map — scoped error boundary + data hardening (BUG FIX / RESILIENCE)
+- Intermittent WebKit-only crash on map open (`TypeError: null is not an object (evaluating 'O.current…')`) was hitting the APP-ROOT error boundary → full-page "Something went wrong / Refresh". Wrapped `<DriftKnowledgeGraph>` in a scoped `ErrorBoundary` (`fallback={null}`, `onError` closes the map) so a map failure can no longer take down the whole app — it auto-recovers and a re-tap remounts fresh. `ErrorBoundary` extended with optional `fallback`/`onError` and now logs the component stack via `componentDidCatch`.
+- Hardened render-phase node helpers (`nodeTopic`, `lastAiPreview`) against missing `chat.messages`.
+- Root cause not isolated from source (every map `.current` deref is guarded; not a hooks violation; did not repro in Playwright WebKit with real drifts). Next step if it recurs: read the component stack via Safari Web Inspector on-device.
+
+### 138. No redundant LLM calls when re-opening an explored term+lens (BUG FIX)
+- Re-opening an already-generated drift (header reopen pill, sibling switcher, "Drift into" chips, inline links, map) was re-firing a new generation because the entry point opened the drift without the saved content/`templateType`, so DriftPanel's auto-send wasn't suppressed.
+- Added centralized `resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages?)` in App.tsx — single source of truth returning `{ existingMessages, templateType, connectCards, connectAnswers }` from temp store + `connectCardsCache`/`connectAnswersCache` + the message's `driftInfos`. Wired into `reopenLastDrift`, `navigateToSiblingDrift`, and `handleStartDrift`'s open path; entry points reuse the existing `driftChatId` instead of minting a new one.
+- DriftPanel backstop: init effect now sets `autoSentRef.current = true` whenever restored messages OR connect cards OR connect answers exist → an explored combination can never re-fetch; first-time generation still fires once.
+
+### 137. Drift Map — "Open this drift" restores the real drift (BUG FIX)
+- Map `onOpenDrift` (App.tsx) reopened Connect-lens drifts blank (just the term) because it never passed `templateType: 'connect'` or cached `connectCards`/`connectAnswers`. Now resolves them (via the same caches + `driftInfos`) and restores the already-generated content — no new LLM call. Connect nodes pass `existingMessages: []` (prose would poison the JSON card parser).
+
+### 136. Connect — lens-switch "No connections found" fix (BUG FIX)
+- Term → Connect → Deep dive → Connect again showed "No connections found." The card-parse effect ran on a render where `driftOnlyMessages` still held the previous lens's PROSE answer, failed `JSON.parse`, and wiped the restored cards to `[]`. Now it only parses when the text looks like a JSON array (`startsWith('[')`) and never blanks existing cards on parse failure.
+
+### 135. Language matching — AI output follows the user's language (NEW, Gemini)
+- Added exported `LANGUAGE_DIRECTIVE` in `gemini.ts` instructing the model to write all output (responses, suggestions, questions, labels, JSON values) in the user's/source language (Hebrew→Hebrew, English→English…). Wired into `sendMessageToGemini`'s system instruction (covers main chat + every drift) and the four standalone helpers (`getSuggestedHighlights`, `getDriftSuggestions`, `getConnections`, `synthesizeDrifts`). Gemini-only by request (OpenRouter/Ollama untouched).
 
 ### 134. Drift Map — informative node preview for Connect drifts (FIX)
 - The map only read `driftStore.getTempConversation`, so Connect-lens drifts (whose Q&A lives in `connectAnswersCache` / parent `driftInfos.connectAnswers`) showed "0 msgs" and a blank preview card. `getTempMessages` now falls back to the connect-answers cache and the parent message's `driftInfos.connectAnswers`, so the node gets real message count + an answer-snippet preview.

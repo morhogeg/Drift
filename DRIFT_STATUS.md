@@ -1,28 +1,28 @@
 # Drift — Quick Status
 
-**Date:** June 2, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 38 (iOS + web)
+**Date:** June 2, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 40 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ iOS bundles a copy of `dist/`. After ANY web change you MUST run `npm run build && npx cap sync ios` before Run/Archive in Xcode — a clean+rebuild in Xcode alone keeps the stale bundle.
 
-## Last Session (Jun 2) — Screenshot-driven polish wave
-- **Drift Map → full-screen tap-to-preview explorer**: mobile map is full-screen (no drawer); tapping a node previews it (select + center + detail card), opening is a deliberate 2nd tap; removed the All/This-chat scope toggle (always this chat).
-- **Map nodes informative**: `nodeTopic()` labels nodes by the actual connection ("Juventus → Industrial Turin Identity"), disambiguated; Connect-lens drift previews now read from `connectAnswersCache`/`driftInfos.connectAnswers` so cards show real msg count + answer snippet.
-- **Synthesis fixed**: bumped `synthesizeDrifts` maxOutputTokens 1000→4096 (thinking model was truncating mid-sentence); rendered in a polished `.synthesis-card`.
-- **Horizontal text-cutoff fixed app-wide**: `min-w-0` on main column + `overflow-x:hidden`/word-wrap CSS.
-- **Connect context-aware** (disambiguate term via conversation), **selection action bar** redesigned (Lucide icons, no wrap), **"Drift into" chips** polished.
+## Last Session (Jun 2) — Reliability wave (after the screenshot-polish wave)
+- **Language matching (Gemini)**: `LANGUAGE_DIRECTIVE` makes all output follow the user's language — wired into `sendMessageToGemini` + the 4 helpers (highlights/suggestions/connections/synthesis). Gemini-only by request.
+- **No redundant LLM calls**: centralized `resolveDriftRestore()` + a DriftPanel auto-send backstop — re-opening any explored term+lens (reopen pill, siblings, chips, inline links, map) restores cached content with ZERO new calls; stable `driftChatId` reuse.
+- **Map "Open this drift"** now restores the real generated drift (incl. Connect cards/answers), not just the term.
+- **Connect lens-switch** no longer shows "No connections found" (parse effect stopped wiping restored cards with stale prose).
+- **Map crash contained**: scoped `ErrorBoundary` around the map (auto-closes instead of full-app reload) + hardened node helpers. Root null-ref (`O.current`) not yet isolated — grab the on-device component stack via Safari Web Inspector if it recurs.
 
 ## Pending (priority order)
-- [ ] TestFlight: archive build 38 in Xcode → App Store Connect
-- [ ] On-device pass: full-screen map (tap-preview, Connect node cards), synthesis full text, context-aware Connect, selection bar / Drift-into chips
+- [ ] TestFlight: archive build 40 in Xcode → App Store Connect
+- [ ] Root-cause the intermittent map `O.current` null-ref (Safari Web Inspector component stack on device)
+- [ ] On-device pass: language matching, no-refetch on re-tap, full-screen map tap-to-preview, synthesis full text
 - [ ] Message editing + regeneration (`updateMessage` exists)
 - [ ] Custom system prompts per chat
-- [ ] Export & Share (deferred) · Security: client-side Gemini key (deferred)
-- [ ] Real auth (Login is a placeholder)
+- [ ] Export & Share (deferred) · Security: client-side Gemini key (deferred) · Real auth (Login placeholder)
 - [ ] Cleanup: dead `DriftMapPanel.tsx`; unused `onOpenRelatedDrift`; dormant `buildForest`/"All" map path (scope toggle removed)
 
 ## Stack snapshot
-React 19 + TypeScript + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class', CSS vars). **Primary LLM:** Gemini REST+SSE · **Secondary:** OpenRouter · **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb. Drift Map = pure SVG bioluminescent graph (pan/pinch/keyboard), now full-screen + tap-to-preview. App.tsx ~3.9k lines · DriftPanel.tsx ~1.7k.
+React 19 + TypeScript + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class', CSS vars). **Primary LLM:** Gemini REST+SSE (language-aware) · **Secondary:** OpenRouter · **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb. Drift Map = pure SVG bioluminescent graph (pan/pinch/keyboard), full-screen + tap-to-preview, scoped error boundary. App.tsx ~3.9k lines · DriftPanel.tsx ~1.7k.
 
 ## Key files
-`src/App.tsx` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/components/SearchModal.tsx` · `src/components/AddModelSheet.tsx` · `src/components/SelectionTooltip.tsx` · `src/store/` · `src/services/gemini.ts` · `src/services/settingsStorage.ts` (default Gemini key)
+`src/App.tsx` (`resolveDriftRestore`) · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/components/ErrorBoundary.tsx` · `src/components/SelectionTooltip.tsx` · `src/store/` · `src/services/gemini.ts` (`LANGUAGE_DIRECTIVE`) · `src/services/settingsStorage.ts`

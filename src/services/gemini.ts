@@ -16,6 +16,14 @@ export const GEMINI_MODELS = {
 
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
 
+/**
+ * Appended to every prompt so AI output matches the user's language. Auto-generated
+ * artifacts (suggestions, connections, synthesis, drift answers) otherwise drift to
+ * English because the system prompts themselves are English.
+ */
+export const LANGUAGE_DIRECTIVE =
+  'LANGUAGE: Write ALL output in the same language as the user\'s text / the source content provided (e.g. Hebrew→Hebrew, English→English, Arabic→Arabic). This applies to every string you produce — responses, suggestions, questions, labels, and JSON string values alike. Keep proper nouns and brand names in their original script.'
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -121,7 +129,7 @@ export async function getSuggestedHighlights(
     const body = {
       systemInstruction: {
         parts: [{
-          text: 'You are a reading guide. Given a text, identify 2-4 short phrases (3-8 words each) that would be most interesting to explore further. Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]',
+          text: `You are a reading guide. Given a text, identify 2-4 short phrases (3-8 words each) that would be most interesting to explore further. The phrases MUST be verbatim substrings copied exactly from the text (same language, same wording). Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]\n\n${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
@@ -181,7 +189,7 @@ export async function getDriftSuggestions(
     const body = {
       systemInstruction: {
         parts: [{
-          text: 'Generate exactly 2 short, curiosity-sparking questions a user might ask to explore the given phrase. Each question must be under 9 words. Return ONLY a JSON array of 2 strings. No explanations. Example: ["Why does this matter today?", "What are real-world examples?"]',
+          text: `Generate exactly 2 short, curiosity-sparking questions a user might ask to explore the given phrase. Each question must be under 9 words. Return ONLY a JSON array of 2 strings. No explanations. Example: ["Why does this matter today?", "What are real-world examples?"]\n\n${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
@@ -261,7 +269,9 @@ Return ONLY a raw JSON array of 4-5 objects. Each object: {"label": string, "kin
 - "forward": a fresh direction worth drifting into next — a doorway, not trivia.
 - label is 5-11 words, concrete, no trailing punctuation.
 - Aim for ~2 "back" and ~2-3 "forward". If there is no real context, return all "forward".
-- No prose, no markdown, no code fences. Any other text breaks the app.`,
+- No prose, no markdown, no code fences. Any other text breaks the app.
+
+${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
@@ -330,7 +340,9 @@ Write engaging markdown:
 - Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they relate, reinforce, or tension each other. Reference branch topics naturally.
 - Do NOT summarize each branch in isolation; surface the through-line and any surprising links.
 - End with one open question worth exploring next, prefixed "**Next:**".
-- Keep it under ~350 words. No preamble like "Here is the synthesis".`,
+- Keep it under ~350 words. No preamble like "Here is the synthesis".
+
+${LANGUAGE_DIRECTIVE}`,
         }],
       },
       contents: [{
@@ -385,7 +397,10 @@ export async function sendMessageToGemini(
       maxOutputTokens: 8192,
     },
   }
-  if (systemInstruction) body.systemInstruction = systemInstruction
+  // Always steer the reply to the user's language (covers main chat + every drift).
+  body.systemInstruction = {
+    parts: [...(systemInstruction?.parts ?? []), { text: LANGUAGE_DIRECTIVE }],
+  }
 
   const doFetch = (b: Record<string, unknown>) =>
     fetch(url, {

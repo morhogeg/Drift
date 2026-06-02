@@ -245,8 +245,16 @@ Rules:
       setConnectCards(initialConnectCards != null ? initialConnectCards : null)
       setConnectQuestion(initialConnectQuestion != null ? initialConnectQuestion : null)
 
-      // If chips are being restored from cache, suppress the auto-send that would re-fetch them
-      if (initialConnectCards != null && initialConnectCards.length > 0) {
+      // Defensive backstop: if ANY cached/restored content exists for this drift
+      // (restored messages, Connect chips, or visited-bridge answers), suppress
+      // the auto-send so an already-explored term+lens can never re-fetch — no
+      // matter which entry point opened it. A genuinely new drift (no cache) has
+      // none of these, so first-time generation still fires exactly once.
+      const hasRestoredContent =
+        (existingMessages != null && existingMessages.length > 0) ||
+        (initialConnectCards != null && initialConnectCards.length > 0) ||
+        (initialConnectAnswers != null && Object.keys(initialConnectAnswers).length > 0)
+      if (hasRestoredContent) {
         autoSentRef.current = true
       }
 
@@ -322,14 +330,20 @@ Rules:
     if (templateType !== 'connect' || isTyping || connectQuestion) return
     const aiMsg = driftOnlyMessages.find(m => !m.isUser && !m.id.startsWith('drift-system-'))
     if (!aiMsg?.text) return
+    const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    // Only treat this as connect cards if it actually looks like a JSON array. When
+    // switching lenses (Connect → Deep dive → Connect), this effect can fire on a
+    // render where driftOnlyMessages still holds the PREVIOUS lens's prose answer;
+    // parsing that and wiping to [] is what caused "No connections found" after the
+    // cards had already been restored. Prose → leave the restored cards intact.
+    if (!raw.startsWith('[')) return
     try {
-      const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
         setConnectCards(parsed.filter((x: unknown) => typeof x === 'string').slice(0, 5))
       }
     } catch {
-      setConnectCards([])
+      // Malformed JSON — keep whatever cards we have rather than blanking the view.
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateType, isTyping, driftOnlyMessages, selectedText])

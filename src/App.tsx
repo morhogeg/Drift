@@ -7,6 +7,7 @@ import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, syn
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
+import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
@@ -310,12 +311,8 @@ function App() {
       ? (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
       : (driftStore.getTempConversation(parentId!) ?? chatHistory.find(c => c.id === parentId)?.messages ?? [])
     const msgIdx = parentMessages.findIndex(m => m.id === sib.sourceMessageId)
-    const existing: Message[] =
-      (chatHistory.find(c => c.id === sib.driftChatId)?.messages?.length
-        ? chatHistory.find(c => c.id === sib.driftChatId)!.messages
-        : null)
-      ?? driftStore.getTempConversation(sib.driftChatId)
-      ?? []
+    // Restore cached content for the sibling so re-opening never re-fetches.
+    const restore = resolveDriftRestore(sib.driftChatId, sib.sourceMessageId, sib.selectedText, parentMessages)
     connectStateRef.current = { question: null, cards: null }
     driftStore.openDrift({
       selectedText: sib.selectedText,
@@ -323,8 +320,10 @@ function App() {
       contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
       highlightMessageId: sib.sourceMessageId,
       driftChatId: sib.driftChatId,
-      existingMessages: existing,
-      templateType: sib.templateType,
+      existingMessages: restore.existingMessages,
+      templateType: restore.templateType ?? sib.templateType,
+      connectCards: restore.connectCards,
+      connectAnswers: restore.connectAnswers,
       ancestry,
     })
   }
@@ -379,6 +378,80 @@ function App() {
       connectCards: tgtCards?.length ? tgtCards : undefined,
       connectAnswers: tgtAnswers && Object.keys(tgtAnswers).length ? tgtAnswers : undefined,
     })
+  }
+
+  // ── Centralized drift restoration ─────────────────────────────────────────────
+  // Single source of truth for restoring an already-explored drift. Given a
+  // driftChatId (+ the source message / selected text it branched from), it
+  // resolves the cached content so re-opening from ANY entry point (reopen pill,
+  // sibling switcher, "Drift into" chips, inline links, map) restores with ZERO
+  // new network calls. Mirrors the map `onOpenDrift` fix and `handleSwitchLens`.
+  const resolveDriftRestore = (
+    driftChatId: string,
+    sourceMessageId?: string,
+    selectedText?: string,
+    parentMessages?: Message[],
+  ): {
+    existingMessages: Message[]
+    templateType: DriftContext['templateType']
+    connectCards?: string[]
+    connectAnswers?: Record<string, Message[]>
+  } => {
+    // Where to look for the drift's metadata (driftInfos): the explicit parent
+    // messages if provided, else the active chat, else all current messages.
+    const searchPools: Message[][] = [
+      parentMessages ?? [],
+      chatHistory.find(c => c.id === activeChatId)?.messages ?? messages,
+      messages,
+    ]
+
+    // Find the driftInfo entry for this id. Prefer the most specific match:
+    // the entry on the exact source message, then a (term + id) match anywhere,
+    // then any entry with this driftChatId.
+    let di: NonNullable<Message['driftInfos']>[number] | undefined
+    for (const pool of searchPools) {
+      const srcMsg = sourceMessageId ? pool.find(m => m.id === sourceMessageId) : undefined
+      di =
+        (srcMsg?.driftInfos?.find(d =>
+          d.driftChatId === driftChatId && (!selectedText || d.selectedText === selectedText))) ??
+        undefined
+      if (di) break
+      const infos = pool.flatMap(m => m.driftInfos ?? [])
+      di =
+        (selectedText
+          ? infos.find(d => d.driftChatId === driftChatId && d.selectedText === selectedText)
+          : undefined) ??
+        infos.find(d => d.driftChatId === driftChatId)
+      if (di) break
+    }
+
+    const connectCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+    const connectAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+    // Prefer the persisted templateType; infer Connect when cards/answers exist.
+    const templateType: DriftContext['templateType'] =
+      di?.templateType ??
+      ((connectCards?.length || (connectAnswers && Object.keys(connectAnswers).length))
+        ? 'connect'
+        : undefined)
+
+    // For Connect, existingMessages MUST be [] — the prose bridge conversation
+    // would poison the JSON card parser (same as handleSwitchLens / map fix).
+    const existingMessages: Message[] =
+      templateType === 'connect'
+        ? []
+        : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
+            ? chatHistory.find(c => c.id === driftChatId)!.messages
+            : null)
+          ?? driftStore.getTempConversation(driftChatId)
+          ?? [])
+
+    return {
+      existingMessages,
+      templateType,
+      connectCards: connectCards?.length ? connectCards : undefined,
+      connectAnswers: connectAnswers && Object.keys(connectAnswers).length ? connectAnswers : undefined,
+    }
   }
 
   // ── Drift synthesis: "bring it home" ──────────────────────────────────────────
@@ -1471,14 +1544,27 @@ function App() {
     const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
       ?? currentMessages.flatMap(m => m.driftInfos ?? []).find(d => d.selectedText === selectedText)
     const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-    const existingMessagesToUse = (reconstructedMessages?.length ? reconstructedMessages : null)
-      ?? driftStore.getTempConversation(finalDriftChatId)
-      ?? []
+
+    // Resolve cached content + the effective lens for an ALREADY-explored drift.
+    // Caller-supplied values (explicit param / restored cards/answers) win; the
+    // resolver fills the gaps (e.g. an inline link that omits templateType for a
+    // term first explored as Connect) so we never re-fetch an explored combo.
+    const restore = resolveDriftRestore(finalDriftChatId, finalSourceMessageId, selectedText, currentMessages)
+    const effectiveTemplateType = templateType ?? existingDrift?.templateType ?? restore.templateType
 
     const cachedConnectCards = restoredConnectCards
       ?? connectCardsCache.current.get(finalDriftChatId)
+      ?? restore.connectCards
     const cachedConnectAnswers = restoredConnectAnswers
-      ?? (existingDrift?.connectAnswers)
+      ?? existingDrift?.connectAnswers
+      ?? restore.connectAnswers
+
+    // For Connect, existingMessages MUST be [] (prose poisons the card parser).
+    const existingMessagesToUse: Message[] = effectiveTemplateType === 'connect'
+      ? []
+      : ((reconstructedMessages?.length ? reconstructedMessages : null)
+        ?? driftStore.getTempConversation(finalDriftChatId)
+        ?? [])
 
     driftStore.openDrift({
       selectedText,
@@ -1487,7 +1573,7 @@ function App() {
       highlightMessageId: actualMessage?.id,
       driftChatId: finalDriftChatId,
       existingMessages: existingMessagesToUse,
-      templateType,
+      templateType: effectiveTemplateType,
       initialSuggestions,
       connectCards: cachedConnectCards?.length ? cachedConnectCards : undefined,
       connectAnswers: cachedConnectAnswers && Object.keys(cachedConnectAnswers).length > 0 ? cachedConnectAnswers : undefined,
@@ -1564,12 +1650,10 @@ function App() {
 
     const parentMessages = chatHistory.find(c => c.id === parentChatId)?.messages ?? messages
     const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
-    const existing: Message[] =
-      (chatHistory.find(c => c.id === driftChatId)?.messages?.length
-        ? chatHistory.find(c => c.id === driftChatId)!.messages
-        : null)
-      ?? driftStore.getTempConversation(driftChatId)
-      ?? []
+
+    // Restore cached content (regular messages OR Connect cards/answers + the
+    // correct templateType) so the panel never re-fetches an explored drift.
+    const restore = resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages)
 
     connectStateRef.current = { question: null, cards: null }
     driftStore.openDrift({
@@ -1578,7 +1662,10 @@ function App() {
       contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
       highlightMessageId: sourceMessageId || undefined,
       driftChatId,
-      existingMessages: existing,
+      existingMessages: restore.existingMessages,
+      templateType: restore.templateType,
+      connectCards: restore.connectCards,
+      connectAnswers: restore.connectAnswers,
       ancestry: [{
         isMainChat: true,
         label: chatHistory.find(c => c.id === parentChatId)?.title || 'Chat',
@@ -3690,6 +3777,7 @@ function App() {
 
       {/* Knowledge Graph */}
       {knowledgeGraphOpen && (
+        <ErrorBoundary fallback={null} onError={() => setKnowledgeGraphOpen(false)}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
@@ -3721,20 +3809,40 @@ function App() {
               })
             }
 
-            // Resolve existing messages — prefer chatHistory, then temp store, then the node object itself
-            const existing: Message[] =
-              (chatHistory.find(c => c.id === driftChatId)?.messages?.length
-                ? chatHistory.find(c => c.id === driftChatId)!.messages
-                : null)
-              ?? driftStore.getTempConversation(driftChatId)
-              ?? (driftChat.messages?.length ? driftChat.messages : null)
-              ?? []
-
             // Get context from parent chat (use the chat we're switching to)
             const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
             const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
 
-            // Open drift panel directly — more reliable than handleStartDrift for existing drifts
+            // Resolve the persisted drift metadata (templateType + Connect content)
+            // from the parent's driftInfos — search the resolved parent first, then
+            // fall back across all current messages.
+            const di = parentMessages
+              .flatMap(m => m.driftInfos ?? [])
+              .find(d => d.driftChatId === driftChatId)
+              ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
+
+            const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+            const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+            // A node whose only content is "Finding connections for…" is a Connect drift.
+            // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
+            const templateType = di?.templateType
+              ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
+
+            // For a Connect lens the chips view rebuilds from cached cards; passing the
+            // (prose) bridge conversation as messages would poison the JSON card parser,
+            // so start it clean and let connectCards/connectAnswers restore the map.
+            const existing: Message[] = templateType === 'connect'
+              ? []
+              : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
+                  ? chatHistory.find(c => c.id === driftChatId)!.messages
+                  : null)
+                ?? driftStore.getTempConversation(driftChatId)
+                ?? (driftChat.messages?.length ? driftChat.messages : null)
+                ?? [])
+
+            // Open drift panel directly — restores the already-generated content with
+            // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
             driftStore.openDrift({
               selectedText,
               sourceMessageId: sourceMessageId ?? '',
@@ -3742,6 +3850,9 @@ function App() {
               highlightMessageId: sourceMessageId,
               driftChatId,
               existingMessages: existing,
+              templateType,
+              connectCards: cachedCards?.length ? cachedCards : undefined,
+              connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
               ancestry: [{
                 isMainChat: true,
                 label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
@@ -3771,6 +3882,7 @@ function App() {
           onSynthesize={handleSynthesize}
           synthesizing={synthesizing}
         />
+        </ErrorBoundary>
       )}
 
       {/* Full-text search across all chats and drifts */}
