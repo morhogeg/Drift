@@ -38,6 +38,7 @@ import { toast } from '@/hooks/useToast'
 import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
+import { SidebarChatRow, type SidebarRowKind } from '@/components/SidebarChatRow'
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -2156,6 +2157,82 @@ function App() {
     return b.createdAt.getTime() - a.createdAt.getTime()
   })
 
+  // ── Group drifts under their origin chat for a differentiated sidebar ────────
+  // The Chat model links a drift to its source via `metadata.isDrift` +
+  // `metadata.parentChatId` (which may point at another drift) + `metadata.selectedText`.
+  // We resolve each drift up to its ROOT chat so nested drift-of-drift still slots
+  // under the conversation it ultimately came from.
+  const sidebarGroups = useMemo(() => {
+    const byId = new Map(chatHistory.map((c) => [c.id, c]))
+
+    const kindOf = (c: ChatSession): SidebarRowKind => {
+      if (c.metadata?.isDrift) return 'drift'
+      // Synthesis = a chat whose latest message is a woven "bring it home" synthesis.
+      if (c.lastMessage && /✦\s*Synthesis/i.test(c.lastMessage)) return 'synthesis'
+      return 'chat'
+    }
+
+    // Walk parent links until we hit a non-drift chat (the root conversation).
+    const rootOf = (c: ChatSession): string => {
+      let cur: ChatSession | undefined = c
+      const seen = new Set<string>()
+      while (cur && cur.metadata?.isDrift && cur.metadata.parentChatId && !seen.has(cur.id)) {
+        seen.add(cur.id)
+        const parent = byId.get(cur.metadata.parentChatId)
+        if (!parent) break
+        cur = parent
+      }
+      return cur?.id ?? c.id
+    }
+
+    // Build groups keyed by root chat id, preserving the sorted top-level order.
+    const groupOrder: string[] = []
+    const drifts = new Map<string, ChatSession[]>()
+    const orphanDrifts: ChatSession[] = []
+
+    for (const c of sortedChats) {
+      if (kindOf(c) === 'drift') {
+        const root = rootOf(c)
+        if (root === c.id || !byId.has(root)) {
+          // Could not resolve a real parent — show it as a standalone row.
+          orphanDrifts.push(c)
+        } else {
+          if (!drifts.has(root)) drifts.set(root, [])
+          drifts.get(root)!.push(c)
+        }
+      } else {
+        if (!groupOrder.includes(c.id)) groupOrder.push(c.id)
+      }
+    }
+
+    const rows: Array<{
+      chat: ChatSession
+      kind: SidebarRowKind
+      nested: boolean
+      originTitle?: string
+    }> = []
+
+    for (const rootId of groupOrder) {
+      const parent = byId.get(rootId)!
+      rows.push({ chat: parent, kind: kindOf(parent), nested: false })
+      // Drifts that branch off this conversation, newest first.
+      const children = (drifts.get(rootId) ?? []).sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      )
+      for (const d of children) {
+        rows.push({ chat: d, kind: 'drift', nested: true, originTitle: parent.title })
+      }
+    }
+
+    // Drifts whose parent isn't in the visible list (e.g. filtered out by search).
+    for (const d of orphanDrifts) {
+      const parent = d.metadata?.parentChatId ? byId.get(d.metadata.parentChatId) : undefined
+      rows.push({ chat: d, kind: 'drift', nested: false, originTitle: parent?.title })
+    }
+
+    return rows
+  }, [sortedChats, chatHistory])
+
   // ── Show login if not authenticated ────────────────────────────────────────
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />
@@ -2242,73 +2319,37 @@ function App() {
           </Pressable>
         </div>
 
-        {/* Chat List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-dark-border/30">
-          {sortedChats.map((chat) => (
+        {/* Chat List — grouped: chats, with their drifts nested beneath, plus synthesis rows */}
+        <div className="flex-1 overflow-y-auto">
+          {sidebarGroups.map((row) => (
             <div
-              key={chat.id}
-              onClick={() => { switchChat(chat.id); uiStore.setSidebarOpen(false) }}
-              onContextMenu={(e) => handleContextMenu(e, chat.id)}
-              className={`
-                group relative px-3 py-2.5 cursor-pointer
-                transition-all duration-100 ease-in-out
-                ${activeChatId === chat.id
-                  ? 'bg-dark-elevated/60'
-                  : 'hover:bg-dark-elevated/40'
-                }
-              `}
+              key={row.chat.id}
+              className={
+                // Hairline separator only above top-level rows, so a chat and its
+                // nested drifts read as one connected cluster.
+                !row.nested ? 'border-t border-dark-border/20 first:border-t-0' : ''
+              }
             >
-              {/* Pin indicator */}
-              {pinnedChats.has(chat.id) && (
-                <Pin className="absolute top-2 right-2 w-3 h-3 text-cyan-400 fill-cyan-400" />
-              )}
-
-              {/* Star indicator */}
-              {starredChats.has(chat.id) && (
-                <Star className="absolute top-2 right-7 w-3 h-3 text-yellow-400 fill-yellow-400" />
-              )}
-
-              <div className="flex items-start gap-0">
-                <div className="flex-1 min-w-0">
-                  {editingChatId === chat.id ? (
-                    <input
-                      type="text"
-                      value={editingTitle}
-                      onChange={(e) => uiStore.setEditingTitle(e.target.value)}
-                      onBlur={handleSaveRename}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveRename()
-                        if (e.key === 'Escape') {
-                          uiStore.setEditingChatId(null)
-                          uiStore.setEditingTitle('')
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-dark-bg/50 text-text-primary text-sm font-medium
-                               rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-accent-violet"
-                      autoFocus
-                    />
-                  ) : (
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {chat.metadata?.isDrift && (
-                        <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />
-                      )}
-                      <h3
-                        className={`text-[13px] font-medium truncate min-w-0 ${chat.metadata?.isDrift ? 'text-accent-violet/90' : 'text-text-primary'} ${getRTLClassName(chat.title)}`}
-                        dir={getTextDirection(chat.title)}
-                      >
-                        {chat.title}
-                      </h3>
-                    </div>
-                  )}
-                  <p
-                    className={`text-[11px] text-text-muted truncate mt-0.5 ${getRTLClassName(chat.lastMessage || '')}`}
-                    dir={getTextDirection(chat.lastMessage || '')}
-                  >
-                    {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
-                  </p>
-                </div>
-              </div>
+              <SidebarChatRow
+                chat={row.chat}
+                kind={row.kind}
+                nested={row.nested}
+                originTitle={row.originTitle}
+                isActive={activeChatId === row.chat.id}
+                isPinned={pinnedChats.has(row.chat.id)}
+                isStarred={starredChats.has(row.chat.id)}
+                isEditing={editingChatId === row.chat.id}
+                editingTitle={editingTitle}
+                stripMarkdown={stripMarkdown}
+                onOpen={() => { switchChat(row.chat.id); uiStore.setSidebarOpen(false) }}
+                onContextMenu={(e) => handleContextMenu(e, row.chat.id)}
+                onEditTitleChange={(v) => uiStore.setEditingTitle(v)}
+                onSaveRename={handleSaveRename}
+                onCancelRename={() => {
+                  uiStore.setEditingChatId(null)
+                  uiStore.setEditingTitle('')
+                }}
+              />
             </div>
           ))}
         </div>
