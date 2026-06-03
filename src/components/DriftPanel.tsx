@@ -177,6 +177,20 @@ export default function DriftPanel({
   const [connectCards, setConnectCards] = useState<string[] | null>(null)
   const [connectQuestion, setConnectQuestion] = useState<string | null>(null)
   const connectAnswersRef = useRef<Map<string, Message[]>>(new Map())
+  // When the panel re-initializes for a new thread (term switch / lens switch),
+  // `driftChatId` flips immediately but the PREVIOUS thread's `driftOnlyMessages`
+  // linger in state for one render until the init effect's queued reset commits.
+  // The Connect-card parser must not parse that stale render's JSON — doing so
+  // keys the previous drift's cards onto the newly-selected term (the "Connect
+  // shows the wrong drift" bug). The init effect arms this flag so the parser
+  // skips exactly that one stale pass; it clears once consumed.
+  const skipStaleCardParseRef = useRef(false)
+  // The driftChatId the live `driftOnlyMessages` belong to. Updated synchronously
+  // by the init effect when a thread loads. The persistence effect gates on this
+  // so that during a term switch — where driftOnlyMessages still holds the OLD
+  // thread but driftChatId has already flipped — the old conversation is never
+  // written under the new thread's key (which would lose it on return: Bug 5).
+  const messagesThreadRef = useRef<string | undefined>(driftChatId)
   const [connectVisitedVersion, setConnectVisitedVersion] = useState(0)
   /** Tracks the active chip session {question, messages} via ref so it survives React batching. */
   const chipSessionRef = useRef<{ question: string; messages: Message[] } | null>(null)
@@ -241,6 +255,15 @@ Rules:
   // Initialize Drift with existing messages or system message
   useEffect(() => {
     if (isOpen) {
+      // Arm the stale-parse skip: the about-to-be-reset messages may still hold
+      // the previous thread's Connect JSON for one render. (See parser below.)
+      skipStaleCardParseRef.current = true
+      // The messages this effect is about to set belong to THIS thread. Stamping
+      // it synchronously means the persistence effect (which fires after the
+      // queued setDriftOnlyMessages commits) saves under the correct key, and any
+      // stale-render fire for the previous thread is gated out.
+      messagesThreadRef.current = driftChatId
+
       // Reset auto-send guard for each new open
       autoSentRef.current = false
 
@@ -328,7 +351,7 @@ Rules:
       setSavedMessageIds(savedIds)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedText, existingMessages, templateType])
+  }, [isOpen, selectedText, existingMessages, templateType, driftChatId])
 
   // Notify parent whenever Connect state changes so it can persist for navigation
   useEffect(() => {
@@ -365,7 +388,20 @@ Rules:
 
   // Parse Connect AI response into cards once streaming finishes (only in chips mode)
   useEffect(() => {
-    if (templateType !== 'connect' || isTyping || connectQuestion) return
+    if (templateType !== 'connect') return
+    // Stale-window guard: when switching terms/lenses, this effect can fire on the
+    // render where driftChatId already points at the NEW thread but
+    // driftOnlyMessages still holds the PREVIOUS thread's streamed JSON (the init
+    // effect's reset is queued, not yet committed). Parsing that would key the
+    // previous drift's cards onto the newly-selected term — the "Connect shows the
+    // wrong drift" bug. The init effect arms a skip for exactly that stale pass;
+    // we consume it here (before the isTyping/question early-returns) so it can
+    // never linger and swallow the next thread's legitimate first parse.
+    if (skipStaleCardParseRef.current) {
+      skipStaleCardParseRef.current = false
+      return
+    }
+    if (isTyping || connectQuestion) return
     const aiMsg = driftOnlyMessages.find(m => !m.isUser && !m.id.startsWith('drift-system-'))
     if (!aiMsg?.text) return
     const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
@@ -389,7 +425,11 @@ Rules:
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
   useEffect(() => {
-    if (driftChatId && driftOnlyMessages.length > 0) {
+    // Only persist messages that belong to the thread currently loaded. During a
+    // term switch there is a render where driftOnlyMessages still holds the OLD
+    // thread but driftChatId has flipped to the new one; saving then would write
+    // the old conversation under the new key. Gate on the messages' own thread.
+    if (driftChatId && driftChatId === messagesThreadRef.current && driftOnlyMessages.length > 0) {
       onMessagesChange?.(driftOnlyMessages)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
