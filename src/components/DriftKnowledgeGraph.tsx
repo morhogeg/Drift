@@ -784,6 +784,35 @@ function GraphCanvas({
                     leaf reveals where it came from, even when the label is
                     truncated. */}
                 <title>{lineageLabel(laid)}</title>
+                {/* Bug 7 (at-a-glance): a small context label ABOVE each drift node
+                    naming its immediate parent term, so a glance at the map reveals
+                    a question's subject ("PSG" over "how many goals") without having
+                    to tap or hover. */}
+                {laid.depth >= 1 && (() => {
+                  const chain = lineageChain(laid)
+                  const parentLabel = chain.length >= 2 ? chain[chain.length - 2] : null
+                  if (!parentLabel || parentLabel === nodeOwnLabel(laid.node)) return null
+                  const pl = parentLabel.length > 18 ? parentLabel.slice(0, 18) + '…' : parentLabel
+                  const ph = hueAt(Math.max(0, laid.depth - 1))
+                  return (
+                    <text
+                      x={laid.x}
+                      y={laid.y - r - (isMobile ? 7 : 8)}
+                      textAnchor="middle"
+                      className="dkg-context"
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        fill: ph.core,
+                        opacity: depthDim ? 0.5 : 0.8,
+                        direction: isRtl(pl) ? 'rtl' : 'ltr',
+                        unicodeBidi: 'plaintext',
+                      }}
+                    >
+                      {'↳ ' + pl}
+                    </text>
+                  )
+                })()}
                 {/* wide ambient halo */}
                 <circle
                   cx={laid.x} cy={laid.y} r={r * (focused ? 2.5 : 1.95)}
