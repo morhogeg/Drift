@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, type LucideIcon } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, X, type LucideIcon } from 'lucide-react'
+import { useOnceFlag } from '../lib/onceFlags'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
@@ -176,6 +177,8 @@ export default function DriftPanel({
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
   const [connectCards, setConnectCards] = useState<string[] | null>(null)
+  // First-run hint for the lens switcher — shown once, dismissed on first use.
+  const [seenLensHint, markLensHint] = useOnceFlag('lens-bar')
   const [connectQuestion, setConnectQuestion] = useState<string | null>(null)
   const connectAnswersRef = useRef<Map<string, Message[]>>(new Map())
   // When the panel re-initializes for a new thread (term switch / lens switch),
@@ -1280,7 +1283,7 @@ Rules:
               return (
                 <button
                   key={l.label}
-                  onClick={() => { if (!active) onSwitchLens(l.tpl) }}
+                  onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
                   className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
                     ${active
                       ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
@@ -1290,6 +1293,14 @@ Rules:
                 </button>
               )
             })}
+          </div>
+        )}
+        {/* First-run hint: the lens switcher is an invisible affordance — teach it once. */}
+        {onSwitchLens && !(templateType === 'connect' && connectQuestion) && !seenLensHint && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-accent-violet/15 bg-accent-violet/[0.06] shrink-0">
+            <Sparkles className="w-3 h-3 text-accent-violet/70 shrink-0" />
+            <span className="text-[11px] text-text-muted leading-snug flex-1">Same term, a new angle — try <span className="text-accent-violet/90 font-medium">Simplify</span>, <span className="text-accent-violet/90 font-medium">Deep dive</span>, or <span className="text-accent-violet/90 font-medium">Connect</span>.</span>
+            <button onClick={markLensHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3 h-3" /></button>
           </div>
         )}
 

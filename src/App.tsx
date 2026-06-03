@@ -29,6 +29,7 @@ import { indexListMessage, getAnchorId, matchListItemsInText } from './services/
 import InlineListLink from './components/lists/InlineListLink'
 import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
 import { runEmbeddingBackfill, getCachedVectors } from '@/lib/embeddingBackfill'
+import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
 import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
@@ -359,6 +360,11 @@ function App() {
       ?? undefined
     handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
   }
+
+  // First-run coachmark: teach the signature drift gesture the moment a reply is
+  // on screen. Auto-dismisses for good once the user opens any drift.
+  const [seenDriftHint, markDriftHint] = useOnceFlag('drift-gesture')
+  useEffect(() => { if (driftOpen) markDriftHint() }, [driftOpen, markDriftHint])
 
   // Rebuild the in-memory per-term lens registry from persisted driftInfos so
   // returning to a term (and its lens threads) survives a reload — the registry
@@ -3706,6 +3712,14 @@ function App() {
         {/* Input area */}
         <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
           <div className="max-w-4xl mx-auto">
+            {/* First-run hint — teaches the drift gesture when a reply is on screen. */}
+            {!seenDriftHint && !driftOpen && !knowledgeGraphOpen && messages.some(m => !m.isUser && !!m.text) && (
+              <div className="flex items-center gap-2.5 mb-2 px-3.5 py-2 rounded-full border border-accent-violet/20 bg-accent-violet/[0.07] backdrop-blur-sm">
+                <MousePointerClick className="w-4 h-4 text-accent-violet/80 shrink-0" />
+                <span className="text-[12.5px] text-text-secondary leading-snug flex-1">Highlight any phrase above to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.</span>
+                <button onClick={markDriftHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
             {/* Mobile-only: model pill row above textarea */}
             <div className="lg:hidden">
               <ModelPillRow
