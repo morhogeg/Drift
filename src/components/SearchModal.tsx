@@ -1,12 +1,27 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Search, X, GitBranch, CornerDownLeft } from 'lucide-react'
+import { Search, X, GitBranch, CornerDownLeft, Sparkles } from 'lucide-react'
 import type { ChatSession } from '@/types/chat'
+import { embedTexts } from '@/services/embeddings'
+import { getCachedVectors } from '@/lib/embeddingBackfill'
+import { rankBySemanticSimilarity } from '@/lib/semanticRecall'
 
 interface SearchModalProps {
   isOpen: boolean
   onClose: () => void
   chatHistory: ChatSession[]
   onNavigate: (chatId: string, messageId: string) => void
+  /** Resolved Gemini key. Empty ⇒ semantic search disabled (lexical-only). */
+  geminiApiKey?: string
+}
+
+/** A semantically-near drift the lexical substring pass missed. */
+interface SemanticHit {
+  chatId: string
+  chatTitle: string
+  term?: string
+  messageId: string
+  snippet: string
+  score: number
 }
 
 interface Hit {
@@ -38,10 +53,11 @@ function buildSnippet(text: string, idx: number, qlen: number): { snippet: strin
   return { snippet, matchStart: rel >= 0 ? rel + prefix.length : 0 }
 }
 
-export default function SearchModal({ isOpen, onClose, chatHistory, onNavigate }: SearchModalProps) {
+export default function SearchModal({ isOpen, onClose, chatHistory, onNavigate, geminiApiKey }: SearchModalProps) {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [active, setActive] = useState(0)
+  const [semanticHits, setSemanticHits] = useState<SemanticHit[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -95,7 +111,69 @@ export default function SearchModal({ isOpen, onClose, chatHistory, onNavigate }
 
   useEffect(() => { setActive(0) }, [debounced])
 
+  // ── Semantic search ─────────────────────────────────────────────────────────
+  // Instant lexical hits above stay authoritative. When a Gemini key exists, we
+  // additionally embed the query and surface semantically-near DRIFTS the
+  // lexical substring pass missed — appended clearly after exact matches.
+  // Degrades to lexical-only without a key / on any error.
+  useEffect(() => {
+    setSemanticHits([]) // clear stale semantic results on every query change
+    const q = debounced
+    if (q.length < 2 || !geminiApiKey?.trim()) return
+
+    // Chats already covered by the lexical pass — don't repeat them.
+    const lexicalChatIds = new Set(hits.map(h => h.chatId))
+
+    let cancelled = false
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      ;(async () => {
+        try {
+          const [queryVecs, candidates] = await Promise.all([
+            embedTexts([q], geminiApiKey, controller.signal),
+            getCachedVectors(),
+          ])
+          if (cancelled || queryVecs.length === 0 || candidates.length === 0) return
+
+          const matches = rankBySemanticSimilarity(queryVecs[0], candidates)
+          if (cancelled || matches.length === 0) return
+
+          const out: SemanticHit[] = []
+          for (const m of matches) {
+            if (lexicalChatIds.has(m.driftChatId)) continue
+            const chat = chatHistory.find(c => c.id === m.driftChatId)
+            if (!chat?.metadata?.isDrift) continue
+            const term = chat.metadata.selectedText
+            const firstAnswer = chat.messages?.find(msg => !msg.isUser && msg.text?.trim())
+            const snippet = (firstAnswer?.text || chat.title || term || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 120)
+            out.push({
+              chatId: chat.id,
+              chatTitle: chat.title || 'Untitled',
+              term,
+              messageId: firstAnswer?.id || chat.messages?.[0]?.id || '',
+              snippet,
+              score: m.score,
+            })
+            if (out.length >= 8) break
+          }
+          if (!cancelled) setSemanticHits(out)
+        } catch {
+          // Lexical-only on any failure.
+        }
+      })()
+    }, 200)
+
+    return () => { cancelled = true; controller.abort(); clearTimeout(timer) }
+  }, [debounced, geminiApiKey, hits, chatHistory])
+
   const choose = useCallback((hit: Hit) => {
+    onNavigate(hit.chatId, hit.messageId)
+  }, [onNavigate])
+
+  const chooseSemantic = useCallback((hit: SemanticHit) => {
     onNavigate(hit.chatId, hit.messageId)
   }, [onNavigate])
 
@@ -156,7 +234,7 @@ export default function SearchModal({ isOpen, onClose, chatHistory, onNavigate }
             <p className="px-4 py-8 text-center text-[13px] text-text-muted">
               Type at least 2 characters to search across all your chats and drifts.
             </p>
-          ) : hits.length === 0 ? (
+          ) : hits.length === 0 && semanticHits.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-text-muted">
               No matches for “<span className="text-text-secondary">{debounced}</span>”.
             </p>
@@ -191,15 +269,44 @@ export default function SearchModal({ isOpen, onClose, chatHistory, onNavigate }
               </button>
             ))
           )}
+
+          {/* Semantic matches — drifts related by meaning that the exact-text
+              pass missed. Always ordered after lexical hits. */}
+          {debounced.length >= 2 && semanticHits.length > 0 && (
+            <>
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1.5">
+                <Sparkles className="w-3 h-3 text-accent-violet/70 flex-shrink-0" />
+                <span className="text-[10.5px] uppercase tracking-wide text-text-muted/70 font-medium">Related by meaning</span>
+                <div className="flex-1 h-px bg-dark-border/40" />
+              </div>
+              {semanticHits.map((hit, i) => (
+                <button
+                  key={`sem-${hit.chatId}-${i}`}
+                  onClick={() => chooseSemantic(hit)}
+                  className="w-full flex items-start gap-3 px-4 py-2.5 min-h-[52px] text-left transition-colors hover:bg-dark-elevated/50"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <GitBranch className="w-3 h-3 text-accent-violet/70 flex-shrink-0" />
+                      <span className="text-[12px] font-medium truncate text-accent-violet/85">
+                        {hit.term || hit.chatTitle}
+                      </span>
+                    </div>
+                    <p className="text-[12.5px] text-text-muted leading-snug line-clamp-2">{hit.snippet}</p>
+                  </div>
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         {/* Footer hint */}
-        {hits.length > 0 && (
+        {(hits.length > 0 || semanticHits.length > 0) && (
           <div className="px-4 py-2 border-t border-dark-border/50 flex items-center gap-3 text-[10.5px] text-text-muted/70">
             <span><kbd className="font-sans">↑↓</kbd> navigate</span>
             <span><kbd className="font-sans">↵</kbd> open</span>
             <span><kbd className="font-sans">esc</kbd> close</span>
-            <span className="ml-auto tabular-nums">{hits.length}{hits.length === MAX_RESULTS ? '+' : ''} result{hits.length === 1 ? '' : 's'}</span>
+            <span className="ml-auto tabular-nums">{hits.length}{hits.length === MAX_RESULTS ? '+' : ''} result{hits.length === 1 ? '' : 's'}{semanticHits.length > 0 ? ` · ${semanticHits.length} related` : ''}</span>
           </div>
         )}
       </div>

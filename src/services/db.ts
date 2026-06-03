@@ -59,8 +59,28 @@ export interface DBChatSession {
 // ── DB schema version ───────────────────────────────────────────────────────
 
 const DB_NAME = 'drift-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const CHATS_STORE = 'drift-chats'
+const EMBEDDINGS_STORE = 'drift-embeddings'
+
+// ── Embedding record ──────────────────────────────────────────────────────────
+// One cached embedding per drift conversation. `hash` is a cheap stable hash of
+// the embedded text so the backfill can skip drifts whose text hasn't changed.
+
+export interface DBEmbedding {
+  /** driftChatId — same id space as DBChatSession.id. */
+  id: string
+  /** The embedding vector. */
+  vec: number[]
+  /** The exact text that was embedded (for debugging / re-embed decisions). */
+  text: string
+  /** Cheap stable hash of `text` — re-embed only when this changes. */
+  hash: string
+  /** Embedding model used (so a model swap can invalidate old vectors). */
+  model: string
+  /** ISO timestamp of when this was written. */
+  updatedAt: string
+}
 
 // ── Singleton DB promise ────────────────────────────────────────────────────
 
@@ -75,6 +95,13 @@ async function getDB(): Promise<IDBPDatabase> {
       if (oldVersion < 1) {
         if (!db.objectStoreNames.contains(CHATS_STORE)) {
           db.createObjectStore(CHATS_STORE, { keyPath: 'id' })
+        }
+      }
+      // Version 2: additive — add the embeddings store. MUST NOT touch the
+      // existing chats store so upgrading users keep all their conversations.
+      if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains(EMBEDDINGS_STORE)) {
+          db.createObjectStore(EMBEDDINGS_STORE, { keyPath: 'id' })
         }
       }
     },
@@ -147,6 +174,64 @@ export const chatDB = {
       await db.clear(CHATS_STORE)
     } catch (err) {
       console.error('[db] chatDB.clear failed:', err)
+    }
+  },
+}
+
+// ── embeddingDB CRUD ──────────────────────────────────────────────────────────
+// Persistent vector cache for the semantic layer. Mirrors chatDB so failures
+// are swallowed + logged (never thrown) — the semantic layer is non-critical.
+
+export const embeddingDB = {
+  /** Load every cached embedding. */
+  async getAll(): Promise<DBEmbedding[]> {
+    try {
+      const db = await getDB()
+      return await db.getAll(EMBEDDINGS_STORE)
+    } catch (err) {
+      console.error('[db] embeddingDB.getAll failed:', err)
+      return []
+    }
+  },
+
+  /** Load a single embedding by drift id. Returns undefined if not found. */
+  async get(id: string): Promise<DBEmbedding | undefined> {
+    try {
+      const db = await getDB()
+      return await db.get(EMBEDDINGS_STORE, id)
+    } catch (err) {
+      console.error(`[db] embeddingDB.get(${id}) failed:`, err)
+      return undefined
+    }
+  },
+
+  /** Insert or replace an embedding record. */
+  async put(rec: DBEmbedding): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.put(EMBEDDINGS_STORE, rec)
+    } catch (err) {
+      console.error(`[db] embeddingDB.put(${rec.id}) failed:`, err)
+    }
+  },
+
+  /** Delete an embedding by drift id. */
+  async delete(id: string): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.delete(EMBEDDINGS_STORE, id)
+    } catch (err) {
+      console.error(`[db] embeddingDB.delete(${id}) failed:`, err)
+    }
+  },
+
+  /** Remove every cached embedding. */
+  async clear(): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.clear(EMBEDDINGS_STORE)
+    } catch (err) {
+      console.error('[db] embeddingDB.clear failed:', err)
     }
   },
 }

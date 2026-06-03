@@ -28,6 +28,9 @@ import { registerGlobalNavigationHandlers } from './components/conversation/Conv
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
 import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { runEmbeddingBackfill, getCachedVectors } from '@/lib/embeddingBackfill'
+import { embedTexts } from '@/services/embeddings'
+import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
@@ -266,13 +269,87 @@ function App() {
   // Rebuilds when chat history changes — memoized so it's free on other renders.
   const termIndex = useMemo(() => buildTermIndex(chatHistory), [chatHistory])
 
+  // Resolved Gemini key (env > enabled preset > settings). Empty when there is
+  // no key (Demo / offline) — every semantic surface below treats "" as "no
+  // semantic layer" and falls back to today's lexical behavior. Never logged.
+  const geminiApiKey = useMemo(() => {
+    const preset = (aiSettings.modelPresets || []).find(p => p.provider === 'gemini' && p.enabled)
+    return (import.meta.env.VITE_GEMINI_API_KEY || preset?.apiKey || aiSettings.geminiApiKey || '').trim()
+  }, [aiSettings.modelPresets, aiSettings.geminiApiKey])
+
+  // ── Semantic backfill (lifecycle) ──────────────────────────────────────────
+  // Whenever chat history settles, diff drifts against the IDB vector cache and
+  // batch-embed any that are missing/stale. Debounced, fire-and-forget, never
+  // blocks UI; silently no-ops without a Gemini key. The in-memory cache inside
+  // embeddingBackfill keeps this cheap on repeat passes.
+  useEffect(() => {
+    if (!geminiApiKey) return
+    const id = setTimeout(() => {
+      runEmbeddingBackfill(chatHistory, geminiApiKey).catch(() => {})
+    }, 1500)
+    return () => clearTimeout(id)
+  }, [chatHistory, geminiApiKey])
+
   // Prior explorations of the term the user just marked — surfaced as the
-  // "you explored this before" moment in the drift panel.
-  const relatedDrifts = useMemo<TermOccurrence[]>(() => {
+  // "you explored this before" moment in the drift panel. The lexical result is
+  // instant; semantic matches (added below) fill in asynchronously.
+  const lexicalRelatedDrifts = useMemo<TermOccurrence[]>(() => {
     const term = driftContext?.selectedText
     if (!driftOpen || !term) return []
     return findRelatedDrifts(termIndex, term, driftContext?.driftChatId)
   }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, termIndex])
+
+  // Semantic recall: embed the marked term, rank cached drift vectors, and merge
+  // with the lexical list (lexical first, semantic-only appended). Held in local
+  // state so the lexical strip renders immediately, then semantic matches appear.
+  const [relatedDrifts, setRelatedDrifts] = useState<TermOccurrence[]>([])
+  useEffect(() => {
+    // Always show the instant lexical result first.
+    setRelatedDrifts(lexicalRelatedDrifts)
+
+    const term = driftContext?.selectedText
+    if (!driftOpen || !term || !geminiApiKey) return // graceful: lexical-only
+
+    let cancelled = false
+    const controller = new AbortController()
+    ;(async () => {
+      try {
+        const [queryVecs, candidates] = await Promise.all([
+          embedTexts([term], geminiApiKey, controller.signal),
+          getCachedVectors(),
+        ])
+        if (cancelled || queryVecs.length === 0 || candidates.length === 0) return
+
+        const matches = rankBySemanticSimilarity(
+          queryVecs[0],
+          candidates,
+          driftContext?.driftChatId,
+        )
+        if (cancelled || matches.length === 0) return
+
+        const resolve = (driftChatId: string): TermOccurrence | undefined => {
+          const c = chatHistory.find(x => x.id === driftChatId)
+          if (!c?.metadata?.isDrift) return undefined
+          const t = c.metadata.selectedText || c.title || ''
+          if (!t) return undefined
+          return {
+            driftChatId,
+            chatTitle: c.title || t,
+            term: t,
+            parentChatId: c.metadata.parentChatId,
+          }
+        }
+
+        const merged = mergeLexicalAndSemantic(lexicalRelatedDrifts, matches, resolve)
+        if (!cancelled) setRelatedDrifts(merged)
+      } catch {
+        // Stay on the lexical result.
+      }
+    })()
+
+    return () => { cancelled = true; controller.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, lexicalRelatedDrifts, geminiApiKey])
 
   // Navigate to a prior drift surfaced in the connection strip. Reuses the same
   // path the inline drift links use, so persisted/temp conversations restore.
@@ -3982,6 +4059,7 @@ function App() {
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
         chatHistory={chatHistory}
+        geminiApiKey={geminiApiKey}
         onNavigate={(chatId, messageId) => {
           setSearchOpen(false)
           switchChat(chatId)

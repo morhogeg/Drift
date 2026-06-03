@@ -131,6 +131,10 @@ function buildForest(
   return { tree: { chat: synthetic, phrase: undefined, children }, rootCount: children.length }
 }
 
+// TODO(semantic): draw semantic edges between drifts that are meaning-related
+// but have no parent→child link (use embeddingDB vectors + cosineSimilarity
+// above SEMANTIC_THRESHOLD). This is purely visual/layout work — out of scope
+// for the embeddings pass; the tree below stays strictly parent→child for now.
 function buildTree(chats: ChatSession[], rootId: string): TreeNode | null {
   const chatMap = new Map(chats.map(c => [c.id, c]))
   const childrenMap = new Map<string, ChatSession[]>()

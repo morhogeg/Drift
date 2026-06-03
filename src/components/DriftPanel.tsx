@@ -703,6 +703,11 @@ Rules:
       // History-aware Connect: feed prior same/related-term drifts into the chip
       // prompt so the directions are ones the user has NOT already taken.
       const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
+      // TODO(semantic): seed the Connect lens directly from semantic neighbors
+      // (e.g. pass the top semantic matches/their answer snippets, not just term
+      // labels, so "back" links can reference meaning-related drifts the lexical
+      // pass missed). Out of scope for this pass — relatedDrifts already carries
+      // merged semantic matches, so this benefits indirectly for now.
       // Disambiguation: "Barcelona" inside a Messi conversation means FC Barcelona
       // the club — not the city. Force the model to read the term through context.
       const connectDisambiguation = parentContext
