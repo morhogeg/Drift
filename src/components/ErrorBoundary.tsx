@@ -3,6 +3,11 @@ import type { ErrorInfo, ReactNode } from 'react'
 
 interface Props {
   children: ReactNode
+  /** When provided, render this instead of the full-page crash screen on error
+   *  (used to scope a failure to a sub-tree, e.g. the Drift Map). */
+  fallback?: ReactNode
+  /** Called once when an error is caught — e.g. to close the offending panel. */
+  onError?: (error: Error) => void
 }
 
 interface State {
@@ -22,9 +27,17 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo)
+    this.props.onError?.(error)
   }
 
   public render() {
+    // Scoped boundary: swallow the error, render the fallback, and let the
+    // parent recover (it stays mounted, so reopening works) instead of nuking
+    // the whole app to a reload screen.
+    if (this.state.hasError && this.props.fallback !== undefined) {
+      return this.props.fallback
+    }
+
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-dark-bg flex items-center justify-center p-4">

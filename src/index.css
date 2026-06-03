@@ -62,11 +62,36 @@ input, textarea, select {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
+  /* Never let content scroll/cut horizontally — it must wrap to the viewport. */
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* Long words, names and unbreakable tokens must wrap instead of widening the
+   column and pushing message text off the right edge. */
+.ai-message,
+.ai-message .prose,
+.ai-message .prose p,
+.ai-message .prose li,
+.ai-message .prose h1,
+.ai-message .prose h2,
+.ai-message .prose h3,
+.ai-message .prose a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+/* Code blocks/tables get their own horizontal scroll rather than stretching the page. */
+.ai-message .prose pre,
+.ai-message .prose table {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* iOS safe area and viewport height fixes */
 html, body {
-  height: 100vh; /* layout viewport — with viewport-fit:cover this reaches physical bottom */
+  height: 100vh; /* fallback */
+  height: 100dvh; /* dynamic viewport — avoids mobile-browser chrome clipping the input bar */
 }
 #root {
   height: 100%;
@@ -75,6 +100,101 @@ html, body {
 /* Safe area padding utilities */
 .pt-safe { padding-top: env(safe-area-inset-top); }
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ── Motion utilities (Apple-level foundation) ── */
+
+/* Streaming-text shimmer: a soft light sweeps across materializing text.
+   Apply `.drift-text-shimmer` to a streaming message while tokens arrive. */
+.drift-text-shimmer {
+  background: linear-gradient(
+    100deg,
+    rgb(var(--color-text-secondary)) 35%,
+    rgb(var(--color-text-primary)) 50%,
+    rgb(var(--color-text-secondary)) 65%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2.4s linear infinite;
+}
+
+/* Respect the user's motion preference — neutralize ambient/looping motion,
+   keep essential, short transitions. This is the accessibility floor for every
+   animation the subagents add on top of the foundation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .drift-text-shimmer {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}
+
+/* ── Drift bloom (drift-feel layer) ──────────────────────────────────────────
+   Opening a drift / branching into a new topic should feel like a space
+   unfolding, not a panel sliding. The shell scales up from slightly small while
+   a soft blur clears; a violet glow blooms behind it then settles. These are
+   keyed by `bloomKey` in DriftPanel so they retrigger on each new space. */
+@keyframes driftBloomShell {
+  0%   { opacity: 0; transform: scale(0.965); filter: blur(6px); }
+  60%  { opacity: 1; filter: blur(0px); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0px); }
+}
+.drift-bloom-shell {
+  animation: driftBloomShell 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: right center;
+}
+
+@keyframes driftBloomGlow {
+  0%   { opacity: 0; transform: scale(0.7); }
+  35%  { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(1.25); }
+}
+.drift-bloom-glow {
+  background: radial-gradient(
+    ellipse 60% 70% at 75% 50%,
+    rgba(168, 85, 247, 0.28) 0%,
+    rgba(255, 0, 110, 0.10) 45%,
+    transparent 75%
+  );
+  animation: driftBloomGlow 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+  filter: blur(12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drift-bloom-shell { animation: none; }
+  .drift-bloom-glow { animation: none; opacity: 0; }
+}
+
+/* Promoting an idea: a freshly pushed-to-main drift settles in from below with a
+   brief violet glow that fades — "this thought just landed in the main thread."
+   Applied only on first arrival (drift-promoted-arrive), then removed. */
+@keyframes driftPromoteArrive {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.99); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes driftPromoteGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+  30%  { box-shadow: 0 0 28px 2px rgba(168, 85, 247, 0.22); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+}
+.drift-promoted-arrive {
+  animation:
+    driftPromoteArrive 0.6s cubic-bezier(0.16, 1, 0.3, 1) both,
+    driftPromoteGlow 1.1s ease-out both;
+  border-radius: 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drift-promoted-arrive { animation: none; }
+}
 
 @layer base {
   * {
@@ -180,6 +300,28 @@ html, body {
   -webkit-user-select: text;
   /* Suppress native iOS callout (Look Up, Share…) so our Drift tooltip shows instead */
   -webkit-touch-callout: none;
+}
+
+/* Synthesis "bring it home" card — a distinct, polished container so the woven
+   summary reads as a deliberate artifact rather than a stray message. */
+.synthesis-card {
+  margin: 0.5rem 0;
+  padding: 1rem 1.15rem 1.1rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(168, 85, 247, 0.12), transparent 60%),
+    linear-gradient(180deg, rgba(168, 85, 247, 0.06), rgba(10, 10, 10, 0.0));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 28px rgba(124, 58, 237, 0.12);
+}
+.synthesis-card .prose h2 {
+  margin-top: 0;
+  background: linear-gradient(90deg, #d8b4fe, #f0abfc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Ensure text selection works */

@@ -386,7 +386,7 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
               
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedSnippet.content)
+                  navigator.clipboard?.writeText(selectedSnippet.content)
                 }}
                 className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-dark-elevated 
                          rounded-lg text-sm text-text-muted hover:text-text-primary transition-colors"

@@ -1,13 +1,154 @@
 # Drift — Session Handoff
 
-**Date:** March 13, 2026
-**Branch:** `feature/list-anchors-links`
-**Build:** 34 (iOS Xcode) / 34 (web)
-**Status:** Mobile Drift Tree — duplicate chip fix, compact design, and working drift-open-from-card.
+**Date:** June 3, 2026
+**Branch:** `feature/apple-level-overhaul`
+**Build:** 44 (iOS Xcode) / web
+**Status:** Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+
+## ⚠️ Provider architecture (important context for next session)
+- **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
+- Branded labs are stored as `provider: 'openrouter'` presets with model ids `openai/* · anthropic/* · x-ai/*`; the live OpenRouter catalog is filtered by that prefix so line-ups never go stale. No dispatch changes — existing OpenRouter streaming path runs them.
 
 ---
 
 ## What Was Done This Session
+
+### 149. Settings — remove Ollama/Qwen3 default seeds + lab-key clarity (FIX)
+- `settingsStorage.ts`: dropped the default `ollama` (llama2) and `qwen3` presets from `defaultSettings.modelPresets`, AND added a migration in `get()` that strips `LEGACY_DEFAULT_PRESET_IDS = {ollama, qwen3}` from already-saved settings (stable ids; user-added Ollama/OpenRouter models get slugged ids so they're untouched). Ollama still available via "More options".
+- `AddModelSheet.tsx`: made the OpenRouter-key requirement for routed labs unmistakable — a **"via OpenRouter"** badge by the lab name, the field relabelled **"OpenRouter API Key"**, and a note: "{lab} is reached through OpenRouter — paste your OpenRouter key (sk-or-…), not a native {lab} key." (Pasting a native `sk-…`/`sk-ant…` key in a routed lab would fail validation.)
+
+### 148. Swipe-to-open-sidebar removed (FIX)
+- A horizontal drag in the chat to select text was being read as an open-sidebar swipe, hijacking the drift selection tooltip. `useSwipeGesture` in `App.tsx` now passes `undefined` for the left/open callback; swipe-right-to-close is kept (no collision — no text selection while the sidebar is open). Sidebar still opens via the header menu button.
+
+### 147. Settings screen redesign (DESIGN)
+- Reworked within the canonical `DESIGN_SYSTEM.md` ("light from within"), not the frontend-design skill, to stay on-brand. New **brand-aware luminous glyphs** (`brandOf` + `ProviderGlyph`): each preset emits its lab's hue (OpenAI emerald, Anthropic Claude-clay #d97757, Grok near-white, Gemini sky, OpenRouter indigo, Ollama green, Demo violet), dimming when toggled off — this also visually distinguishes OpenAI/Anthropic/Grok even though they share the OpenRouter backend. Softer group cards (gradient surface, faint hairlines, rounded-2xl), refined section headers with an "N active" count, taller tappable rows, premium "Add a model" CTA, polished empty state, larger title + circular close button. Fixed a latent bug: panel drop-shadow used a Unicode minus (`−`) so it never rendered → real `-20px`. "Dummy AI" → "Demo AI".
+
+### 146. Add Models — the four frontier labs (FEATURE)
+- `AddModelSheet.tsx` reorganised: `LAB_PROVIDERS` (OpenAI · Anthropic · Google Gemini · xAI Grok) lead, then `MORE_PROVIDERS` (OpenRouter full search · Ollama · Demo). Introduced a brand/backend split: `ProviderMeta.id` is the UI brand, `ProviderMeta.backend` is the actual `Provider` stored on the preset. OpenAI/Anthropic/xAI use `backend: 'openrouter'` + an `orPrefix` (`openai/`·`anthropic/`·`x-ai/`); their model list is the **live OpenRouter catalog filtered by prefix** (never stale). Gemini path is byte-for-byte unchanged (native, `checkGeminiConnection`, `GEMINI_OPTIONS`). No new `Provider` union members → no dispatch/Settings changes; existing OpenRouter streaming path runs the routed labs. Research-backed: confirmed OpenAI has no browser CORS, Anthropic/Gemini do, Grok unclear, `CapacitorHttp` breaks SSE.
+
+### 144. Content-generation quality — full prompt rewrite (QUALITY)
+- Audited and rewrote every AI-generation surface for context-grounding, user-intent fidelity, and anti-generic output, within the existing parse contracts:
+  - **`gemini.ts`**: `getSuggestedHighlights` (pick rich "doorway" phrases — proper nouns / terms of art / load-bearing concepts, strict verbatim-substring, temp 0.3, ban generic verbs & whole clauses), `getDriftSuggestions` (context-grounded, banned its own generic example templates, demands two distinct angles, role-labeled last-4 context), `getConnections` (disambiguation + grounded "back" links + cross-domain, context budget 1200→2000), `synthesizeDrifts` (honesty guard — don't force false connective tissue / invent facts).
+  - **`DriftPanel.tsx`**: rewrote `TEMPLATE_SYSTEM_PROMPTS['simplify']` (one vivid analogy, smart-adult tone, aim for the "aha", ~120 words) and `['research']` (Deep dive — expert depth, mechanism/history/live-debates, specific names+dates, honest about contested points, skimmable); sharpened the Connect Rules (specific verifiable concepts, ≥1 tension, no duplicates/near-synonyms, no hallucination); rewrote the Connect bridge-answer prompt to demand the actual *link* (through-line / shared mechanism / influence / tension), lead with the surprising part, keep the term in frame; widened `parentContext` 6→8 messages with a 1200-char per-message cap.
+  - **Latent bug fixed**: the multi-model *compare* path ignored `parentContext` entirely and used the weakest generic prompt → ungrounded answers that could disambiguate the term differently per model. Now uses the same context-grounded prompt as the single-model path.
+
+### 143. Map — meaningful node & pill labels, not "Barcelona 1/2/3" (FIX)
+- `nodeTopic` rewritten with a real priority chain: Connect bridge (`term → Y`) → genuine user question → **gist of the first real answer** (markdown/JSON stripped, first clause, iOS-15-safe: no regex lookbehind) → bare term only as last resort. So multiple lenses on one term (Simplify / Deep dive / Connect) now read by what they actually explored instead of a meaningless counter.
+- `collectTopics` (the EXPLORED strip) now uses `nodeTopic` too, so the top-of-map pills are meaningful as well. `disambiguateTopics` kept as a final safety net. Graph labels truncate at 24, pills at 20, detail card wraps.
+
+### 142. Map — filter field redesign (POLISH)
+- Fixed-height pill (34px) aligned with the recenter button; stable width (removed the jarring focus-expand); `dir="auto"` so Hebrew/Arabic queries align RTL; cleaner clear-button hit target. `.dkg-search` padding + recenter button bumped to match heights.
+
+### 141. Language — transliterate proper nouns + map bridge open (BUG FIX)
+- **Transliteration**: `LANGUAGE_DIRECTIVE` (`gemini.ts`) used to say "keep proper nouns in their original script" — that's why a Hebrew chat showed "Johan Cruyff"/"Real Madrid"/"Catalan Nationalism" in Latin. Now it requires writing every proper noun in the conversation's OWN script (Hebrew chat → "יוהאן קרויף", "ריאל מדריד", "לאומיות קטלאנית"), only code/URLs/units stay Latin. Connect `<concept>` rule updated to match.
+- **Map bridge open**: the Drift Map's "Open this drift" on a Connect *bridge* node ("ברצלונה → Johan Cruyff") dropped back to the connections cards screen instead of the bridge conversation. `onOpenDrift` (`App.tsx`) now detects a bridge thread (a user "…connect to Y" message in the node), passes its real messages + `connectQuestion` so DriftPanel opens the chip-chat answer view; the connections-LIST drift still opens clean (cards). Added `Message[]` resolution that's shared between the two paths.
+
+### 140. Connect — relationship taxonomy + living map redesign (REDESIGN)
+- Reworked the Connect lens card list (`DriftPanel.tsx:1290–1380`) from a flat uniform list into a **semantic relationship map** with live visual distinction:
+  - **Relationship typing (language-agnostic):** Updated the Connect prompt to return `"<type> :: <relationship> :: <concept>"` where `<type>` is a language-invariant keyword (`origin·identity·influence·tension·history`) classifying the KIND of link. New module-scope `CONNECT_TYPES` registry maps each kind → hue + lucide icon. Parser remains backward-compatible with legacy 2-part (`"relationship :: concept"`) and bare-concept cached cards.
+  - **Color + icon chips:** Each card now displays a leading icon chip (Landmark / Fingerprint / Sparkles / Swords / Clock) in its kind's hue (`origin`=#34d399 green, `identity`=#22d3ee cyan, `influence`=#a78bfa purple, `tension`=#fb923c warm amber, `history`=#fbbf24 yellow). `tension` edges use a dashed connector so opposition visually contrasts against the cool field. The type legend appears in the footer so the user understands the taxonomy.
+  - **Alive hub + edges:** Hub node now breathes (`animate-breathe`); each edge has a glowing type-colored synapse dot on the rail (`box-shadow: 0 0 8px ${glow}`, `hover:scale-150`). Explored edges light up in their type color (the "where you've been" trail).
+  - **RTL fix:** Whole block uses `dir={getTextDirection(selectedText)}` + logical Tailwind props (`border-s`/`ps-5`/`-start-*`/`text-start`/`ms-[6px]`) so the rail + arrows mirror for Hebrew and other RTL languages. Arrow icon swaps to `ArrowUpLeft` when `dir === 'rtl'`. Confirmed all logical utilities compiled into the bundle CSS.
+  - **Dead space:** First-visit hint line ("Tap a connection to explore the bridge") + inline type legend (`presentKinds` footer chips) fill the lower area.
+- Build + `npx cap sync ios` ✅; tsc + Vite clean; logical properties compile correctly. Not yet eyeballed on-device (needs a live Gemini call to populate cards with typed responses).
+
+### 139. Drift Map — scoped error boundary + data hardening (BUG FIX / RESILIENCE)
+- Intermittent WebKit-only crash on map open (`TypeError: null is not an object (evaluating 'O.current…')`) was hitting the APP-ROOT error boundary → full-page "Something went wrong / Refresh". Wrapped `<DriftKnowledgeGraph>` in a scoped `ErrorBoundary` (`fallback={null}`, `onError` closes the map) so a map failure can no longer take down the whole app — it auto-recovers and a re-tap remounts fresh. `ErrorBoundary` extended with optional `fallback`/`onError` and now logs the component stack via `componentDidCatch`.
+- Hardened render-phase node helpers (`nodeTopic`, `lastAiPreview`) against missing `chat.messages`.
+- Root cause not isolated from source (every map `.current` deref is guarded; not a hooks violation; did not repro in Playwright WebKit with real drifts). Next step if it recurs: read the component stack via Safari Web Inspector on-device.
+
+### 138. No redundant LLM calls when re-opening an explored term+lens (BUG FIX)
+- Re-opening an already-generated drift (header reopen pill, sibling switcher, "Drift into" chips, inline links, map) was re-firing a new generation because the entry point opened the drift without the saved content/`templateType`, so DriftPanel's auto-send wasn't suppressed.
+- Added centralized `resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages?)` in App.tsx — single source of truth returning `{ existingMessages, templateType, connectCards, connectAnswers }` from temp store + `connectCardsCache`/`connectAnswersCache` + the message's `driftInfos`. Wired into `reopenLastDrift`, `navigateToSiblingDrift`, and `handleStartDrift`'s open path; entry points reuse the existing `driftChatId` instead of minting a new one.
+- DriftPanel backstop: init effect now sets `autoSentRef.current = true` whenever restored messages OR connect cards OR connect answers exist → an explored combination can never re-fetch; first-time generation still fires once.
+
+### 137. Drift Map — "Open this drift" restores the real drift (BUG FIX)
+- Map `onOpenDrift` (App.tsx) reopened Connect-lens drifts blank (just the term) because it never passed `templateType: 'connect'` or cached `connectCards`/`connectAnswers`. Now resolves them (via the same caches + `driftInfos`) and restores the already-generated content — no new LLM call. Connect nodes pass `existingMessages: []` (prose would poison the JSON card parser).
+
+### 136. Connect — lens-switch "No connections found" fix (BUG FIX)
+- Term → Connect → Deep dive → Connect again showed "No connections found." The card-parse effect ran on a render where `driftOnlyMessages` still held the previous lens's PROSE answer, failed `JSON.parse`, and wiped the restored cards to `[]`. Now it only parses when the text looks like a JSON array (`startsWith('[')`) and never blanks existing cards on parse failure.
+
+### 135. Language matching — AI output follows the user's language (NEW, Gemini)
+- Added exported `LANGUAGE_DIRECTIVE` in `gemini.ts` instructing the model to write all output (responses, suggestions, questions, labels, JSON values) in the user's/source language (Hebrew→Hebrew, English→English…). Wired into `sendMessageToGemini`'s system instruction (covers main chat + every drift) and the four standalone helpers (`getSuggestedHighlights`, `getDriftSuggestions`, `getConnections`, `synthesizeDrifts`). Gemini-only by request (OpenRouter/Ollama untouched).
+
+### 134. Drift Map — informative node preview for Connect drifts (FIX)
+- The map only read `driftStore.getTempConversation`, so Connect-lens drifts (whose Q&A lives in `connectAnswersCache` / parent `driftInfos.connectAnswers`) showed "0 msgs" and a blank preview card. `getTempMessages` now falls back to the connect-answers cache and the parent message's `driftInfos.connectAnswers`, so the node gets real message count + an answer-snippet preview.
+- `DetailCard` title now uses `nodeTopic()` for drift nodes → shows the actual connection ("Juventus → Industrial Turin Identity") instead of the bare term.
+
+### 133. "Drift into" suggestion chips — polish (POLISH)
+- Label moved to its own line (uppercase section header) so wrapped chip rows align cleanly to the left (was inline with the first chip → ragged wrap).
+- Roomier even grid (`gap-2`), larger tap target, subtle shadow, clearer hover/active, and a per-chip `↗` (ArrowUpRight) affordance that brightens on hover. Long terms truncate via `max-w-full` + `truncate`.
+
+### 132. Drift Map — full-screen tap-to-preview explorer (REDESIGN)
+- Mobile map is now **full-screen** (`fixed inset-0`), not an 88dvh bottom-sheet drawer — removed drag handle, rounded top, and dimmed backdrop; header gets a safe-area top inset.
+- **Tap = preview, not jump:** tapping a node only selects + centers it (shows the detail card); navigation is a deliberate second step via the card's "Open this drift / Go to chat" button. Enter/Space still opens fully; arrow keys move + preview. EXPLORED chips also preview (select) instead of navigating away.
+- **Removed the All / This chat scope toggle** — the map is always scoped to the current conversation (`scope` fixed to `'chat'`; toggle + `conversationCount` removed).
+
+### 131. Drift Map — meaningful node labels (FIX)
+- Nodes previously all showed the bare selected term (e.g. three identical "Barcelona"). Added `nodeTopic()` (surfaces the Connect bridge target / first real question, falls back to the term) + a per-node `labelById` map that runs `disambiguateTopics` so siblings stay distinct.
+
+### 130. Drift synthesis — truncation fix (BUG FIX)
+- `synthesizeDrifts` ran `gemini-3.5-flash` (a thinking model) with `maxOutputTokens: 1000`; reasoning tokens consumed the budget and the synthesis cut off mid-sentence (stray unclosed `**`). Raised to 4096 so the ~350-word answer completes and closes its markdown.
+
+### 129. Synthesis message — polished card (POLISH)
+- Synthesis messages (`id` starts with `synth-`) now render in a `.synthesis-card`: violet gradient border, soft glow, gradient title — reads as a deliberate artifact, not a stray message.
+
+### 128. Horizontal text cutoff — app-wide fit fix (BUG FIX)
+- Chat content (incl. synthesis) overflowed the right edge / was cut off. Root cause: the main chat column was `flex-1` without `min-w-0`, letting content widen past the viewport. Added `min-w-0` to the main column, `overflow-x: hidden` + `max-width:100%` on `.chat-messages-container`, and `overflow-wrap: anywhere` / `word-break` on `.ai-message`/prose (with code blocks/tables getting their own scroll). Added `min-w-0` on the message bubble too.
+
+### 127. Connect — context-aware disambiguation (FIX)
+- Connect ignored conversation context: "Barcelona" in a Messi thread returned city-of-Barcelona connections (Gaudí, Modernisme…). Connect prompt now gets a hard "DISAMBIGUATE BY CONTEXT" instruction that forces the term to be read through the surrounding conversation (FC Barcelona the club, not the city). Removed a latent double-append of context for Connect.
+
+### 126. Term selection action bar — professional redesign (POLISH)
+- The iOS selection bar (Drift / Simplify / Deep dive / Connect / Save) was cramped ("Deep dive" wrapped to two lines) with a cyan/violet/blue rainbow. Replaced emoji with consistent Lucide icons (BookOpen / Telescope / Link2), switched templates to a calm uniform icon-over-label layout (no wrap), kept Drift as the single gradient primary, and unified colors/dividers/padding into one polished control. Desktop tooltip updated to icons too.
+
+### 125. Lens switcher — preserve Connect state across switches (FIX)
+- Cache connect cards + visited-bridge answers per thread-id (`connectCardsCache` + new `connectAnswersCache`). Switching back to a Connect view restores its map AND tapped-connection indicators. Connect targets start with clean messages so bridge prose can't poison the JSON card parser.
+
+### 124. Drift panel — "View as" lens switcher (NEW)
+- A "View as" strip in the panel header re-views the SAME term through any lens (Drift / Simplify / Deep dive / Connect) without returning to the chat. Fixes terms being locked to their first action. Each lens keeps its own in-session thread via a per-term registry (`lensRegistryRef`, baseKey `msgId::term` → template → driftChatId); the original chat-linked thread is preserved at its id. Hidden inside Connect's bridge sub-mode.
+
+### 123. Connect view → relationship map + bridge-maker (REDESIGN)
+- Connect is no longer "more suggestions" (which duplicated the drift screen). The term is a hub with labeled relationship edges to related concepts; tapping an edge opens a thread where the AI draws the bridge between the two. "Connect to anything…" input bridges to any typed concept.
+- Connect system prompt now returns `"<relationship> :: <concept>"` pairs (connectCards stays `string[]`; old bare-string cards still render). Bridge questions ride the existing `connectQuestion` flow (display + prompt). Removed dead `getConnections`/`connections` machinery.
+
+### 122. Connect view — forward-only "Drift ideas" list (REDESIGN, superseded by #123)
+- Removed both backward-looking sections ("You explored this before" + "How this relates to where you've been"). Connect is now purely about where to go next.
+- Merged "Directions you could drift" + "Explore from here" into ONE deduped list of tappable doorways (questions first, sharper angles below), each opening a focused thread, with `↗` → cyan visited-dot. Prior-drift context still feeds the AI prompt; it's just no longer shown as a block.
+- Removed now-unused imports/props (`Reveal`, `History`, `Compass`, `CornerUpLeft`, `onOpenRelatedDrift` destructure).
+
+### 121. Conversation forking (NEW)
+- Fork button (GitBranch) on AI messages → `handleForkChat`: creates a new sibling conversation carrying everything through that point (drift markers cleared), switches to it. `metadata.forkedFrom` / `forkedAtMessageId` link back. "What if I'd asked X instead?"
+
+### 120. Suggested next terms — "Drift into" chips (NEW)
+- Chip row under each AI answer from unexplored `suggestedHighlights` (already highlighted inline; now also explicit one-tap drift chips).
+
+### 119. Drift Map — keyboard navigation + filter box (NEW)
+- Arrow keys walk node→node spatially, Enter/Space opens, view re-centers on selection. Floating filter input dims non-matching nodes; Enter jumps to first match.
+
+### 118. Full-text search across all chats + drifts (NEW)
+- `SearchModal.tsx` command palette (⌘K): searches every message in every conversation/drift, ranked, keyboard-navigable, jumps + highlights. Header search button added.
+
+### 117. Drift synthesis — "bring it home" (NEW)
+- `synthesizeDrifts()` in gemini.ts weaves every descendant drift of a conversation into one markdown synthesis. Synthesize bar in the Drift Map (chat scope, ≥2 drifts) posts it back on the conversation and scrolls to it.
+
+### 116. Global "All explorations" map (NEW)
+- `DriftKnowledgeGraph` scope toggle **This chat / All**; "All" builds a synthetic super-root forest (`buildForest`) of every conversation. Node activation now keys off `isDrift` (drift→panel, chat→switch), not depth.
+
+### 115. Model-agnostic Add Model flow (REDESIGN)
+- `AddModelSheet` rebuilt provider-first: pick provider (Gemini / OpenRouter / Ollama / Demo) → connect (API key or server URL, validated) → choose model(s). OpenRouter & Ollama fetch live model lists (searchable) + accept custom IDs. Outputs generic `ModelPreset[]`. Aligned provider dot colors across picker/pill/settings.
+
+### 114. Always-visible breadcrumb in main header (NEW)
+- When the active chat is a drift, the header shows the full path `root › term › term` (was only inside the drift panel); each crumb taps to that chat and scrolls to the branch point.
+
+### 113. Lateral term-walking — sibling switcher (NEW)
+- Sibling strip under the drift-panel header: prev/next + scrollable pills of every term branched from the same parent; walk term→term in place, active pill auto-scrolls into view.
+
+### 112. Reopen-last-drift pill scoped to active chat (BUG FIX)
+- The header reopen pill leaked a stale drift from another conversation onto a fresh chat. Now gated on `lastDrift.parentChatId === activeChatId`.
+
+### 111. iOS bundle staleness resolved (INFRA)
+- Confirmed iOS loads bundled `dist/` (no live-reload server). Stale May 31 bundle was being rebuilt by Xcode; `npm run build && npx cap sync ios` now required after web changes. Build bumped to 35.
 
 ### 110. Drift Tree — card tap opens existing drift correctly on mobile (BUG FIX)
 - Replaced `handleStartDrift` (designed for new drifts) with a direct `driftStore.openDrift()` call when opening from tree card — bypasses the complex message-index-finding logic that was producing blank panels.
@@ -209,15 +350,19 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 32 in Xcode → upload to App Store Connect.
-- [ ] **AddModelSheet — OpenRouter & Ollama** — extend AddModelSheet with OpenRouter (fetches live model catalog) and Ollama (fetches /api/tags) paths.
+- [ ] **TestFlight submission** — archive build 44 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
+- [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.
+- [ ] **(Optional) Native Anthropic + Gemini** — if a native Anthropic key is wanted, wire `api.anthropic.com` directly (CORS ok with `anthropic-dangerous-direct-browser-access` header); would make OpenAI/Grok-via-OpenRouter a hybrid. Left as-is for now by request.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
-- [ ] **Conversation forking** — fork the entire main chat at any message point ("what if I'd asked X instead?"). Extends the Drift metaphor to the main thread.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
-- [ ] **Full-text search** — search across ALL message content in ALL chats (not just sidebar title filter).
-- [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF.
-- [ ] **Drift synthesis** — "Synthesize branches" button in Drift Map — merges all branch insights into one summary.
+- [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
+- [ ] **Security: Gemini key client-side** — key is bundled in the web build; move behind a proxy before any public release. (Deferred by request.)
 - [ ] **Real auth** — Supabase Auth or Firebase Auth (Login screen is currently a placeholder)
 - [ ] **Light theme color polish** — some hardcoded dark hex colors remain
-- [ ] **App.tsx refactor** — ~3000 lines, could extract more hooks
+- [ ] **App.tsx refactor** — ~3.9k lines, could extract more hooks
 - [ ] **Voice output** — TTS read-back of AI responses
+- [ ] **Cleanup** — `DriftMapPanel.tsx` is dead code (graph replaced it); `onOpenRelatedDrift` prop now unused in DriftPanel. Map scope toggle removed (#132) → `buildForest`/forest "All explorations" path is now dormant (scope fixed to `'chat'`); remove if the global map isn't coming back.
+
+## Completed this session (was pending)
+- ✅ AddModelSheet OpenRouter & Ollama · ✅ Conversation forking · ✅ Full-text search · ✅ Drift synthesis

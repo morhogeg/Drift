@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, Square, ArrowDown, ArrowUp, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Mic } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights } from './services/gemini'
+import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
 import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
 import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
+import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
@@ -20,10 +22,13 @@ import HeaderControls from './components/HeaderControls'
 import MultiModelCarousel from './components/MultiModelCarousel'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
+import SearchModal from './components/SearchModal'
 import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
+import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { haptics } from '@/lib/haptics'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -33,6 +38,7 @@ import { toast } from '@/hooks/useToast'
 import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
+import { SidebarChatRow, type SidebarRowKind } from '@/components/SidebarChatRow'
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -64,12 +70,18 @@ function App() {
   const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
+  // Drift just promoted to the main thread — drives a one-time settle-in arrival
+  // animation (cleared shortly after, so reloads/scroll don't re-animate it).
+  const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
+  const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevContinueTargetsRef = useRef<typeof modelStore.selectedTargets | null>(null)
 
   // Mobile carousel + model picker state
   const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
+  const [synthesizing, setSynthesizing] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -84,6 +96,13 @@ function App() {
   const [coachMarkActive, setCoachMarkActive] = useState(false)
   const coachMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── Last opened drift (for one-tap "reopen") ────────────────────────────────
+  // Remembers the most recently opened drift in this session so the user can
+  // jump back into their last branch from anywhere — they never lose their place.
+  const [lastDrift, setLastDrift] = useState<
+    { driftChatId: string; selectedText: string; parentChatId: string; sourceMessageId: string } | null
+  >(null)
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mainScrollPosition = useRef<number>(0)
@@ -91,6 +110,13 @@ function App() {
   const connectStateRef = useRef<{ question: string | null; cards: string[] | null }>({ question: null, cards: null })
   // Persists generated Connect chips per driftChatId so re-opening a Connect drift shows chips instantly
   const connectCardsCache = useRef<Map<string, string[]>>(new Map())
+  // Per-driftChatId cache of visited-bridge answers — survives lens switches so
+  // returning to a Connect view keeps its "you tapped this" indicators.
+  const connectAnswersCache = useRef<Map<string, Record<string, Message[]>>>(new Map())
+  // Per-term lens registry: baseKey ("msgId::term") → (template → driftChatId).
+  // Lets the in-panel "View as" switcher keep a separate thread per lens and
+  // return to the original one, without touching the inline-link / map model.
+  const lensRegistryRef = useRef<Map<string, Map<string, string>>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
@@ -116,6 +142,7 @@ function App() {
   const activeChatId = chatStore.activeChatId
   const isTyping = chatStore.isTyping
   const streamingResponse = chatStore.streamingResponse
+  const streamingMessageId = chatStore.streamingMessageId
   const message = chatStore.inputText
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
@@ -196,9 +223,25 @@ function App() {
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
-  // ── Swipe gesture: left → open sidebar, right → close sidebar ───────────────
+  // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
+  // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
+  // same gesture (open → immediately close). Guard the toggle so it can't flip
+  // more than once per gesture (~450ms), and always read the *latest* state via
+  // the store (never a stale closure value).
+  const graphToggleLockRef = useRef(0)
+  const toggleKnowledgeGraph = () => {
+    const now = Date.now()
+    if (now - graphToggleLockRef.current < 450) return
+    graphToggleLockRef.current = now
+    setKnowledgeGraphOpen(!useUIStore.getState().knowledgeGraphOpen)
+  }
+
+  // ── Swipe gesture: right → close sidebar only ──────────────────────────────
+  // Swipe-to-OPEN was removed: a horizontal drag in the chat to select text was
+  // being read as an open-sidebar swipe, hijacking the drift selection tooltip.
+  // The sidebar still opens via the header menu button; close keeps the swipe.
   const swipeHandlers = useSwipeGesture(
-    () => uiStore.setSidebarOpen(true),   // swipe left → open
+    undefined,                            // swipe left → (disabled — collided with text selection)
     () => uiStore.setSidebarOpen(false),  // swipe right → close
   )
   const galleryOpen = uiStore.galleryOpen
@@ -217,6 +260,312 @@ function App() {
 
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
+
+  // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
+  // Index every prior drift by its term (cheap; reads only what's persisted).
+  // Rebuilds when chat history changes — memoized so it's free on other renders.
+  const termIndex = useMemo(() => buildTermIndex(chatHistory), [chatHistory])
+
+  // Prior explorations of the term the user just marked — surfaced as the
+  // "you explored this before" moment in the drift panel.
+  const relatedDrifts = useMemo<TermOccurrence[]>(() => {
+    const term = driftContext?.selectedText
+    if (!driftOpen || !term) return []
+    return findRelatedDrifts(termIndex, term, driftContext?.driftChatId)
+  }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, termIndex])
+
+  // Navigate to a prior drift surfaced in the connection strip. Reuses the same
+  // path the inline drift links use, so persisted/temp conversations restore.
+  const handleOpenRelatedDrift = (occ: TermOccurrence) => {
+    const existing = chatHistory.find(c => c.id === occ.driftChatId)?.messages
+      ?? driftStore.getTempConversation(occ.driftChatId)
+      ?? undefined
+    handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
+  }
+
+  // ── Lateral term-walking: sibling drifts ──────────────────────────────────────
+  // The other terms that branch from the same parent as the open drift. Lets the
+  // user walk sideways term→term without returning to the map. Resolved from the
+  // parent's messages' driftInfos, in the order they were created.
+  interface SiblingDrift { selectedText: string; driftChatId: string; sourceMessageId: string; templateType?: DriftContext['templateType'] }
+  const siblingDrifts = useMemo<SiblingDrift[]>(() => {
+    if (!driftOpen || !driftContext?.driftChatId) return []
+    const ancestry = driftContext.ancestry ?? []
+    const parentEntry = ancestry[ancestry.length - 1]
+    const parentIsMain = !parentEntry || parentEntry.isMainChat
+    const parentId = parentIsMain ? activeChatId : parentEntry.driftChatId
+    const parentMessages = parentIsMain
+      ? (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      : (driftStore.getTempConversation(parentId!) ?? chatHistory.find(c => c.id === parentId)?.messages ?? [])
+    const out: SiblingDrift[] = []
+    const seen = new Set<string>()
+    for (const m of parentMessages) {
+      if (!m.driftInfos) continue
+      for (const d of m.driftInfos) {
+        if (seen.has(d.driftChatId)) continue
+        seen.add(d.driftChatId)
+        out.push({ selectedText: d.selectedText, driftChatId: d.driftChatId, sourceMessageId: m.id, templateType: d.templateType })
+      }
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driftOpen, driftContext?.driftChatId, driftContext?.ancestry, chatHistory, messages, activeChatId])
+
+  // Open a sibling drift in place. Siblings share this drift's ancestry-to-parent,
+  // so we reuse it verbatim and only swap the term/source/conversation.
+  const navigateToSiblingDrift = (sib: SiblingDrift) => {
+    if (sib.driftChatId === driftContext?.driftChatId) return
+    haptics.impact('light')
+    const ancestry = driftContext?.ancestry ?? [{
+      isMainChat: true,
+      label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
+      selectedText: '', sourceMessageId: '', contextMessages: [],
+    }]
+    const parentEntry = ancestry[ancestry.length - 1]
+    const parentIsMain = !parentEntry || parentEntry.isMainChat
+    const parentId = parentIsMain ? activeChatId : parentEntry.driftChatId
+    const parentMessages = parentIsMain
+      ? (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      : (driftStore.getTempConversation(parentId!) ?? chatHistory.find(c => c.id === parentId)?.messages ?? [])
+    const msgIdx = parentMessages.findIndex(m => m.id === sib.sourceMessageId)
+    // Restore cached content for the sibling so re-opening never re-fetches.
+    const restore = resolveDriftRestore(sib.driftChatId, sib.sourceMessageId, sib.selectedText, parentMessages)
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText: sib.selectedText,
+      sourceMessageId: sib.sourceMessageId,
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sib.sourceMessageId,
+      driftChatId: sib.driftChatId,
+      existingMessages: restore.existingMessages,
+      templateType: restore.templateType ?? sib.templateType,
+      connectCards: restore.connectCards,
+      connectAnswers: restore.connectAnswers,
+      ancestry,
+    })
+  }
+
+  // ── View-as lens switcher ─────────────────────────────────────────────────────
+  // Re-view the SAME term through a different lens (Drift / Simplify / Deep dive /
+  // Connect) without going back to the chat. Each lens keeps its own thread; the
+  // first lens (the one opened from chat) is preserved at its original id.
+  const handleSwitchLens = (template: DriftContext['templateType']) => {
+    const ctx = driftStore.driftContext
+    if (!ctx?.driftChatId || !ctx.selectedText) return
+
+    const baseKey = `${ctx.sourceMessageId}::${ctx.selectedText}`
+    let reg = lensRegistryRef.current.get(baseKey)
+    if (!reg) { reg = new Map(); lensRegistryRef.current.set(baseKey, reg) }
+
+    const curTpl = ctx.templateType ?? 'drift'
+    if (!reg.has(curTpl)) reg.set(curTpl, ctx.driftChatId)   // remember the current thread
+
+    const tgtTpl = template ?? 'drift'
+    if (tgtTpl === curTpl) return
+
+    let tgtId = reg.get(tgtTpl)
+    if (!tgtId) { tgtId = `${reg.get(curTpl)}__${tgtTpl}`; reg.set(tgtTpl, tgtId) }
+
+    // Restore the target thread's Connect state so its map + visited-bridge
+    // indicators come back exactly as the user left them.
+    const di = (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
+      .flatMap(m => m.driftInfos ?? [])
+      .find(d => d.driftChatId === tgtId)
+    const tgtCards = connectCardsCache.current.get(tgtId) ?? di?.connectCards
+    const tgtAnswers = connectAnswersCache.current.get(tgtId) ?? di?.connectAnswers
+
+    // For a Connect lens the chips view rebuilds from cached cards; passing the
+    // (prose) bridge conversation as messages would poison the JSON card parser,
+    // so start it clean and let initialConnectCards/Answers restore the map.
+    const existing = template === 'connect'
+      ? []
+      : (driftStore.getTempConversation(tgtId) ?? chatHistory.find(c => c.id === tgtId)?.messages ?? [])
+
+    haptics.impact('light')
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText: ctx.selectedText,
+      sourceMessageId: ctx.sourceMessageId,
+      contextMessages: ctx.contextMessages,
+      highlightMessageId: ctx.highlightMessageId,
+      driftChatId: tgtId,
+      existingMessages: existing,
+      templateType: template,
+      ancestry: ctx.ancestry,
+      connectCards: tgtCards?.length ? tgtCards : undefined,
+      connectAnswers: tgtAnswers && Object.keys(tgtAnswers).length ? tgtAnswers : undefined,
+    })
+  }
+
+  // ── Centralized drift restoration ─────────────────────────────────────────────
+  // Single source of truth for restoring an already-explored drift. Given a
+  // driftChatId (+ the source message / selected text it branched from), it
+  // resolves the cached content so re-opening from ANY entry point (reopen pill,
+  // sibling switcher, "Drift into" chips, inline links, map) restores with ZERO
+  // new network calls. Mirrors the map `onOpenDrift` fix and `handleSwitchLens`.
+  const resolveDriftRestore = (
+    driftChatId: string,
+    sourceMessageId?: string,
+    selectedText?: string,
+    parentMessages?: Message[],
+  ): {
+    existingMessages: Message[]
+    templateType: DriftContext['templateType']
+    connectCards?: string[]
+    connectAnswers?: Record<string, Message[]>
+  } => {
+    // Where to look for the drift's metadata (driftInfos): the explicit parent
+    // messages if provided, else the active chat, else all current messages.
+    const searchPools: Message[][] = [
+      parentMessages ?? [],
+      chatHistory.find(c => c.id === activeChatId)?.messages ?? messages,
+      messages,
+    ]
+
+    // Find the driftInfo entry for this id. Prefer the most specific match:
+    // the entry on the exact source message, then a (term + id) match anywhere,
+    // then any entry with this driftChatId.
+    let di: NonNullable<Message['driftInfos']>[number] | undefined
+    for (const pool of searchPools) {
+      const srcMsg = sourceMessageId ? pool.find(m => m.id === sourceMessageId) : undefined
+      di =
+        (srcMsg?.driftInfos?.find(d =>
+          d.driftChatId === driftChatId && (!selectedText || d.selectedText === selectedText))) ??
+        undefined
+      if (di) break
+      const infos = pool.flatMap(m => m.driftInfos ?? [])
+      di =
+        (selectedText
+          ? infos.find(d => d.driftChatId === driftChatId && d.selectedText === selectedText)
+          : undefined) ??
+        infos.find(d => d.driftChatId === driftChatId)
+      if (di) break
+    }
+
+    const connectCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+    const connectAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+    // Prefer the persisted templateType; infer Connect when cards/answers exist.
+    const templateType: DriftContext['templateType'] =
+      di?.templateType ??
+      ((connectCards?.length || (connectAnswers && Object.keys(connectAnswers).length))
+        ? 'connect'
+        : undefined)
+
+    // For Connect, existingMessages MUST be [] — the prose bridge conversation
+    // would poison the JSON card parser (same as handleSwitchLens / map fix).
+    const existingMessages: Message[] =
+      templateType === 'connect'
+        ? []
+        : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
+            ? chatHistory.find(c => c.id === driftChatId)!.messages
+            : null)
+          ?? driftStore.getTempConversation(driftChatId)
+          ?? [])
+
+    return {
+      existingMessages,
+      templateType,
+      connectCards: connectCards?.length ? connectCards : undefined,
+      connectAnswers: connectAnswers && Object.keys(connectAnswers).length ? connectAnswers : undefined,
+    }
+  }
+
+  // ── Drift synthesis: "bring it home" ──────────────────────────────────────────
+  // Weaves every descendant drift of a conversation into one cohesive synthesis,
+  // posted back as a message on that conversation. Closes the explore→return loop.
+  const handleSynthesize = async (rootId: string) => {
+    if (synthesizing) return
+    const rootChat = chatHistory.find(c => c.id === rootId)
+    if (!rootChat) { toast.error('Conversation not found'); return }
+
+    // Walk the whole drift subtree, gathering each branch's conversation.
+    const branches: { term: string; content: string }[] = []
+    const seen = new Set<string>()
+    const collect = (pid: string) => {
+      for (const c of chatHistory) {
+        if (seen.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
+        seen.add(c.id)
+        const msgs = c.messages?.length ? c.messages : (driftStore.getTempConversation(c.id) ?? [])
+        const content = msgs.map(m => `${m.isUser ? 'Q' : 'A'}: ${stripMarkdown(m.text)}`).join('\n').trim()
+        if (content) branches.push({ term: c.metadata?.selectedText || c.title, content })
+        collect(c.id)
+      }
+    }
+    collect(rootId)
+
+    if (branches.length < 2) { toast.info('Explore at least 2 drifts to synthesize them'); return }
+
+    const geminiPreset = (aiSettings.modelPresets || []).find(p => p.provider === 'gemini' && p.enabled)
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || geminiPreset?.apiKey || aiSettings.geminiApiKey
+    if (!apiKey) { toast.error('Add a Gemini key in Settings to synthesize'); return }
+
+    setSynthesizing(true)
+    haptics.impact('medium')
+    toast.info(`Synthesizing ${branches.length} drifts…`)
+    try {
+      const text = await synthesizeDrifts(rootChat.title, branches, apiKey)
+      if (!text) { toast.error('Synthesis failed — try again'); return }
+      const msg: Message = {
+        id: 'synth-' + Date.now(),
+        text: `## ✦ Synthesis · ${branches.length} drifts\n\n${text}`,
+        isUser: false,
+        timestamp: new Date(),
+      }
+      chatStore.addMessage(rootId, msg)
+      haptics.impact('heavy')
+      if (rootId !== activeChatId) switchChat(rootId)
+      setKnowledgeGraphOpen(false)
+      setTimeout(() => {
+        const el = document.querySelector(`[data-message-id="${msg.id}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          el.classList.add('highlight-message')
+          setTimeout(() => el.classList.remove('highlight-message'), 2200)
+        }
+      }, 280)
+      toast.success('Synthesis added to your chat')
+    } finally {
+      setSynthesizing(false)
+    }
+  }
+
+  // ── Conversation forking: "what if I'd asked X instead?" ──────────────────────
+  // Branches the timeline at a message into a new sibling conversation containing
+  // everything through that point, then switches there to continue differently.
+  const handleForkChat = (messageId: string) => {
+    const sourceChat = chatHistory.find(c => c.id === activeChatId)
+    const msgs = sourceChat?.messages?.length ? sourceChat.messages : messages
+    const idx = msgs.findIndex(m => m.id === messageId)
+    if (idx === -1) return
+    haptics.impact('medium')
+
+    // Carry everything up to and including this message; drop drift markers so the
+    // fork starts clean (its own drifts will be tracked independently).
+    const carried: Message[] = msgs.slice(0, idx + 1).map(m => ({
+      ...m,
+      hasDrift: false,
+      driftInfos: undefined,
+    }))
+    const forkId = 'fork-' + Date.now()
+    const baseTitle = sourceChat?.title && sourceChat.title !== 'New Chat' ? sourceChat.title : 'Conversation'
+    const last = carried[carried.length - 1]
+    const forkChat: ChatSession = {
+      id: forkId,
+      title: `Fork: ${baseTitle}`,
+      messages: carried,
+      lastMessage: last ? stripMarkdown(last.text).slice(0, 100) : 'Forked conversation',
+      createdAt: new Date(),
+      metadata: { forkedFrom: activeChatId, forkedAtMessageId: messageId },
+    }
+    chatStore.registerDriftSession(forkChat)
+    switchChat(forkId)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-message-id="${messageId}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 150)
+    toast.success('Forked — continue in a new direction')
+  }
 
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -289,6 +638,23 @@ function App() {
     return () => { unsubNav() }
   }, [])
 
+  // Bug 8: clickable AI terms (InlineListLink) open a drift on the tapped term.
+  // Route them through the SAME entry point as a text-selection drift so the
+  // drift is recorded in driftInfos + registered as a session — which is exactly
+  // what makes it appear as a node/edge (with lineage) in the Drift Map.
+  useEffect(() => {
+    const onStartFromTerm = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const term: string = (detail.term || '').trim()
+      const messageId: string = detail.messageId || ''
+      if (!term || !messageId) return
+      handleStartDrift(term, messageId)
+    }
+    window.addEventListener('drift:start-from-term', onStartFromTerm as EventListener)
+    return () => window.removeEventListener('drift:start-from-term', onStartFromTerm as EventListener)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Track active message id by viewport center ──────────────────────────────
   useEffect(() => {
     let ticking = false
@@ -319,6 +685,7 @@ function App() {
 
   // ── Inline list link processing ─────────────────────────────────────────────
   const processEntityText = (children: React.ReactNode, _messageId: string): React.ReactNode => {
+    const fromMessageId = _messageId
     let remaining = 5
 
     const renderString = (text: string): React.ReactNode => {
@@ -342,7 +709,7 @@ function App() {
       for (const u of used) {
         if (u.s > cursor) out.push(text.slice(cursor, u.s))
         if (u.list) {
-          out.push(<InlineListLink key={`list-${u.list.to}-${u.list.anchor}-${u.s}-${u.e}`} toMessageId={u.list.to} anchorId={u.list.anchor} surface={u.list.surface} />)
+          out.push(<InlineListLink key={`list-${u.list.to}-${u.list.anchor}-${u.s}-${u.e}`} toMessageId={u.list.to} fromMessageId={fromMessageId} anchorId={u.list.anchor} surface={u.list.surface} />)
         }
         cursor = u.e
       }
@@ -456,7 +823,12 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
         e.preventDefault()
-        setKnowledgeGraphOpen(!knowledgeGraphOpen)
+        toggleKnowledgeGraph()
+      }
+      // ⌘K / Ctrl-K — full-text search across all chats and drifts.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setSearchOpen(v => !v)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -698,6 +1070,9 @@ function App() {
         canvasId: canvasIdSnapshot
       }
 
+      // Sending a message has weight — a light, confident thunk.
+      haptics.impact('light')
+
       const updatedMessages = [...messages, newMessage]
       chatStore.setMessages(updatedMessages)
       if (activeCanvasId) setActiveCanvasId(null)
@@ -747,17 +1122,33 @@ function App() {
           }
           // append empty bubble — use getState() to avoid stale closure overwriting user message
           chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
-          await streamer(
-            apiMessages as any,
-            (chunk) => {
-              acc += chunk
-              chatStore.setStreaming(acc)
-              // patch the bubble in place
-              const current = useChatStore.getState().messages
-              chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
-            },
-            abortControllerRef.current?.signal
-          )
+          // Mark this bubble as the actively-streaming one (drives the live shimmer).
+          // For broadcast we let the first lane "own" the id — the shimmer is per-message.
+          chatStore.setStreamingMessageId(aiResponseId)
+          let firstToken = true
+          try {
+            await streamer(
+              apiMessages as any,
+              (chunk) => {
+                if (firstToken) {
+                  firstToken = false
+                  // A thought materializing — a light tick as the first token lands.
+                  haptics.selection()
+                }
+                acc += chunk
+                chatStore.setStreaming(acc)
+                // patch the bubble in place
+                const current = useChatStore.getState().messages
+                chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+              },
+              abortControllerRef.current?.signal
+            )
+          } finally {
+            // Stop shimmering this bubble (only if it's still the active one).
+            if (useChatStore.getState().streamingMessageId === aiResponseId) {
+              chatStore.setStreamingMessageId(null)
+            }
+          }
           // update lastMessage preview
           chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(acc).slice(0, 100) })
           return { id: aiResponseId, text: acc }
@@ -882,6 +1273,7 @@ function App() {
         chatStore.updateChat(activeChatId, { lastMessage: 'Connection error' })
       } finally {
         chatStore.setIsTyping(false)
+        chatStore.setStreamingMessageId(null)
         abortControllerRef.current = null
         if (!userHasScrolled.current) setTimeout(scrollToBottom, 100)
       }
@@ -894,6 +1286,7 @@ function App() {
       abortControllerRef.current = null
       chatStore.setIsTyping(false)
       chatStore.setStreaming('')
+      chatStore.setStreamingMessageId(null)
     }
   }
 
@@ -1019,6 +1412,12 @@ function App() {
 
   // ── Drift handlers ──────────────────────────────────────────────────────────
   const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[], restoredConnectCards?: string[], restoredConnectAnswers?: Record<string, Message[]>) => {
+    // Haptic weight communicates significance:
+    //  • branching deeper (panel already open → a new topic emerges) = the
+    //    defining gesture, a heavy "you went somewhere" thunk.
+    //  • opening a fresh space from the main thread = a medium "occasion."
+    haptics.impact(driftStore.driftOpen ? 'heavy' : 'medium')
+
     const chatContainer = document.querySelector('.chat-messages-container')
     if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
 
@@ -1180,14 +1579,27 @@ function App() {
     const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
       ?? currentMessages.flatMap(m => m.driftInfos ?? []).find(d => d.selectedText === selectedText)
     const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-    const existingMessagesToUse = (reconstructedMessages?.length ? reconstructedMessages : null)
-      ?? driftStore.getTempConversation(finalDriftChatId)
-      ?? []
+
+    // Resolve cached content + the effective lens for an ALREADY-explored drift.
+    // Caller-supplied values (explicit param / restored cards/answers) win; the
+    // resolver fills the gaps (e.g. an inline link that omits templateType for a
+    // term first explored as Connect) so we never re-fetch an explored combo.
+    const restore = resolveDriftRestore(finalDriftChatId, finalSourceMessageId, selectedText, currentMessages)
+    const effectiveTemplateType = templateType ?? existingDrift?.templateType ?? restore.templateType
 
     const cachedConnectCards = restoredConnectCards
       ?? connectCardsCache.current.get(finalDriftChatId)
+      ?? restore.connectCards
     const cachedConnectAnswers = restoredConnectAnswers
-      ?? (existingDrift?.connectAnswers)
+      ?? existingDrift?.connectAnswers
+      ?? restore.connectAnswers
+
+    // For Connect, existingMessages MUST be [] (prose poisons the card parser).
+    const existingMessagesToUse: Message[] = effectiveTemplateType === 'connect'
+      ? []
+      : ((reconstructedMessages?.length ? reconstructedMessages : null)
+        ?? driftStore.getTempConversation(finalDriftChatId)
+        ?? [])
 
     driftStore.openDrift({
       selectedText,
@@ -1196,7 +1608,7 @@ function App() {
       highlightMessageId: actualMessage?.id,
       driftChatId: finalDriftChatId,
       existingMessages: existingMessagesToUse,
-      templateType,
+      templateType: effectiveTemplateType,
       initialSuggestions,
       connectCards: cachedConnectCards?.length ? cachedConnectCards : undefined,
       connectAnswers: cachedConnectAnswers && Object.keys(cachedConnectAnswers).length > 0 ? cachedConnectAnswers : undefined,
@@ -1213,6 +1625,18 @@ function App() {
   const handleCloseDrift = (driftMessages?: Message[]) => {
     // Read context before closing (driftContext is stable until next openDrift)
     const { selectedText, sourceMessageId, driftChatId, ancestry } = driftStore.driftContext
+
+    // Remember this drift so the user can reopen it in one tap from the header —
+    // only worth offering if there's an actual conversation to return to.
+    if (driftChatId && selectedText && driftMessages && driftMessages.length > 0) {
+      const rootEntry = ancestry?.[0]
+      setLastDrift({
+        driftChatId,
+        selectedText,
+        parentChatId: rootEntry?.isMainChat ? activeChatId : (ancestry?.find(e => e.driftChatId)?.driftChatId ?? activeChatId),
+        sourceMessageId: sourceMessageId ?? '',
+      })
+    }
 
     driftStore.closeDrift(driftMessages)
 
@@ -1245,6 +1669,46 @@ function App() {
       const chatContainer = document.querySelector('.chat-messages-container')
       if (chatContainer) chatContainer.scrollTop = mainScrollPosition.current
     }, 150)
+  }
+
+  // ── Reopen last drift ─────────────────────────────────────────────────────────
+  // One tap returns the user to the branch they most recently left, switching to
+  // its parent chat first if needed. Never make them hunt for where they were.
+  const reopenLastDrift = () => {
+    if (!lastDrift) return
+    haptics.impact('medium')
+    const { driftChatId, selectedText, parentChatId, sourceMessageId } = lastDrift
+
+    if (parentChatId && parentChatId !== activeChatId) {
+      switchChat(parentChatId)
+    }
+
+    const parentMessages = chatHistory.find(c => c.id === parentChatId)?.messages ?? messages
+    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
+
+    // Restore cached content (regular messages OR Connect cards/answers + the
+    // correct templateType) so the panel never re-fetches an explored drift.
+    const restore = resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages)
+
+    connectStateRef.current = { question: null, cards: null }
+    driftStore.openDrift({
+      selectedText,
+      sourceMessageId,
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sourceMessageId || undefined,
+      driftChatId,
+      existingMessages: restore.existingMessages,
+      templateType: restore.templateType,
+      connectCards: restore.connectCards,
+      connectAnswers: restore.connectAnswers,
+      ancestry: [{
+        isMainChat: true,
+        label: chatHistory.find(c => c.id === parentChatId)?.title || 'Chat',
+        selectedText: '',
+        sourceMessageId: '',
+        contextMessages: [],
+      }],
+    })
   }
 
   // ── Breadcrumb navigation ────────────────────────────────────────────────────
@@ -1527,6 +1991,18 @@ function App() {
       messages: forceRefreshMessages,
       lastMessage: stripMarkdown(lastDriftMessage?.text || 'Drift pushed')
     })
+
+    // Promoting an idea: this is a deliberate, satisfying gesture — a discovery
+    // moving into the more permanent main thread. Confirm it physically + visibly.
+    // (Undo stays available via the panel's push button toggle.)
+    haptics.success()
+    const promoteLabel = selectedText.length > 28 ? selectedText.slice(0, 28) + '…' : selectedText
+    toast.success(`Promoted "${promoteLabel}" to the main thread`)
+
+    // Trigger a one-time settle-in arrival for the freshly-promoted messages.
+    setJustPromotedChatId(actualDriftChatId)
+    if (justPromotedTimerRef.current) clearTimeout(justPromotedTimerRef.current)
+    justPromotedTimerRef.current = setTimeout(() => setJustPromotedChatId(null), 1200)
   }
 
   // ── Context menu handlers ───────────────────────────────────────────────────
@@ -1712,6 +2188,82 @@ function App() {
     return b.createdAt.getTime() - a.createdAt.getTime()
   })
 
+  // ── Group drifts under their origin chat for a differentiated sidebar ────────
+  // The Chat model links a drift to its source via `metadata.isDrift` +
+  // `metadata.parentChatId` (which may point at another drift) + `metadata.selectedText`.
+  // We resolve each drift up to its ROOT chat so nested drift-of-drift still slots
+  // under the conversation it ultimately came from.
+  const sidebarGroups = useMemo(() => {
+    const byId = new Map(chatHistory.map((c) => [c.id, c]))
+
+    const kindOf = (c: ChatSession): SidebarRowKind => {
+      if (c.metadata?.isDrift) return 'drift'
+      // Synthesis = a chat whose latest message is a woven "bring it home" synthesis.
+      if (c.lastMessage && /✦\s*Synthesis/i.test(c.lastMessage)) return 'synthesis'
+      return 'chat'
+    }
+
+    // Walk parent links until we hit a non-drift chat (the root conversation).
+    const rootOf = (c: ChatSession): string => {
+      let cur: ChatSession | undefined = c
+      const seen = new Set<string>()
+      while (cur && cur.metadata?.isDrift && cur.metadata.parentChatId && !seen.has(cur.id)) {
+        seen.add(cur.id)
+        const parent = byId.get(cur.metadata.parentChatId)
+        if (!parent) break
+        cur = parent
+      }
+      return cur?.id ?? c.id
+    }
+
+    // Build groups keyed by root chat id, preserving the sorted top-level order.
+    const groupOrder: string[] = []
+    const drifts = new Map<string, ChatSession[]>()
+    const orphanDrifts: ChatSession[] = []
+
+    for (const c of sortedChats) {
+      if (kindOf(c) === 'drift') {
+        const root = rootOf(c)
+        if (root === c.id || !byId.has(root)) {
+          // Could not resolve a real parent — show it as a standalone row.
+          orphanDrifts.push(c)
+        } else {
+          if (!drifts.has(root)) drifts.set(root, [])
+          drifts.get(root)!.push(c)
+        }
+      } else {
+        if (!groupOrder.includes(c.id)) groupOrder.push(c.id)
+      }
+    }
+
+    const rows: Array<{
+      chat: ChatSession
+      kind: SidebarRowKind
+      nested: boolean
+      originTitle?: string
+    }> = []
+
+    for (const rootId of groupOrder) {
+      const parent = byId.get(rootId)!
+      rows.push({ chat: parent, kind: kindOf(parent), nested: false })
+      // Drifts that branch off this conversation, newest first.
+      const children = (drifts.get(rootId) ?? []).sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      )
+      for (const d of children) {
+        rows.push({ chat: d, kind: 'drift', nested: true, originTitle: parent.title })
+      }
+    }
+
+    // Drifts whose parent isn't in the visible list (e.g. filtered out by search).
+    for (const d of orphanDrifts) {
+      const parent = d.metadata?.parentChatId ? byId.get(d.metadata.parentChatId) : undefined
+      rows.push({ chat: d, kind: 'drift', nested: false, originTitle: parent?.title })
+    }
+
+    return rows
+  }, [sortedChats, chatHistory])
+
   // ── Show login if not authenticated ────────────────────────────────────────
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />
@@ -1782,68 +2334,53 @@ function App() {
           </button>
         </div>
 
-        {/* Chat List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-dark-border/30">
-          {sortedChats.map((chat) => (
+        {/* New chat — visible affordance (was keyboard-only, ⌘⌥N) */}
+        <div className="px-2 pt-2 pb-1.5">
+          <Pressable
+            onClick={() => { createNewChat(); uiStore.setSidebarOpen(false) }}
+            haptic="light"
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl
+                       border border-accent-violet/25 bg-gradient-to-r from-accent-pink/[0.08] to-accent-violet/[0.08]
+                       hover:from-accent-pink/[0.14] hover:to-accent-violet/[0.14] hover:border-accent-violet/40
+                       transition-all duration-150 group"
+          >
+            <Plus className="w-4 h-4 text-accent-violet group-hover:text-accent-pink transition-colors shrink-0" />
+            <span className="text-[13px] font-medium text-text-primary">New chat</span>
+            <span className="ml-auto text-[10px] text-text-muted/70 font-mono hidden lg:inline">⌘⌥N</span>
+          </Pressable>
+        </div>
+
+        {/* Chat List — grouped: chats, with their drifts nested beneath, plus synthesis rows */}
+        <div className="flex-1 overflow-y-auto">
+          {sidebarGroups.map((row) => (
             <div
-              key={chat.id}
-              onClick={() => { switchChat(chat.id); uiStore.setSidebarOpen(false) }}
-              onContextMenu={(e) => handleContextMenu(e, chat.id)}
-              className={`
-                group relative px-3 py-2.5 cursor-pointer
-                transition-all duration-100 ease-in-out
-                ${activeChatId === chat.id
-                  ? 'bg-dark-elevated/60'
-                  : 'hover:bg-dark-elevated/40'
-                }
-              `}
+              key={row.chat.id}
+              className={
+                // Hairline separator only above top-level rows, so a chat and its
+                // nested drifts read as one connected cluster.
+                !row.nested ? 'border-t border-dark-border/20 first:border-t-0' : ''
+              }
             >
-              {/* Pin indicator */}
-              {pinnedChats.has(chat.id) && (
-                <Pin className="absolute top-2 right-2 w-3 h-3 text-cyan-400 fill-cyan-400" />
-              )}
-
-              {/* Star indicator */}
-              {starredChats.has(chat.id) && (
-                <Star className="absolute top-2 right-7 w-3 h-3 text-yellow-400 fill-yellow-400" />
-              )}
-
-              <div className="flex items-start gap-0">
-                <div className="flex-1 min-w-0">
-                  {editingChatId === chat.id ? (
-                    <input
-                      type="text"
-                      value={editingTitle}
-                      onChange={(e) => uiStore.setEditingTitle(e.target.value)}
-                      onBlur={handleSaveRename}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveRename()
-                        if (e.key === 'Escape') {
-                          uiStore.setEditingChatId(null)
-                          uiStore.setEditingTitle('')
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-dark-bg/50 text-text-primary text-sm font-medium
-                               rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-accent-violet"
-                      autoFocus
-                    />
-                  ) : (
-                    <h3
-                      className={`text-[13px] font-medium text-text-primary ${getRTLClassName(chat.title)}`}
-                      dir={getTextDirection(chat.title)}
-                    >
-                      {chat.title}
-                    </h3>
-                  )}
-                  <p
-                    className={`text-[11px] text-text-muted truncate mt-0.5 ${getRTLClassName(chat.lastMessage || '')}`}
-                    dir={getTextDirection(chat.lastMessage || '')}
-                  >
-                    {chat.lastMessage ? stripMarkdown(chat.lastMessage) : ''}
-                  </p>
-                </div>
-              </div>
+              <SidebarChatRow
+                chat={row.chat}
+                kind={row.kind}
+                nested={row.nested}
+                originTitle={row.originTitle}
+                isActive={activeChatId === row.chat.id}
+                isPinned={pinnedChats.has(row.chat.id)}
+                isStarred={starredChats.has(row.chat.id)}
+                isEditing={editingChatId === row.chat.id}
+                editingTitle={editingTitle}
+                stripMarkdown={stripMarkdown}
+                onOpen={() => { switchChat(row.chat.id); uiStore.setSidebarOpen(false) }}
+                onContextMenu={(e) => handleContextMenu(e, row.chat.id)}
+                onEditTitleChange={(v) => uiStore.setEditingTitle(v)}
+                onSaveRename={handleSaveRename}
+                onCancelRename={() => {
+                  uiStore.setEditingChatId(null)
+                  uiStore.setEditingTitle('')
+                }}
+              />
             </div>
           ))}
         </div>
@@ -1907,7 +2444,7 @@ function App() {
       {/* Main Chat Area */}
       <div
         className={`
-          flex-1 flex flex-col relative
+          flex-1 min-w-0 flex flex-col relative
           transition-all duration-150 ease-in-out
           ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
           ${(driftOpen || knowledgeGraphOpen) ? 'lg:mr-[480px]' : 'mr-0'}
@@ -1917,8 +2454,8 @@ function App() {
       >
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
-          <div className="px-2 py-0.5 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="px-2 py-0.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-4 min-w-0 flex-1">
               {!sidebarOpen ? (
                 <>
                   <button
@@ -1934,11 +2471,20 @@ function App() {
                 <div className="w-[36px]" />
               )}
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                {/* Search — across every conversation and drift */}
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group shrink-0"
+                  title="Search (⌘K)"
+                >
+                  <Search className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
+                </button>
+
                 {/* Snippet Gallery Button — hidden on mobile */}
                 <button
                   onClick={() => uiStore.setGalleryOpen(true)}
-                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative"
+                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group relative shrink-0"
                   title="Snippet Gallery"
                 >
                   <Bookmark className="w-5 h-5 text-text-muted group-hover:text-cyan-400 transition-colors duration-75" />
@@ -1948,22 +2494,139 @@ function App() {
                     </span>
                   )}
                 </button>
+
+                {/* Current-chat context — always shows where you are. For a drift
+                    chat it renders the full path (root › term › term) so "where am
+                    I / how do I get back up" is visible and one tap from anywhere. */}
+                {(() => {
+                  const currentChat = chatHistory.find(c => c.id === activeChatId)
+                  const title = currentChat?.title?.trim()
+                  if (!title || messages.length === 0) return null
+
+                  // Walk up parentChatId to build the trail from root → here.
+                  const chain: { id: string; label: string; isDrift: boolean; sourceMessageId?: string }[] = []
+                  const guard = new Set<string>()
+                  let cur: typeof currentChat | undefined = currentChat
+                  while (cur && !guard.has(cur.id)) {
+                    guard.add(cur.id)
+                    const isDrift = !!cur.metadata?.isDrift
+                    chain.unshift({
+                      id: cur.id,
+                      label: (isDrift ? (cur.metadata?.selectedText || cur.title) : cur.title)?.trim() || 'Chat',
+                      isDrift,
+                      sourceMessageId: cur.metadata?.sourceMessageId,
+                    })
+                    const pid = cur.metadata?.parentChatId
+                    cur = pid ? chatHistory.find(c => c.id === pid) : undefined
+                  }
+
+                  // Plain root chat — keep the simple single-title affordance.
+                  if (chain.length <= 1) {
+                    const isDriftChat = !!currentChat?.metadata?.isDrift
+                    return (
+                      <button
+                        onClick={() => uiStore.setSidebarOpen(true)}
+                        className="flex items-center gap-1.5 min-w-0 px-1.5 py-1 rounded-lg hover:bg-dark-elevated/60 transition-colors duration-75 group"
+                        title={isDriftChat ? `Drift · ${title}` : title}
+                      >
+                        {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
+                        <span
+                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
+                          dir={getTextDirection(title)}
+                        >
+                          {title}
+                        </span>
+                      </button>
+                    )
+                  }
+
+                  // Drift chat — full breadcrumb. Tapping an ancestor switches to it
+                  // and scrolls to the message the child branched from.
+                  const goToCrumb = (crumb: typeof chain[number], childSourceMessageId?: string) => {
+                    haptics.selection()
+                    switchChat(crumb.id)
+                    if (childSourceMessageId) {
+                      setTimeout(() => {
+                        const el = document.querySelector(`[data-message-id="${childSourceMessageId}"]`)
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          el.classList.add('highlight-message')
+                          setTimeout(() => el.classList.remove('highlight-message'), 2000)
+                        }
+                      }, 150)
+                    }
+                  }
+                  return (
+                    <div
+                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[52vw] lg:max-w-[420px] [&::-webkit-scrollbar]:hidden"
+                      style={{ scrollbarWidth: 'none' }}
+                    >
+                      {chain.map((crumb, i) => {
+                        const isLast = i === chain.length - 1
+                        const childSrc = chain[i + 1]?.sourceMessageId
+                        return (
+                          <span key={crumb.id} className="flex items-center gap-0 shrink-0">
+                            <button
+                              onClick={() => isLast ? uiStore.setSidebarOpen(true) : goToCrumb(crumb, childSrc)}
+                              className={`flex items-center gap-1 px-1 py-1 rounded-md hover:bg-dark-elevated/60 transition-colors duration-75
+                                ${isLast
+                                  ? (crumb.isDrift ? 'text-accent-violet/90' : 'text-text-secondary')
+                                  : 'text-text-muted hover:text-text-secondary'}`}
+                              title={crumb.label}
+                            >
+                              {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
+                              {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
+                              <span
+                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLClassName(crumb.label)}`}
+                                dir={getTextDirection(crumb.label)}
+                              >
+                                {crumb.label}
+                              </span>
+                            </button>
+                            {!isLast && <ChevronRight className="w-3 h-3 text-text-muted/40 shrink-0" />}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Drift Tree Button — shown when current chat has drifts */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Reopen last drift — one tap back to the branch you just left.
+                  Hidden while the panel/tree is open (you're already there), and
+                  only shown for a drift that belongs to the chat you're viewing —
+                  otherwise a stale branch from another conversation leaks in. */}
+              {lastDrift && lastDrift.parentChatId === activeChatId && !driftOpen && !knowledgeGraphOpen && (
+                <Pressable
+                  onClick={reopenLastDrift}
+                  haptic={null}
+                  title={`Reopen drift · "${lastDrift.selectedText}"`}
+                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full
+                             border border-accent-violet/25 bg-accent-violet/[0.07]
+                             text-accent-violet/85 hover:text-accent-violet hover:bg-accent-violet/[0.12]
+                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[34vw] sm:max-w-[200px]"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[12px] font-medium truncate">{lastDrift.selectedText}</span>
+                </Pressable>
+              )}
+
+              {/* Drift Tree Button — first-class control whenever the thread has
+                  branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
-                <button
-                  onClick={() => setKnowledgeGraphOpen(!knowledgeGraphOpen)}
-                  title="Drift Tree (⌘⌥G)"
-                  className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center gap-1.5 rounded-lg transition-all duration-75 relative
+                <Pressable
+                  onClick={() => { haptics.selection(); toggleKnowledgeGraph() }}
+                  haptic={null}
+                  title="Drift Map (⌘⌥G)"
+                  className={`h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition-all duration-150 relative
                     ${knowledgeGraphOpen
-                      ? 'text-accent-violet bg-accent-violet/10'
-                      : 'text-text-muted hover:text-accent-violet hover:bg-accent-violet/5'
+                      ? 'text-accent-violet bg-accent-violet/[0.12] border border-accent-violet/40'
+                      : 'text-text-secondary border border-accent-violet/25 bg-accent-violet/[0.06] hover:text-accent-violet hover:bg-accent-violet/[0.12] hover:border-accent-violet/40'
                     }`}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                     <defs>
                       <linearGradient id="drift-icon-g" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                         <stop stopColor="#ff006e"/>
@@ -1976,10 +2639,11 @@ function App() {
                     <path d="M4 6.5v5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
                     <path d="M6.5 4h5a2 2 0 0 1 2 2v5.5" stroke={knowledgeGraphOpen ? 'url(#drift-icon-g)' : 'currentColor'} strokeWidth="1.5"/>
                   </svg>
-                  <span className="absolute -top-0.5 -right-0.5 text-[9px] font-bold bg-accent-violet text-white rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1 leading-none">
+                  <span className="text-[12px] font-medium leading-none">Map</span>
+                  <span className={`text-[11px] font-semibold leading-none tabular-nums ${knowledgeGraphOpen ? 'text-accent-violet' : 'text-accent-violet/80'}`}>
                     {totalDriftCount}
                   </span>
-                </button>
+                </Pressable>
               )}
               {/* New Chat Button */}
               <button
@@ -2086,11 +2750,13 @@ function App() {
                           }, 150)
                         }
                       }}
-                      className="flex items-center gap-0.5 text-[11px] text-text-muted/45
-                               hover:text-accent-violet/80 transition-colors duration-150 shrink-0 leading-none"
+                      className="flex items-center gap-0.5 text-[11px] font-medium text-accent-violet/70
+                               hover:text-accent-violet rounded-full px-2 py-1 hover:bg-accent-violet/[0.08]
+                               transition-colors duration-150 shrink-0 leading-none"
+                      title="Back to the source conversation"
                     >
                       <ChevronLeft className="w-3 h-3" />
-                      back
+                      Back
                     </button>
                   </div>
                 )
@@ -2114,7 +2780,14 @@ function App() {
                       <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
                     </svg>
                     <h2 className="text-text-primary font-semibold text-[22px] leading-snug mb-2">What's on your mind?</h2>
-                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[260px] mx-auto">Ask anything. Highlight any response to <span className="text-accent-violet">drift</span> into a focused side chat.</p>
+                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
+                  </div>
+                  {/* Concept cue — teaches the core gesture without a tutorial wall. */}
+                  <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] mt-1">
+                    <MousePointerClick className="w-4 h-4 text-accent-violet/70 shrink-0" />
+                    <p className="text-text-muted text-[13px] leading-snug">
+                      Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
+                    </p>
                   </div>
                 </div>
               )}
@@ -2136,6 +2809,7 @@ function App() {
                   (prevMsg?.isDriftPush && !prevMsg?.text.startsWith('📌') && !prevMsg?.isHiddenContext)
                 )
                 const isPlainAI = !msg.isUser && !isDriftMessage
+                const isSynthesis = isPlainAI && msg.id.startsWith('synth-')
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
@@ -2276,7 +2950,8 @@ function App() {
 
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
+                    data-drift-promoted={isDriftMessage ? 'true' : undefined}
                     key={msg.id}
                   >
                     {/* Drift group header */}
@@ -2321,14 +2996,19 @@ function App() {
                             : msg.isUser ? 'justify-end' : 'justify-start'
                         } animate-fade-up relative group
                                     ${isDriftMessage && hasMultipleDriftMessages && !isLastDriftMessage ? 'mb-2' : ''}`}
-                        style={{ animationDelay: `${index * 50}ms` }}
+                        /* Gentle cascade on load; capped so a new message in a long
+                           thread still appears promptly rather than waiting out a
+                           per-index delay. */
+                        style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
                       >
                         <div
                           className={`
-                            ${(isPlainAI || isDriftMessage || isSinglePushMessage)
+                            ${isSynthesis
+                              ? 'synthesis-card w-full'
+                              : (isPlainAI || isDriftMessage || isSinglePushMessage)
                               ? 'w-full py-2'
                               : `max-w-[80%] rounded-2xl px-5 ${!msg.isUser && msg.modelTag ? 'pt-7 pb-3' : 'py-3'}`
-                            } relative
+                            } min-w-0 relative
                             ${(isPlainAI || isDriftMessage || isSinglePushMessage)
                               ? `ai-message text-text-secondary${(isDriftMessage || isSinglePushMessage) ? ' cursor-pointer' : ''}`
                               : msg.isUser
@@ -2565,7 +3245,7 @@ function App() {
                             </p>
                           ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
                             <div
-                              className={`text-[13px] leading-6 ${getRTLClassName(msg.text)}`}
+                              className={`text-[13px] leading-6 ${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
@@ -2670,7 +3350,7 @@ function App() {
                             </div>
                           ) : (
                             <div
-                              className={`${getRTLClassName(msg.text)}`}
+                              className={`${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
                             >
                               <ReactMarkdown
@@ -2719,6 +3399,41 @@ function App() {
                             </div>
                           )}
 
+                          {/* Drift-into chips — AI-suggested next terms worth exploring.
+                              Surfaces the unexplored highlights as one-tap branches so
+                              "where do I go next" is explicit, not just inline. */}
+                          {!msg.isUser && (() => {
+                            const explored = new Set((msg.driftInfos ?? []).map(d => d.selectedText))
+                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 4)
+                            if (nextTerms.length === 0) return null
+                            return (
+                              <div className="mt-3.5">
+                                <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
+                                  <GitBranch className="w-3 h-3" />
+                                  Drift into
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {nextTerms.map((term) => (
+                                    <button
+                                      key={term}
+                                      onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
+                                      className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                        text-[12.5px] font-medium leading-none text-accent-violet/90
+                                        border border-accent-violet/25 bg-accent-violet/[0.07]
+                                        shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                        hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                        active:scale-[0.97] transition-all duration-150"
+                                      title={`Drift into "${term}"`}
+                                    >
+                                      <span className="truncate">{term}</span>
+                                      <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })()}
+
                           {/* Bottom action row — Gemini-style */}
                           {!msg.isUser && (
                             <div className={`flex items-center gap-0.5 mt-2 ${!isPlainAI ? 'pt-1.5 border-t border-dark-border/20' : ''}`}>
@@ -2740,6 +3455,16 @@ function App() {
                               >
                                 <Bookmark className={`w-4 h-4 ${savedMessageIds.has(msg.id) ? 'fill-cyan-400' : ''}`} />
                               </button>
+                              {isPlainAI && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleForkChat(msg.id) }}
+                                  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleForkChat(msg.id) }}
+                                  className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-text-muted hover:text-accent-violet hover:bg-dark-elevated/60 active:bg-dark-elevated transition-colors"
+                                  title="Fork conversation from here — explore a different path"
+                                >
+                                  <GitBranch className="w-4 h-4" />
+                                </button>
+                              )}
                               {msg.isDriftPush && !msg.text.startsWith('📌') && msg.driftPushMetadata?.wasSavedAsChat !== true && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSavePushedDriftAsChat(msg) }}
@@ -2762,7 +3487,8 @@ function App() {
               {isTyping && !streamingResponse && !messages.some(m => !m.isUser && (!m.text || m.text.length === 0)) && (
                 <div className="max-w-5xl mx-auto px-5">
                   <div className="flex justify-start animate-fade-up py-2">
-                    <div className="flex gap-1.5 items-center px-1">
+                    {/* Thinking — the dots breathe (container) while each dot bounces */}
+                    <div className="flex gap-1.5 items-center px-1 animate-breathe">
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <span className="w-1.5 h-1.5 bg-text-muted/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -2790,7 +3516,7 @@ function App() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-violet" />
               </span>
               <span className="text-sm text-text-primary">
-                Select any text to <span className="text-accent-violet font-medium">drift</span> →
+                Highlight anything that sparks a question to <span className="text-accent-violet font-medium">drift</span>
               </span>
               <button
                 onClick={dismissCoachMark}
@@ -2999,10 +3725,11 @@ function App() {
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1 && targets[0].provider !== 'dummy') return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini' | 'dummy'
           if (targets.some(t => t.provider === 'gemini')) return 'gemini'
           if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
           if (targets.some(t => t.provider === 'ollama')) return 'ollama'
+          if (targets.some(t => t.provider === 'dummy')) return 'dummy'
           return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
@@ -3042,6 +3769,9 @@ function App() {
         onConnectAnswerSaved={(question, answerMessages) => {
           if (!driftContext?.driftChatId) return
           const driftId = driftContext.driftChatId
+          // Cache by id (works for original + composite lens threads alike).
+          const prevCache = connectAnswersCache.current.get(driftId) ?? {}
+          connectAnswersCache.current.set(driftId, { ...prevCache, [question]: answerMessages })
           const currentChat = chatHistory.find(c => c.id === activeChatId)
           const currentMsgs = currentChat?.messages ?? messages
           const updated = currentMsgs.map(msg => {
@@ -3063,6 +3793,12 @@ function App() {
           }
         }}
         onStartDrift={(text, msgId, suggestions) => handleStartDrift(text, msgId, undefined, undefined, undefined, suggestions)}
+        relatedDrifts={relatedDrifts}
+        onOpenRelatedDrift={handleOpenRelatedDrift}
+        siblingDrifts={siblingDrifts}
+        currentDriftChatId={driftContext?.driftChatId}
+        onNavigateToSibling={navigateToSiblingDrift}
+        onSwitchLens={handleSwitchLens}
       />
 
       {/* Settings Modal */}
@@ -3117,6 +3853,12 @@ function App() {
 
       {/* Knowledge Graph */}
       {knowledgeGraphOpen && (
+        // Bug 2: do NOT auto-close on a render error. The boundary is remounted
+        // every time the panel opens, so an onError→close turned any transient
+        // render throw into an "opens then immediately closes" loop. Containing
+        // the error in place (empty fallback) keeps a single tap stable and makes
+        // a real failure visible/diagnosable instead of silently yanking the map.
+        <ErrorBoundary fallback={null}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
@@ -3148,20 +3890,50 @@ function App() {
               })
             }
 
-            // Resolve existing messages — prefer chatHistory, then temp store, then the node object itself
-            const existing: Message[] =
-              (chatHistory.find(c => c.id === driftChatId)?.messages?.length
-                ? chatHistory.find(c => c.id === driftChatId)!.messages
-                : null)
-              ?? driftStore.getTempConversation(driftChatId)
-              ?? (driftChat.messages?.length ? driftChat.messages : null)
-              ?? []
-
             // Get context from parent chat (use the chat we're switching to)
             const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
             const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
 
-            // Open drift panel directly — more reliable than handleStartDrift for existing drifts
+            // Resolve the persisted drift metadata (templateType + Connect content)
+            // from the parent's driftInfos — search the resolved parent first, then
+            // fall back across all current messages.
+            const di = parentMessages
+              .flatMap(m => m.driftInfos ?? [])
+              .find(d => d.driftChatId === driftChatId)
+              ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
+
+            const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+            const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+            // A node whose only content is "Finding connections for…" is a Connect drift.
+            // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
+            const templateType = di?.templateType
+              ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
+
+            // The drift's own conversation (chat history → temp store → node payload).
+            const driftMsgs: Message[] =
+              ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
+                  ? chatHistory.find(c => c.id === driftChatId)!.messages
+                  : null)
+                ?? driftStore.getTempConversation(driftChatId)
+                ?? (driftChat.messages?.length ? driftChat.messages : null)
+                ?? [])
+
+            // A Connect *bridge* node is itself a focused Q&A thread ("How does X
+            // connect to Y?") — NOT the connections list. Detect its question and
+            // open the thread on its answer (connectQuestion set → chip-chat view),
+            // instead of dropping back to the cards screen.
+            const bridgeUserMsg = driftMsgs.find(m => m.isUser && /connect(?:s|ed)?\s+to\s+.+/i.test(m.text))
+            const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
+
+            // The connections-LIST drift rebuilds its chips from cached cards, and
+            // passing the (prose) conversation as messages would poison the JSON card
+            // parser — so start it clean. A bridge thread (or any non-Connect drift)
+            // keeps its real messages so the actual conversation shows.
+            const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
+
+            // Open drift panel directly — restores the already-generated content with
+            // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
             driftStore.openDrift({
               selectedText,
               sourceMessageId: sourceMessageId ?? '',
@@ -3169,6 +3941,10 @@ function App() {
               highlightMessageId: sourceMessageId,
               driftChatId,
               existingMessages: existing,
+              templateType,
+              connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
+              connectCards: cachedCards?.length ? cachedCards : undefined,
+              connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
               ancestry: [{
                 isMainChat: true,
                 label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
@@ -3178,9 +3954,47 @@ function App() {
               }],
             })
           }}
-          getTempMessages={(id) => driftStore.getTempConversation(id) ?? null}
+          getTempMessages={(id) => {
+            const temp = driftStore.getTempConversation(id)
+            if (temp && temp.length) return temp
+            // Connect-lens drifts keep their Q&A in a per-id cache / on the parent's
+            // driftInfos — surface it so the map node has real content + a preview.
+            const answers =
+              connectAnswersCache.current.get(id) ??
+              chatHistory
+                .flatMap(c => c.messages ?? [])
+                .flatMap(m => m.driftInfos ?? [])
+                .find(d => d.driftChatId === id)?.connectAnswers
+            if (answers) {
+              const flat = Object.values(answers).flat()
+              if (flat.length) return flat
+            }
+            return null
+          }}
+          onSynthesize={handleSynthesize}
+          synthesizing={synthesizing}
         />
+        </ErrorBoundary>
       )}
+
+      {/* Full-text search across all chats and drifts */}
+      <SearchModal
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        chatHistory={chatHistory}
+        onNavigate={(chatId, messageId) => {
+          setSearchOpen(false)
+          switchChat(chatId)
+          setTimeout(() => {
+            const el = document.querySelector(`[data-message-id="${messageId}"]`)
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              el.classList.add('highlight-message')
+              setTimeout(() => el.classList.remove('highlight-message'), 2000)
+            }
+          }, 150)
+        }}
+      />
 
       {/* Snippet Gallery */}
       <SnippetGallery

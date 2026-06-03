@@ -52,6 +52,9 @@ interface ChatStore {
   messages: Message[]
   isTyping: boolean
   streamingResponse: string
+  /** Id of the AI message currently receiving streamed tokens (null when idle).
+   *  Drives the live shimmer on the materializing response. */
+  streamingMessageId: string | null
   searchQuery: string
   /** Current value of the chat input textarea. */
   inputText: string
@@ -86,6 +89,9 @@ interface ChatStore {
 
   /** Update the streaming accumulation buffer (does NOT persist — transient). */
   setStreaming: (content: string) => void
+
+  /** Mark which AI message is actively streaming (null when none). Transient. */
+  setStreamingMessageId: (id: string | null) => void
 
   setIsTyping: (typing: boolean) => void
   setInputText: (text: string) => void
@@ -125,6 +131,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
   isTyping: false,
   streamingResponse: '',
+  streamingMessageId: null,
   searchQuery: '',
   inputText: '',
 
@@ -332,6 +339,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   // ── setStreaming ───────────────────────────────────────────────────────────
   setStreaming(content: string) {
     set({ streamingResponse: content })
+  },
+
+  setStreamingMessageId(id: string | null) {
+    set({ streamingMessageId: id })
   },
 
   setIsTyping(typing: boolean) {

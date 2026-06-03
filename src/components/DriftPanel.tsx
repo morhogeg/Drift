@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, Mic, Home } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, type LucideIcon } from 'lucide-react'
 import type { AncestryEntry } from '../types/chat'
+import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
+import { sendMessageToDummy } from '../services/dummyAI'
 import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
@@ -11,6 +13,26 @@ import type { AISettings } from './Settings'
 import { snippetStorage } from '../services/snippetStorage'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
+import { Stagger, staggerChild } from './motion'
+import { haptics } from '../lib/haptics'
+import { motion } from 'framer-motion'
+
+// ── Connect taxonomy ──────────────────────────────────────────────────────
+// Each connection edge is classified (by the LLM, language-agnostically) into
+// one of these kinds, so the user can scan *meaning* — ownership vs. influence
+// vs. opposition — at a glance instead of reading every label. Each kind owns a
+// hue + icon; `tension` (opposition) is deliberately warm so it pops against
+// the cool field. Unknown / legacy 2-part cards fall back to `link`.
+interface ConnectKind { label: string; icon: LucideIcon; color: string; glow: string }
+const CONNECT_TYPES: Record<string, ConnectKind> = {
+  origin:    { label: 'Origin',    icon: Landmark,    color: '#34d399', glow: 'rgba(52,211,153,0.55)' },
+  identity:  { label: 'Identity',  icon: Fingerprint, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' },
+  influence: { label: 'Influence', icon: Sparkles,    color: '#a78bfa', glow: 'rgba(167,139,250,0.55)' },
+  tension:   { label: 'Tension',   icon: Swords,      color: '#fb923c', glow: 'rgba(251,146,60,0.55)' },
+  history:   { label: 'History',   icon: Clock,       color: '#fbbf24', glow: 'rgba(251,191,36,0.55)' },
+}
+const CONNECT_FALLBACK: ConnectKind = { label: 'Link', icon: Waypoints, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' }
+const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? CONNECT_FALLBACK
 
 interface Message {
   id: string
@@ -43,7 +65,7 @@ interface DriftPanelProps {
   /** Called whenever the drift conversation messages change — used to keep the temp store in sync. */
   onMessagesChange?: (messages: Message[]) => void
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
+  selectedProvider?: 'openrouter' | 'ollama' | 'gemini' | 'dummy'
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
@@ -67,6 +89,25 @@ interface DriftPanelProps {
   onConnectAnswerSaved?: (question: string, messages: Message[]) => void
   /** Opens a new drift from within this panel (e.g. from a Connect card). */
   onStartDrift?: (text: string, messageId: string, suggestions?: string[]) => void
+  /** Prior explorations of this same/related term across all chats (from the term index). */
+  relatedDrifts?: TermOccurrence[]
+  /** Navigate to a prior drift surfaced in the "explored before" strip. */
+  onOpenRelatedDrift?: (occ: TermOccurrence) => void
+  /** Sibling drifts — other terms branched from the same parent — for lateral walking. */
+  siblingDrifts?: SiblingDrift[]
+  /** The chat id of the drift currently open, used to locate it among its siblings. */
+  currentDriftChatId?: string
+  /** Walk sideways to a sibling drift without leaving the panel. */
+  onNavigateToSibling?: (sib: SiblingDrift) => void
+  /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
+  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | undefined) => void
+}
+
+export interface SiblingDrift {
+  selectedText: string
+  driftChatId: string
+  sourceMessageId: string
+  templateType?: 'simplify' | 'research' | 'connect'
 }
 
 export default function DriftPanel({
@@ -99,11 +140,21 @@ export default function DriftPanel({
   initialConnectAnswers,
   onConnectStateChange,
   onConnectAnswerSaved,
+  relatedDrifts,
+  siblingDrifts,
+  currentDriftChatId,
+  onNavigateToSibling,
+  onSwitchLens,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [driftOnlyMessages, setDriftOnlyMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  // Id of the AI message currently receiving streamed tokens — drives the live shimmer.
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
+  // Bumped whenever a space unfolds (panel opens) or a new topic emerges (drift
+  // changes while open) — retriggers the bloom animation on the panel shell.
+  const [bloomKey, setBloomKey] = useState(0)
   const [pushedToMain, setPushedToMain] = useState(false)
   const [savedAsChat, setSavedAsChat] = useState(false)
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
@@ -116,6 +167,7 @@ export default function DriftPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
@@ -126,6 +178,20 @@ export default function DriftPanel({
   const [connectCards, setConnectCards] = useState<string[] | null>(null)
   const [connectQuestion, setConnectQuestion] = useState<string | null>(null)
   const connectAnswersRef = useRef<Map<string, Message[]>>(new Map())
+  // When the panel re-initializes for a new thread (term switch / lens switch),
+  // `driftChatId` flips immediately but the PREVIOUS thread's `driftOnlyMessages`
+  // linger in state for one render until the init effect's queued reset commits.
+  // The Connect-card parser must not parse that stale render's JSON — doing so
+  // keys the previous drift's cards onto the newly-selected term (the "Connect
+  // shows the wrong drift" bug). The init effect arms this flag so the parser
+  // skips exactly that one stale pass; it clears once consumed.
+  const skipStaleCardParseRef = useRef(false)
+  // The driftChatId the live `driftOnlyMessages` belong to. Updated synchronously
+  // by the init effect when a thread loads. The persistence effect gates on this
+  // so that during a term switch — where driftOnlyMessages still holds the OLD
+  // thread but driftChatId has already flipped — the old conversation is never
+  // written under the new thread's key (which would lose it on return: Bug 5).
+  const messagesThreadRef = useRef<string | undefined>(driftChatId)
   const [connectVisitedVersion, setConnectVisitedVersion] = useState(0)
   /** Tracks the active chip session {question, messages} via ref so it survives React batching. */
   const chipSessionRef = useRef<{ question: string; messages: Message[] } | null>(null)
@@ -141,20 +207,43 @@ export default function DriftPanel({
   // --------------------------------------------------------------------------
 
   const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
-    'simplify': "You are an expert at making complex ideas simple. Explain the selected text as if to a curious 12-year-old. Use analogies, avoid jargon, and make it memorable.",
-    'research': "You are a thorough research assistant. Provide factual, well-sourced background on the selected text. Include key facts, context, history, and current relevance. Use Google Search grounding if available.",
-    'connect': `You are a lateral thinking engine for an exploratory reading app. The user has selected a word or phrase from a conversation and wants to discover surprising intellectual threads to explore.
+    'simplify': `You make hard ideas suddenly click. The user selected a term while reading and wants it made simple — but they are a smart adult, so never be condescending or babyish.
 
-Return ONLY a raw JSON array of 4-5 strings. Each string is a short, thought-provoking question or reframe that opens a genuinely interesting direction. No prose, no markdown, no code fences.
+- Interpret the term in the sense the surrounding conversation implies (disambiguate by context — don't explain the generic dictionary meaning if the conversation means something specific).
+- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences.
+- Strip the jargon, but if a key technical word matters, name it once and translate it.
+- Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
+- Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
+    'research': `You are a sharp domain expert giving an authoritative deep dive on a term the user selected mid-reading. This is NOT a Wikipedia dump and NOT a beginner explainer — assume an intelligent reader who wants depth, nuance, and the things a non-expert would miss.
+
+- Interpret the term in the sense the surrounding conversation implies; disambiguate by context.
+- Go past the obvious: give the mechanism, the history that actually shaped it, the live debates or open questions, and why it matters. Prefer specific names, dates, figures, and concrete examples over vague generalities.
+- Be accurate. If something is contested or uncertain, say so plainly rather than asserting it. Do not invent specifics — when unsure, use Google Search grounding if available, otherwise hedge honestly.
+- Structure for skimming: a strong opening line, then tight paragraphs or a few headed sections. No padding.
+- Add genuine NEW value beyond what the conversation already showed.`,
+    'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
+
+Return ONLY a raw JSON array of 5-6 strings. Each string is "<type> :: <relationship> :: <concept>":
+- <type> = exactly ONE of these English keywords (always English, regardless of output language) classifying the KIND of link:
+    • origin    — where it comes from / who owns, founded, governs, or created it
+    • identity  — what it represents, embodies, or symbolizes
+    • influence — what shaped it, or what it shaped (inspired by, precursor to, archetype for, echoes)
+    • tension   — what it opposes, contrasts with, rivals, or conflicts with
+    • history   — a dated event or historical milestone tied to it
+- <relationship> = a short labeled edge, 1-4 words (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals"). Write it in the SAME LANGUAGE as the surrounding conversation.
+- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words). Write it in the SAME language AND script as the conversation, transliterating any foreign proper name into that script (for a Hebrew chat: "Johan Cruyff" → "יוהאן קרויף", "Real Madrid" → "ריאל מדריד" — never leave it in Latin letters).
+- Separator is exactly " :: " (space colon colon space). There are exactly TWO separators per string.
 
 Example output for "Julius Caesar":
-["Did Shakespeare use Caesar to warn Elizabeth I about succession?","What does the Rubicon crossing tell us about the psychology of no return?","How did Caesar's calendar reform still shape our daily lives?","Why do assassinations so rarely achieve what their planners intended?","Is charisma a weapon or a vulnerability for leaders?"]
+["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
 
 Rules:
-- Each item is a question or reframe, 6-12 words.
-- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern.
-- Skip the obvious — nothing the user can already infer from the conversation.
-- Make them feel like doorways, not trivia.
+- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include at least one "tension" (something it opposes/rivals) wherever one honestly exists.
+- Each <concept> must be a SPECIFIC, real, verifiable thing (a named person, place, event, work, or named idea) — not a vague category ("various philosophers", "modern society") and not a near-synonym of the term itself.
+- Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
+- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern. Reach for the link a thoughtful reader would NOT immediately predict.
+- Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
+- Do not invent facts. If you are not confident the connection is real, choose a different one.
 - Output raw JSON array of strings only. Any other text breaks the app.`,
   }
 
@@ -167,6 +256,15 @@ Rules:
   // Initialize Drift with existing messages or system message
   useEffect(() => {
     if (isOpen) {
+      // Arm the stale-parse skip: the about-to-be-reset messages may still hold
+      // the previous thread's Connect JSON for one render. (See parser below.)
+      skipStaleCardParseRef.current = true
+      // The messages this effect is about to set belong to THIS thread. Stamping
+      // it synchronously means the persistence effect (which fires after the
+      // queued setDriftOnlyMessages commits) saves under the correct key, and any
+      // stale-render fire for the previous thread is gated out.
+      messagesThreadRef.current = driftChatId
+
       // Reset auto-send guard for each new open
       autoSentRef.current = false
 
@@ -209,8 +307,16 @@ Rules:
       setConnectCards(initialConnectCards != null ? initialConnectCards : null)
       setConnectQuestion(initialConnectQuestion != null ? initialConnectQuestion : null)
 
-      // If chips are being restored from cache, suppress the auto-send that would re-fetch them
-      if (initialConnectCards != null && initialConnectCards.length > 0) {
+      // Defensive backstop: if ANY cached/restored content exists for this drift
+      // (restored messages, Connect chips, or visited-bridge answers), suppress
+      // the auto-send so an already-explored term+lens can never re-fetch — no
+      // matter which entry point opened it. A genuinely new drift (no cache) has
+      // none of these, so first-time generation still fires exactly once.
+      const hasRestoredContent =
+        (existingMessages != null && existingMessages.length > 0) ||
+        (initialConnectCards != null && initialConnectCards.length > 0) ||
+        (initialConnectAnswers != null && Object.keys(initialConnectAnswers).length > 0)
+      if (hasRestoredContent) {
         autoSentRef.current = true
       }
 
@@ -220,7 +326,7 @@ Rules:
       } else if (!templateType && !(existingMessages && existingMessages.length > 0)) {
         const geminiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
         if (geminiKey) {
-          const ctx = contextMessages.slice(-3).map(m => m.text).join(' ')
+          const ctx = contextMessages.slice(-4).map(m => `${m.isUser ? 'User' : 'Assistant'}: ${m.text}`).join('\n')
           getDriftSuggestions(selectedText, ctx, geminiKey).then(s => {
             setDriftSuggestions(s)
           })
@@ -246,7 +352,7 @@ Rules:
       setSavedMessageIds(savedIds)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedText, existingMessages, templateType])
+  }, [isOpen, selectedText, existingMessages, templateType, driftChatId])
 
   // Notify parent whenever Connect state changes so it can persist for navigation
   useEffect(() => {
@@ -283,17 +389,36 @@ Rules:
 
   // Parse Connect AI response into cards once streaming finishes (only in chips mode)
   useEffect(() => {
-    if (templateType !== 'connect' || isTyping || connectQuestion) return
+    if (templateType !== 'connect') return
+    // Stale-window guard: when switching terms/lenses, this effect can fire on the
+    // render where driftChatId already points at the NEW thread but
+    // driftOnlyMessages still holds the PREVIOUS thread's streamed JSON (the init
+    // effect's reset is queued, not yet committed). Parsing that would key the
+    // previous drift's cards onto the newly-selected term — the "Connect shows the
+    // wrong drift" bug. The init effect arms a skip for exactly that stale pass;
+    // we consume it here (before the isTyping/question early-returns) so it can
+    // never linger and swallow the next thread's legitimate first parse.
+    if (skipStaleCardParseRef.current) {
+      skipStaleCardParseRef.current = false
+      return
+    }
+    if (isTyping || connectQuestion) return
     const aiMsg = driftOnlyMessages.find(m => !m.isUser && !m.id.startsWith('drift-system-'))
     if (!aiMsg?.text) return
+    const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    // Only treat this as connect cards if it actually looks like a JSON array. When
+    // switching lenses (Connect → Deep dive → Connect), this effect can fire on a
+    // render where driftOnlyMessages still holds the PREVIOUS lens's prose answer;
+    // parsing that and wiping to [] is what caused "No connections found" after the
+    // cards had already been restored. Prose → leave the restored cards intact.
+    if (!raw.startsWith('[')) return
     try {
-      const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
         setConnectCards(parsed.filter((x: unknown) => typeof x === 'string').slice(0, 5))
       }
     } catch {
-      setConnectCards([])
+      // Malformed JSON — keep whatever cards we have rather than blanking the view.
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateType, isTyping, driftOnlyMessages, selectedText])
@@ -301,7 +426,11 @@ Rules:
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
   useEffect(() => {
-    if (driftChatId && driftOnlyMessages.length > 0) {
+    // Only persist messages that belong to the thread currently loaded. During a
+    // term switch there is a render where driftOnlyMessages still holds the OLD
+    // thread but driftChatId has flipped to the new one; saving then would write
+    // the old conversation under the new key. Gate on the messages' own thread.
+    if (driftChatId && driftChatId === messagesThreadRef.current && driftOnlyMessages.length > 0) {
       onMessagesChange?.(driftOnlyMessages)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -314,6 +443,27 @@ Rules:
       chipSessionRef.current = { question: connectQuestion, messages: driftOnlyMessages }
     }
   }, [driftOnlyMessages, connectQuestion])
+
+  // A bridge question frames the connection between the term and a concept —
+  // it doubles as the displayed label and the prompt sent to the model.
+  const bridgeQuestion = (concept: string) => `How does "${selectedText}" connect to ${concept}?`
+
+  // Open (or restore) a focused Connect thread for a given question/bridge.
+  const openConnectThread = (question: string) => {
+    haptics.selection()
+    const cached = connectAnswersRef.current.get(question)
+    setConnectQuestion(question)
+    if (cached) {
+      autoSentRef.current = true
+      setMessages(cached)
+      setDriftOnlyMessages(cached)
+    } else {
+      autoSentRef.current = false
+      const systemMsg: Message = { id: 'drift-system-' + Date.now(), text: question, isUser: false, timestamp: new Date() }
+      setMessages([systemMsg])
+      setDriftOnlyMessages([systemMsg])
+    }
+  }
 
   // When returning to chips view (connectQuestion → null), persist the last chip session.
   // This fires after React commits the batch, so we read from the ref which was already updated.
@@ -340,12 +490,27 @@ Rules:
     }
   }, [isOpen])
 
+  // Bloom: a space unfolding. Retrigger the bloom whenever the panel opens or
+  // the topic changes underneath it (branching into a new drift) — the shell
+  // scales up, the blur clears, and a glow blooms behind it.
+  useEffect(() => {
+    if (isOpen) setBloomKey(k => k + 1)
+  }, [isOpen, driftChatId])
+
   // Auto-scroll breadcrumb to the end (current item) whenever depth changes
   useEffect(() => {
     if (breadcrumbScrollRef.current) {
       breadcrumbScrollRef.current.scrollLeft = breadcrumbScrollRef.current.scrollWidth
     }
   }, [ancestry?.length, isOpen])
+
+  // Keep the active term pill visible as the user walks between siblings.
+  useEffect(() => {
+    const strip = siblingStripRef.current
+    if (!strip) return
+    const active = strip.querySelector('[data-sibling-active="true"]')
+    active?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [currentDriftChatId, siblingDrifts])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -505,6 +670,9 @@ Rules:
   const sendMessage = async (overrideText?: string) => {
     const textToSend = (overrideText ?? message).trim()
     if (textToSend) {
+      // Sending a message has weight — a light, confident thunk.
+      haptics.impact('light')
+
       const newMessage: Message = {
         id: 'drift-' + Date.now().toString(),
         text: textToSend,
@@ -523,21 +691,39 @@ Rules:
         msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Finding connections for') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Deep dive into this') && !msg.text.startsWith('Show me what this connects to') && msg.id !== newMessage.id
       )
       
-      // Build context string from parent conversation (last ~6 messages)
-      const parentContext = contextMessages.slice(-6).map(msg =>
-        `${msg.isUser ? 'User' : 'Assistant'}: ${msg.text}`
-      ).join('\n')
+      // Build context string from parent conversation (last ~8 messages). Cap each
+      // message so one very long answer can't crowd out the rest of the context.
+      const parentContext = contextMessages.slice(-8).map(msg => {
+        const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
+        return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
+      }).join('\n')
 
       // Use template system prompt if set, otherwise use default context-aware prompt
       // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
+      // History-aware Connect: feed prior same/related-term drifts into the chip
+      // prompt so the directions are ones the user has NOT already taken.
+      const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
+      // Disambiguation: "Barcelona" inside a Messi conversation means FC Barcelona
+      // the club — not the city. Force the model to read the term through context.
+      const connectDisambiguation = parentContext
+        ? `\n\nCRITICAL — DISAMBIGUATE BY CONTEXT: The user selected "${selectedText}" while reading the conversation below. Interpret "${selectedText}" ONLY in the sense the conversation implies — use the surrounding text to resolve which specific entity is meant (e.g. a football club vs. a city, a person vs. a namesake, a company vs. a common word). Every connection MUST be about that contextual meaning, NOT the most generic/popular meaning of the word.\n\nConversation context:\n${parentContext}`
+        : ''
+      const connectChipsPrompt = (priorTerms.length
+        ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
+        : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
+
       const baseSystemContent = (templateType === 'connect' && connectQuestion)
-        ? `The user is reading about "${selectedText}" and chose to explore this question: "${connectQuestion}". Answer it directly and insightfully. Draw connections back to "${selectedText}" where relevant. Be concise.${parentContext ? `\n\nConversation context:\n${parentContext}` : ''}`
+        ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
+        : (templateType === 'connect')
+        ? connectChipsPrompt
         : templateType
         ? TEMPLATE_SYSTEM_PROMPTS[templateType]
         : (parentContext
-            ? `The user is exploring "${selectedText}" from an ongoing conversation. Here is the relevant context from that conversation:\n\n${parentContext}\n\nThe user has selected "${selectedText}" from the above and wants to explore it further. Answer in the context of that conversation — do not treat "${selectedText}" as an ambiguous term if the conversation makes its meaning clear. Be concise and add value beyond what's already visible.`
-            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`)
-      const systemContent = (templateType && parentContext)
+            ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
+            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
+      // Connect branches already embed their own context above; only the
+      // non-connect templates need it appended here.
+      const systemContent = (templateType && templateType !== 'connect' && parentContext)
         ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
         : baseSystemContent
 
@@ -559,13 +745,10 @@ Rules:
       const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
       const effectiveApiKey = envKey || aiSettings.openRouterApiKey
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
+      const provider: 'openrouter' | 'ollama' | 'gemini' | 'dummy' = selectedProvider
         ? selectedProvider
         : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
 
-      console.log('Drift panel - provider chosen:', provider)
-      console.log('Drift panel - API messages:', apiMessages)
-      
       try {
         // Create abort controller for this request
         const abortController = new AbortController()
@@ -583,8 +766,15 @@ Rules:
         }
         setMessages(prev => [...prev, aiMessage])
         setDriftOnlyMessages(prev => [...prev, aiMessage])
-        
+        setStreamingMsgId(aiResponseId)
+
+        let firstToken = true
         const onChunk = (chunk: string) => {
+          if (firstToken) {
+            firstToken = false
+            // A thought materializing — a light tick as the first token lands.
+            haptics.selection()
+          }
           accumulatedResponse += chunk
           setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
           setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
@@ -613,6 +803,8 @@ Rules:
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel
           )
+        } else if (provider === 'dummy') {
+          await sendMessageToDummy(apiMessages as any, onChunk, abortController.signal)
         }
       // Fire-and-forget: fetch key-term highlights for this AI response
       const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
@@ -642,6 +834,7 @@ Rules:
         setDriftOnlyMessages(prev => [...prev, aiResponse])
       } finally {
         setIsTyping(false)
+        setStreamingMsgId(null)
         abortControllerRef.current = null
       }
     }
@@ -653,6 +846,7 @@ Rules:
       abortControllerRef.current = null
       setIsTyping(false)
       setIsComparing(false)
+      setStreamingMsgId(null)
     }
     if (compareAbortControllersRef.current) {
       for (const c of Object.values(compareAbortControllersRef.current)) {
@@ -683,12 +877,20 @@ Rules:
       setMessage('')
     }
 
-    // Build API messages with system context
+    // Build API messages with system context. Mirror the single-model path:
+    // ground the answer in the parent conversation so each model disambiguates
+    // "${selectedText}" the same way the user means it.
+    const compareContext = contextMessages.slice(-8).map(msg => {
+      const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
+      return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
+    }).join('\n')
     const baseConversation = workingDrift.filter(msg => !msg.text.startsWith('What would you like to know about'))
     const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
       {
         role: 'system',
-        content: `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise and add NEW value beyond what's already visible.`
+        content: compareContext
+          ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${compareContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies. Don't repeat the basic definition they can already see; add NEW value — the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate; don't invent facts.`
+          : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`
       },
       ...baseConversation.map(msg => ({ role: msg.isUser ? 'user' as const : 'assistant' as const, content: msg.text }))
     ]
@@ -893,8 +1095,18 @@ Rules:
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
     `}>
-      {/* Panel */}
-      <div className={`
+      {/* Glow blooming behind the panel as it unfolds — keyed to retrigger on
+          open and on branching into a new topic. */}
+      <div
+        key={`glow-${bloomKey}`}
+        aria-hidden
+        className="drift-bloom-glow pointer-events-none absolute inset-y-0 right-0 w-2/3 z-0"
+      />
+      {/* Panel — blooms open (scale + blur-clear) on each new space */}
+      <div
+        key={`shell-${bloomKey}`}
+        className={`
+        drift-bloom-shell relative z-[1]
         w-full h-full bg-dark-bg
         border-l border-accent-violet/[0.12]
         shadow-[-8px_0_60px_rgba(168,85,247,0.08)]
@@ -902,6 +1114,14 @@ Rules:
       `}>
         {/* Header */}
         <header className="relative z-10 border-b border-white/[0.05] bg-dark-surface/95 backdrop-blur-xl pt-safe">
+          {/* Quiet breathing accent — the space stays alive while idle, settles
+              while a thought is materializing. */}
+          {!isTyping && (
+            <div
+              aria-hidden
+              className="animate-breathe pointer-events-none absolute -top-6 right-8 w-40 h-12 rounded-full blur-2xl bg-accent-violet/[0.10]"
+            />
+          )}
           {(() => {
             const actionMessages = driftOnlyMessages.filter(m => !m.text.startsWith('What would you'))
             const showActions = templateType === 'connect'
@@ -1038,60 +1258,209 @@ Rules:
             )
           })()}
         </header>
-        
+
+        {/* "View as" lens switcher — re-view the same term through a different lens
+            without returning to the chat. Each lens keeps its own thread. Hidden in
+            Connect's bridge sub-mode (you're inside an answer there). */}
+        {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+            <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
+            {([
+              { tpl: undefined, label: 'Drift' },
+              { tpl: 'simplify', label: 'Simplify' },
+              { tpl: 'research', label: 'Deep dive' },
+              { tpl: 'connect', label: 'Connect' },
+            ] as const).map((l) => {
+              const active = (l.tpl ?? undefined) === (templateType ?? undefined)
+              return (
+                <button
+                  key={l.label}
+                  onClick={() => { if (!active) onSwitchLens(l.tpl) }}
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
+                    ${active
+                      ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
+                      : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20'}`}
+                >
+                  {l.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Sibling switcher — walk sideways between terms branched from the same
+            parent, without going back to the map. Only shown when siblings exist. */}
+        {siblingDrifts && siblingDrifts.length > 1 && onNavigateToSibling && (() => {
+          const idx = siblingDrifts.findIndex(s => s.driftChatId === currentDriftChatId)
+          const prev = idx > 0 ? siblingDrifts[idx - 1] : null
+          const next = idx >= 0 && idx < siblingDrifts.length - 1 ? siblingDrifts[idx + 1] : null
+          return (
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0">
+              <button
+                onClick={() => prev && onNavigateToSibling(prev)}
+                disabled={!prev}
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div
+                ref={siblingStripRef}
+                className="flex-1 flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {siblingDrifts.map((sib) => {
+                  const isCurrent = sib.driftChatId === currentDriftChatId
+                  return (
+                    <button
+                      key={sib.driftChatId}
+                      data-sibling-active={isCurrent}
+                      onClick={() => !isCurrent && onNavigateToSibling(sib)}
+                      className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
+                        ${isCurrent
+                          ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
+                          : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20 hover:bg-white/[0.04]'}`}
+                      title={sib.selectedText}
+                    >
+                      {sib.selectedText}
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                onClick={() => next && onNavigateToSibling(next)}
+                disabled={!next}
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                title={next ? `Next: "${next.selectedText}"` : 'No next term'}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )
+        })()}
+
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
           <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
+            {/* Relationship map: the term is a hub with labeled edges to related
+                concepts. Tap an edge → the AI draws the bridge between the two,
+                which becomes its own thread. "Connect to anything" adds an edge. */}
             {(isTyping || connectCards === null) ? (
               <div className="flex flex-col gap-2.5">
-                {[1,2,3,4,5].map(i => (
-                  <div key={i} className="h-12 rounded-2xl bg-white/[0.04] animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="h-14 rounded-2xl bg-white/[0.04] animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
                 ))}
               </div>
-            ) : connectCards.length === 0 ? (
-              <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
-            ) : (
-              <div className="flex flex-col gap-2.5">
-                <p className="text-[10px] text-text-muted/40 uppercase tracking-widest mb-1">Explore from here</p>
-                {connectCards.map((question, i) => {
-                  const visited = connectAnswersRef.current.has(question)
-                  void connectVisitedVersion // consumed to trigger re-render
-                  return <button
-                    key={i}
-                    onClick={() => {
-                      const cached = connectAnswersRef.current.get(question)
-                      if (cached) {
-                        // Restore previous conversation — no LLM call needed
-                        setConnectQuestion(question)
-                        autoSentRef.current = true
-                        setMessages(cached)
-                        setDriftOnlyMessages(cached)
-                      } else {
-                        // Fresh chat — auto-send the question
-                        setConnectQuestion(question)
-                        autoSentRef.current = false
-                        const systemMsg: Message = {
-                          id: 'drift-system-' + Date.now(),
-                          text: question,
-                          isUser: false,
-                          timestamp: new Date(),
-                        }
-                        setMessages([systemMsg])
-                        setDriftOnlyMessages([systemMsg])
-                      }
-                    }}
-                    className={`text-left w-full flex items-start justify-between gap-2 px-4 py-3 rounded-2xl text-[14px] leading-snug active:scale-[0.98] transition-all duration-150
-                      ${visited
-                        ? 'border border-cyan-400/30 bg-cyan-500/[0.08] text-text-primary'
-                        : 'border border-cyan-500/15 bg-cyan-500/[0.04] text-text-secondary hover:border-cyan-400/35 hover:text-text-primary hover:bg-cyan-500/[0.09]'}`}
-                  >
-                    <span>{question}</span>
-                    {visited && <span className="flex-shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400/70" />}
-                  </button>
-                })}
-
-              </div>
-            )}
+            ) : (() => {
+              // Each card is "<type> :: <relationship> :: <concept>". Legacy cards
+              // may be "<relationship> :: <concept>" (no type) or a bare concept —
+              // parse defensively so old cached drifts still render.
+              const edges = (connectCards ?? []).map(card => {
+                const parts = card.split('::').map(s => s.trim()).filter(Boolean)
+                if (parts.length >= 3) {
+                  return { typeKey: parts[0].toLowerCase(), relationship: parts[1].replace(/:+$/, ''), concept: parts.slice(2).join(' :: ') }
+                }
+                if (parts.length === 2) {
+                  return { typeKey: '', relationship: parts[0].replace(/:+$/, ''), concept: parts[1] }
+                }
+                return { typeKey: '', relationship: '', concept: parts[0] ?? '' }
+              }).filter(e => e.concept)
+              void connectVisitedVersion // consumed to trigger re-render on cache changes
+              if (edges.length === 0) {
+                return <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
+              }
+              const dir = getTextDirection(selectedText)
+              const Arrow = dir === 'rtl' ? ArrowUpLeft : ArrowUpRight
+              const anyVisited = edges.some(e => connectAnswersRef.current.has(bridgeQuestion(e.concept)))
+              const presentKinds = [...new Set(edges.map(e => e.typeKey).filter(k => k in CONNECT_TYPES))]
+              return (
+                <div dir={dir}>
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Waypoints className="w-3.5 h-3.5 text-accent-discovery/80" />
+                    <p className="text-micro uppercase tracking-widest text-accent-discovery/80">Connections</p>
+                  </div>
+                  {/* Hub — a living node the edges emanate from */}
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <span className="relative flex items-center justify-center shrink-0 w-3.5 h-3.5">
+                      <span className="absolute -inset-1 rounded-full border border-accent-discovery/30 animate-breathe" aria-hidden />
+                      <span className="w-3 h-3 rounded-full bg-accent-discovery" style={{ boxShadow: '0 0 14px rgba(34,211,238,0.7)' }} />
+                    </span>
+                    <span className="text-[15px] font-semibold text-text-primary leading-snug truncate" dir={dir}>{selectedText}</span>
+                  </div>
+                  {/* Edges branching from the hub. Logical props (border-s / ps /
+                      -start) mirror automatically for RTL languages like Hebrew. */}
+                  <div className="ms-[6px] border-s ps-5" style={{ borderColor: 'rgba(34,211,238,0.18)' }}>
+                    <Stagger className="flex flex-col gap-2 pt-1" step={0.04}>
+                      {edges.map((e, i) => {
+                        const q = bridgeQuestion(e.concept)
+                        const visited = connectAnswersRef.current.has(q)
+                        const k = connectKind(e.typeKey)
+                        const Icon = k.icon
+                        const isTension = e.typeKey === 'tension'
+                        return (
+                          <motion.button
+                            key={i}
+                            variants={staggerChild}
+                            onClick={() => openConnectThread(q)}
+                            className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
+                            style={{
+                              borderColor: visited ? `${k.color}66` : 'rgba(255,255,255,0.07)',
+                              background: visited ? `${k.color}14` : 'rgba(26,26,26,0.4)',
+                            }}
+                            title={`See how "${selectedText}" connects to ${e.concept}`}
+                          >
+                            {/* connector + glowing synapse node sitting on the rail */}
+                            <span
+                              className={`absolute top-1/2 -translate-y-1/2 -start-5 w-5 ${isTension ? 'border-t border-dashed' : 'h-px'}`}
+                              style={isTension ? { borderColor: `${k.color}88` } : { background: `${k.color}66` }}
+                              aria-hidden
+                            />
+                            <span
+                              className="absolute top-1/2 -translate-y-1/2 -start-[23px] w-1.5 h-1.5 rounded-full transition-transform duration-200 group-hover:scale-150"
+                              style={{ background: k.color, boxShadow: `0 0 8px ${k.glow}` }}
+                              aria-hidden
+                            />
+                            {/* type icon chip */}
+                            <span
+                              className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                              style={{ background: `${k.color}1a`, color: k.color }}
+                            >
+                              <Icon className="w-[18px] h-[18px]" strokeWidth={2} />
+                            </span>
+                            <div className="flex-1 min-w-0" dir={getTextDirection(e.concept)}>
+                              {e.relationship && (
+                                <span className="block text-[10px] tracking-wider leading-none mb-1 truncate" style={{ color: `${k.color}cc` }}>{e.relationship}</span>
+                              )}
+                              <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug transition-colors">{e.concept}</span>
+                            </div>
+                            {visited
+                              ? <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 6px ${k.glow}` }} aria-hidden />
+                              : <Arrow className="w-4 h-4 text-text-muted/40 group-hover:text-text-secondary shrink-0 transition-colors" />}
+                          </motion.button>
+                        )
+                      })}
+                    </Stagger>
+                  </div>
+                  {/* Footer: first-visit hint, then a legend of the kinds present */}
+                  {!anyVisited && (
+                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">Tap a connection to explore the bridge between them.</p>
+                  )}
+                  {presentKinds.length > 0 && (
+                    <div className="mt-4 ps-5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {presentKinds.map(key => {
+                        const k = CONNECT_TYPES[key]
+                        return (
+                          <span key={key} className="inline-flex items-center gap-1.5 text-[10px] text-text-muted/70">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 5px ${k.glow}` }} aria-hidden />
+                            {k.label}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -1103,23 +1472,14 @@ Rules:
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Ask your own question…"
+                  placeholder="Connect to anything…"
                   className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-white/[0.08] focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       const val = (e.target as HTMLInputElement).value.trim()
                       if (!val) return
                       ;(e.target as HTMLInputElement).value = ''
-                      setConnectQuestion(val)
-                      autoSentRef.current = false
-                      const systemMsg: Message = {
-                        id: 'drift-system-' + Date.now(),
-                        text: val,
-                        isUser: false,
-                        timestamp: new Date(),
-                      }
-                      setMessages([systemMsg])
-                      setDriftOnlyMessages([systemMsg])
+                      openConnectThread(bridgeQuestion(val))
                     }
                   }}
                 />
@@ -1133,16 +1493,7 @@ Rules:
                       const val = input?.value.trim()
                       if (!val) return
                       if (input) input.value = ''
-                      setConnectQuestion(val)
-                      autoSentRef.current = false
-                      const systemMsg: Message = {
-                        id: 'drift-system-' + Date.now(),
-                        text: val,
-                        isUser: false,
-                        timestamp: new Date(),
-                      }
-                      setMessages([systemMsg])
-                      setDriftOnlyMessages([systemMsg])
+                      openConnectThread(bridgeQuestion(val))
                     }}
                   >
                     <ArrowUp className="w-4 h-4" />
@@ -1254,7 +1605,7 @@ Rules:
                         <span className="block mb-1 text-[10px] text-text-muted/60 pl-1">{msg.modelTag}</span>
                       )}
                       <div className="px-1 pb-1">
-                        <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>
+                        <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)} ${streamingMsgId === msg.id ? 'drift-text-shimmer' : ''}`} dir={getTextDirection(msg.text)}>
                           <ReactMarkdown
                             className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-headings:text-text-primary prose-headings:font-semibold prose-headings:mb-2 prose-headings:mt-3 prose-p:text-text-secondary prose-p:mb-2 prose-strong:text-text-primary prose-strong:font-semibold prose-ul:my-2 prose-ul:space-y-1 prose-li:text-text-secondary prose-li:ml-4 prose-code:text-accent-violet prose-code:bg-dark-bg/50 prose-pre:bg-dark-bg prose-pre:border prose-pre:border-dark-border/50 prose-pre:rounded-lg prose-pre:p-3 prose-blockquote:border-l-accent-violet prose-blockquote:text-text-muted prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-thead:bg-dark-elevated/50 prose-thead:border-b prose-thead:border-dark-border/50 prose-th:text-text-primary prose-th:font-semibold prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:text-xs prose-td:text-text-secondary prose-td:px-2 prose-td:py-1.5 prose-td:border-b prose-td:border-dark-border/30 prose-td:text-xs prose-tr:hover:bg-dark-elevated/20"
                             remarkPlugins={[remarkGfm]}
@@ -1341,7 +1692,8 @@ Rules:
           
           {isTyping && (
             <div className="flex justify-start pl-1">
-              <div className="flex gap-1 items-center py-2">
+              {/* Thinking — the dot cluster breathes while each dot bounces */}
+              <div className="flex gap-1 items-center py-2 animate-breathe">
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '120ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-text-muted/40 animate-bounce" style={{ animationDelay: '240ms' }} />

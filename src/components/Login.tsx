@@ -308,7 +308,7 @@ export function Login({ onLogin }: LoginProps) {
 
           <div className="bg-gray-900/30 backdrop-blur-xl border border-white/[0.05] rounded-2xl p-6">
             <p className="text-sm text-gray-400 text-center mb-6">
-              Where conversations evolve naturally
+              Sign in to pick up your threads
             </p>
             <form onSubmit={handleSubmit} className="space-y-4">
               <input

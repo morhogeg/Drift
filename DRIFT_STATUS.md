@@ -1,47 +1,43 @@
 # Drift — Quick Status
 
-**Date:** May 27, 2026 | **Branch:** `main` | **Build:** 34 (iOS + web, pending new archive)
+**Date:** June 3, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 44 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-## Last Session (May 27)
-- Fixed broken Gemini model names (gemini-3.1-flash-lite-preview → gemini-3.1-flash-lite, gemini-3-flash-preview → gemini-3.5-flash, gemini-2.0-flash → gemini-2.5-flash-lite before June 1 shutdown)
-- Selection tooltip overhauled: removed Challenge, Pros/Cons, Devil's Advocate; kept Simplify + Deep dive; added new **Connect** template
-- **Connect feature** built end-to-end:
-  - Shows 4-5 AI-generated question chips as a discovery map (not a chat)
-  - Tapping a chip opens an inline conversation in the same panel — no new window
-  - Back button returns to chips list; visited chips show cyan dot + brighter border
-  - Re-tapping a visited chip restores cached conversation (no extra LLM call)
-  - Back button clears text selection to dismiss floating tooltip
-  - Fixed bug: templateType was passed into wrong positional arg (existingDriftChatId slot)
+> ⚠️ iOS bundles a copy of `dist/`. After ANY web change you MUST run `npm run build && npx cap sync ios` before Run/Archive in Xcode — a clean+rebuild in Xcode alone keeps the stale bundle.
+
+## Last Session (Jun 3 PM) — Bug-fix wave + usability/map + web QA
+Ran as 4 parallel agents in isolated git worktrees (sidebar / map / panel / web-QA), merged sequentially with no conflicts.
+- **Sidebar overhaul** — new `SidebarChatRow.tsx`: three distinct row types (Chat / Drift / Synthesis) with own icon+treatment; drifts nest under their source chat (resolves up `parentChatId` to root) with a violet rail + `from <parent>` caption. Synthesis detected via `/✦ Synthesis/i` on `lastMessage`.
+- **Drift Map (`DriftKnowledgeGraph.tsx`)** — (a) fixed mobile open-then-close: 450ms re-entrancy-guarded toggle + removed `ErrorBoundary onError→close` (boundary was conditionally mounted, yanking the map on any transient throw). (b) Node **lineage**: `<title>` breadcrumb on hover/long-press + breadcrumb trail in DetailCard. (c) Clickable AI terms (`InlineListLink`) now dispatch `drift:start-from-term` → routed to `handleStartDrift`, so they record as map nodes/edges. (d) **At-a-glance** parent-term context label rendered ABOVE each drift node (e.g. `↳ PSG` over the goals question), RTL-safe, parent-hue.
+- **Drift panel (`DriftPanel.tsx`)** — Connect/term keying: added `driftChatId` to the init effect deps; `skipStaleCardParseRef` stops the parser keying the old drift's cards onto a newly-selected term; `messagesThreadRef` stamps the loading thread so per-term saves never land under the wrong key. Fixes: Connect showing wrong drift's content, lens/pill out of sync, and per-term conversation vanishing on term switch.
+- **Web QA fixes** — added `dummy` (Demo) provider branch in DriftPanel (drifts were throwing "No Gemini key" in keyless Demo mode); `100dvh` viewport (input bar no longer clipped by mobile browser chrome); `navigator.clipboard?.` guard; **removed console statements that logged API keys / full settings** to the browser console.
+- **State persistence verified** — per-(term × lens) threads persist + restore across term switches (`navigateToSiblingDrift` → `resolveDriftRestore`) and lens switches (`handleSwitchLens` + `lensRegistryRef`). Connect cards + visited-bridge answers cached in `connectCardsCache`/`connectAnswersCache` + `driftInfos`.
+
+### Roadmap agreed for next sessions (intelligence + usability)
+1. **Semantic concept layer (IN PROGRESS)** — `termIndex.ts` matching is lexical only (exact + substring); `SearchModal` is `indexOf`; NO embeddings exist. Add Gemini embeddings (same key, `embedContent`), cache vectors in IndexedDB per `driftChatId`, rank `findRelatedDrifts` by cosine. Upgrades recall + Connect + map edges + search at once. Local Transformers.js fallback noted for keyless/offline.
+2. **Continuity / resurfacing** — `lensRegistryRef` is in-memory (lost on reload, rebuildable from `driftInfos`); no "open loops"/resume surface for un-synthesized drift trees.
+3. **Discoverability** — drift gesture, lenses, clickable terms, synthesis are all invisible affordances; no first-run teaching. Add on-brand, reduced-motion-aware coachmarks + empty states.
+
+## Earlier Session (Jun 3 AM) — Providers + Settings wave
+- **Add Models → 4 frontier labs:** OpenAI · Anthropic · Google Gemini · xAI Grok lead the picker (then OpenRouter/Ollama/Demo under "More options"). OpenAI/Anthropic/Grok route through **OpenRouter** (one `sk-or-…` key) — they block direct browser CORS; their model lists are the live OpenRouter catalog filtered by `openai/`·`anthropic/`·`x-ai/` prefix. **Gemini stays native & untouched.**
+- **Settings redesign:** brand-aware luminous glyphs (each lab its own hue, dims when off), softer cards, "N active" header, premium CTA, fixed unrendered panel shadow (Unicode-minus bug).
+- **Swipe-to-open-sidebar removed** — collided with text selection / drift tooltip. Close-swipe kept; opens via header menu.
+- **Removed Ollama/Qwen3** default presets (seed + migration strips them from saved settings).
+- **Lab-key clarity:** routed labs show "via OpenRouter" badge + "OpenRouter API Key" label + a note (native `sk-…` keys won't work there).
+
+## Provider architecture (key context)
+OpenAI/Grok = no client-side native keys possible (no CORS; `CapacitorHttp` breaks SSE). Anthropic/Gemini *can* go native (Anthropic needs `anthropic-dangerous-direct-browser-access` header). Current: all 4 as brands, OpenAI/Anthropic/Grok via OpenRouter, Gemini native. Future options open: hybrid (native Anthropic+Gemini) or +proxy (native all 4).
 
 ## Pending (priority order)
-- [ ] **TestFlight** — archive build in Xcode → App Store Connect (build 35)
-- [ ] **Message editing** — click to edit sent message, regenerate AI response (`updateMessage` exists)
-- [ ] **AddModelSheet: OpenRouter + Ollama** — extend model picker beyond Gemini-only
-- [ ] **Conversation forking** — fork main chat at any message ("what if I'd asked X instead?")
-- [ ] **Drift synthesis** — "Synthesize branches" button merges all branch insights into a summary
-- [ ] **Full-text search** — search across ALL message content in ALL chats
-- [ ] **Export & Share** — chat + drift tree as Markdown/PDF
-- [ ] **Real auth** — Supabase/Firebase Auth (Login screen is a placeholder)
-
-## Connect feature — architecture notes
-- `templateType === 'connect'` in DriftPanel drives two sub-modes:
-  - **chips mode** (`connectQuestion === null`): shows flat list of AI-generated question chips
-  - **chat mode** (`connectQuestion !== null`): inline chat, auto-sends the question, input bar visible
-- `connectAnswersRef` (useRef Map) caches per-question conversations; cleared on new term selection
-- `connectVisitedVersion` state counter forces re-render when cache updates (visited dot appearance)
-- Connect AI prompt returns raw JSON string array — parsed in effect gated on `!isTyping && !connectQuestion`
-- System prompt in chat mode is conversational (NOT the JSON prompt) — keyed on `connectQuestion !== null`
-- `SelectionTooltip` → `App.tsx` wrapper: `(text, msgId, templateType) => handleStartDrift(text, msgId, undefined, undefined, templateType)` — critical, don't remove
+- [ ] TestFlight: archive build 44 → App Store Connect
+- [ ] On-device: providers/settings wave (OpenRouter key streams; Settings; no Ollama/Qwen3; no swipe-open) + content wave (Hebrew)
+- [ ] (Optional) native Anthropic+Gemini hybrid
+- [ ] Message editing + regeneration (`updateMessage` exists) · Custom system prompts per chat
+- [ ] Export & Share (deferred) · Security: client-side key (deferred) · Real auth
+- [ ] App.tsx refactor (~3.9k lines) · Voice output · Dead code cleanup
 
 ## Stack snapshot
-React 19 + TypeScript + Vite 7 + Capacitor 7 + Tailwind CSS (darkMode: 'class', CSS vars for colors).
-**Primary LLM:** Gemini REST+SSE (grounding enabled) · **Secondary:** OpenRouter · **Local:** Ollama · **Demo:** DummyAI
-**Gemini models (May 2026):** gemini-3.1-flash-lite (FLASH_LITE_PREVIEW), gemini-3.5-flash (FLASH_PREVIEW), gemini-2.5-flash (FLASH_25), gemini-2.5-flash-lite (FLASH_20)
-**State:** Zustand 5 — chatStore, driftStore, modelStore, uiStore · **DB:** IndexedDB via idb
-**Drift Tree:** Mobile bottom sheet (88dvh) + desktop push panel — pure HTML/CSS/SVG tree, no ReactFlow · App.tsx ~3000 lines · DriftPanel.tsx ~1100 lines
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs + others:** OpenRouter (OpenAI-compatible, streaming). **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb. Drift Map = pure SVG bioluminescent graph. App.tsx ~3.9k lines · DriftPanel.tsx ~1.7k.
 
 ## Key files
-`src/App.tsx` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`
-`src/components/SelectionTooltip.tsx` · `src/store/` · `src/services/gemini.ts`
-`src/services/settingsStorage.ts` ← default Gemini API key lives here
+`src/components/Settings.tsx` (`brandOf`/`ProviderGlyph`, redesign) · `src/components/AddModelSheet.tsx` (LAB_PROVIDERS/MORE_PROVIDERS, brand/backend split, orPrefix) · `src/services/settingsStorage.ts` (defaults + legacy-seed migration) · `src/App.tsx` (`useSwipeGesture` open removed; provider dispatch) · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/services/gemini.ts` (`LANGUAGE_DIRECTIVE`)

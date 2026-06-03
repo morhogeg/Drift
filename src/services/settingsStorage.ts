@@ -16,10 +16,12 @@ const defaultSettings: AISettings = {
   modelPresets: [
     { id: 'gemini-flash-lite', provider: 'gemini', label: 'Gemini 3.1 Flash Lite', model: GEMINI_MODELS.FLASH_LITE_PREVIEW, enabled: true },
     { id: 'gemini-flash', provider: 'gemini', label: 'Gemini 3.5 Flash', model: GEMINI_MODELS.FLASH_PREVIEW, enabled: true },
-    { id: 'ollama', provider: 'ollama', label: 'Ollama', model: 'llama2', serverUrl: 'http://localhost:11434', enabled: false },
-    { id: 'qwen3', provider: 'openrouter', label: 'Qwen3', model: OPENROUTER_MODELS.QWEN3, enabled: false },
   ]
 }
+
+// Legacy default seeds we no longer ship — stripped from existing installs too.
+// (Stable ids; user-added Ollama/OpenRouter models get slugged ids, so they're safe.)
+const LEGACY_DEFAULT_PRESET_IDS = new Set(['ollama', 'qwen3'])
 
 export const settingsStorage = {
   get(): AISettings {
@@ -63,6 +65,11 @@ export const settingsStorage = {
           ]
         }
       }
+      // Drop the retired default Ollama/Qwen3 seeds from existing saved settings.
+      if (Array.isArray(parsed.modelPresets)) {
+        parsed.modelPresets = parsed.modelPresets.filter((p: any) => !LEGACY_DEFAULT_PRESET_IDS.has(p.id))
+      }
+
       // Merge with defaults to ensure all fields exist
       return { ...defaultSettings, ...parsed }
     } catch (error) {
@@ -73,9 +80,7 @@ export const settingsStorage = {
 
   save(settings: AISettings): void {
     try {
-      console.log('Saving settings to localStorage:', settings)
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
-      console.log('Settings saved successfully')
     } catch (error) {
       console.error('Error saving settings:', error)
     }
