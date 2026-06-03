@@ -14,8 +14,13 @@ interface AddModelSheetProps {
 }
 
 // ── Provider catalogue — the one place a new provider gets registered ───────────
+// A "brand" is what the user picks (OpenAI, Anthropic…). `backend` is the actual
+// service that runs it. The three frontier labs that browsers can't reach directly
+// (OpenAI & xAI block CORS; this keeps one consistent path) are routed through
+// OpenRouter — one key unlocks all of them. Gemini stays NATIVE and untouched.
 interface ProviderMeta {
-  id: Provider
+  id: string                 // brand id (ui-level)
+  backend: Provider          // the provider stored on the preset + used to send
   name: string
   tagline: string
   dot: string
@@ -24,14 +29,27 @@ interface ProviderMeta {
   /** Helper shown under the credential field. */
   hint?: string
   keyPlaceholder?: string
+  /** OpenRouter-backed brands: only show catalog models whose id starts with this. */
+  orPrefix?: string
 }
 
-const PROVIDERS: ProviderMeta[] = [
-  { id: 'gemini', name: 'Google Gemini', tagline: 'Free keys · fast & capable', dot: 'bg-sky-400', needs: 'apiKey', hint: 'aistudio.google.com — free API keys', keyPlaceholder: 'AIza...' },
-  { id: 'openrouter', name: 'OpenRouter', tagline: 'Hundreds of models, one key', dot: 'bg-blue-400', needs: 'apiKey', hint: 'openrouter.ai/keys — free tier available', keyPlaceholder: 'sk-or-v1-...' },
-  { id: 'ollama', name: 'Ollama', tagline: 'Local models on your machine', dot: 'bg-emerald-400', needs: 'serverUrl', hint: 'Runs fully offline — no key required', keyPlaceholder: 'http://localhost:11434' },
-  { id: 'dummy', name: 'Demo AI', tagline: 'Simulated replies — no key', dot: 'bg-violet-400', needs: 'none' },
+const OR_KEY_HINT = 'openrouter.ai/keys — one key covers OpenAI, Claude & Grok'
+
+// The four frontier labs lead the list; everything else lives under "More options".
+const LAB_PROVIDERS: ProviderMeta[] = [
+  { id: 'openai', backend: 'openrouter', name: 'OpenAI', tagline: 'GPT-5 family', dot: 'bg-emerald-400', needs: 'apiKey', hint: OR_KEY_HINT, keyPlaceholder: 'sk-or-v1-...', orPrefix: 'openai/' },
+  { id: 'anthropic', backend: 'openrouter', name: 'Anthropic', tagline: 'Claude Opus & Sonnet', dot: 'bg-orange-400', needs: 'apiKey', hint: OR_KEY_HINT, keyPlaceholder: 'sk-or-v1-...', orPrefix: 'anthropic/' },
+  { id: 'gemini', backend: 'gemini', name: 'Google Gemini', tagline: 'Free keys · fast & capable', dot: 'bg-sky-400', needs: 'apiKey', hint: 'aistudio.google.com — free API keys', keyPlaceholder: 'AIza...' },
+  { id: 'xai', backend: 'openrouter', name: 'xAI Grok', tagline: 'Grok 4 family', dot: 'bg-zinc-300', needs: 'apiKey', hint: OR_KEY_HINT, keyPlaceholder: 'sk-or-v1-...', orPrefix: 'x-ai/' },
 ]
+
+const MORE_PROVIDERS: ProviderMeta[] = [
+  { id: 'openrouter', backend: 'openrouter', name: 'OpenRouter', tagline: 'Hundreds of models, one key', dot: 'bg-blue-400', needs: 'apiKey', hint: 'openrouter.ai/keys — free tier available', keyPlaceholder: 'sk-or-v1-...' },
+  { id: 'ollama', backend: 'ollama', name: 'Ollama', tagline: 'Local models on your machine', dot: 'bg-emerald-500', needs: 'serverUrl', hint: 'Runs fully offline — no key required', keyPlaceholder: 'http://localhost:11434' },
+  { id: 'dummy', backend: 'dummy', name: 'Demo AI', tagline: 'Simulated replies — no key', dot: 'bg-violet-400', needs: 'none' },
+]
+
+const PROVIDERS: ProviderMeta[] = [...LAB_PROVIDERS, ...MORE_PROVIDERS]
 
 // Curated Gemini line-up (kept stable ids so existing presets upsert cleanly).
 const GEMINI_OPTIONS: ModelOption[] = [
@@ -60,7 +78,7 @@ export default function AddModelSheet({
   maxAdd,
 }: AddModelSheetProps) {
   const [phase, setPhase] = useState<Phase>('provider')
-  const [provider, setProvider] = useState<Provider>('gemini')
+  const [brandId, setBrandId] = useState<string>('openai')
   const [credential, setCredential] = useState('')   // apiKey or serverUrl
   const [showKey, setShowKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -69,13 +87,14 @@ export default function AddModelSheet({
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Map<string, ModelOption>>(new Map())
 
-  const meta = PROVIDERS.find((p) => p.id === provider)!
+  const meta = PROVIDERS.find((p) => p.id === brandId)!
+  const backend = meta.backend
 
   // Reset whenever the sheet opens.
   useEffect(() => {
     if (isOpen) {
       setPhase('provider')
-      setProvider('gemini')
+      setBrandId('openai')
       setCredential('')
       setShowKey(false)
       setError(null)
@@ -89,9 +108,9 @@ export default function AddModelSheet({
 
   // ── Provider picked ───────────────────────────────────────────────────────────
   const pickProvider = (p: ProviderMeta) => {
-    setProvider(p.id)
+    setBrandId(p.id)
     setError(null)
-    setCredential(p.id === 'ollama' ? 'http://localhost:11434' : '')
+    setCredential(p.backend === 'ollama' ? 'http://localhost:11434' : '')
     setSelected(new Map())
     setSearch('')
     if (p.needs === 'none') {
@@ -114,13 +133,13 @@ export default function AddModelSheet({
     setPhase('validating')
     try {
       let ok = false
-      if (provider === 'gemini') ok = await checkGeminiConnection(value)
-      else if (provider === 'openrouter') ok = await checkOpenRouterConnection(value)
-      else if (provider === 'ollama') ok = await checkOllamaConnection(value)
+      if (backend === 'gemini') ok = await checkGeminiConnection(value)
+      else if (backend === 'openrouter') ok = await checkOpenRouterConnection(value)
+      else if (backend === 'ollama') ok = await checkOllamaConnection(value)
 
       if (!ok) {
         setError(
-          provider === 'ollama'
+          backend === 'ollama'
             ? "Couldn't reach that Ollama server. Is it running?"
             : 'Invalid API key. Double-check and try again.',
         )
@@ -130,20 +149,23 @@ export default function AddModelSheet({
       await loadModels(value)
       setPhase('model-select')
     } catch {
-      setError(provider === 'ollama' ? 'Could not reach the server.' : 'Could not reach the provider. Check your connection.')
+      setError(backend === 'ollama' ? 'Could not reach the server.' : 'Could not reach the provider. Check your connection.')
       setPhase('connect')
     }
   }
 
   const loadModels = async (value: string) => {
-    if (provider === 'gemini') {
+    if (backend === 'gemini') {
       setOptions(GEMINI_OPTIONS)
       return
     }
     setLoadingModels(true)
     try {
-      if (provider === 'openrouter') {
-        const list = await listOpenRouterModels(value)
+      if (backend === 'openrouter') {
+        let list = await listOpenRouterModels(value)
+        // Branded labs (OpenAI / Anthropic / xAI) show only their own models,
+        // straight from the live catalog so the line-up never goes stale.
+        if (meta.orPrefix) list = list.filter((m) => m.id.startsWith(meta.orPrefix!))
         setOptions(
           list.map((m) => ({
             key: `or-${slug(m.id)}`,
@@ -152,7 +174,7 @@ export default function AddModelSheet({
             desc: m.id.endsWith(':free') ? 'Free' : undefined,
           })),
         )
-      } else if (provider === 'ollama') {
+      } else if (backend === 'ollama') {
         const tags = await listOllamaModels(value)
         setOptions(tags.map((t) => ({ key: `ollama-${slug(t)}`, label: t, model: t })))
       }
@@ -175,7 +197,7 @@ export default function AddModelSheet({
     const m = search.trim()
     if (!m) return
     const opt: ModelOption = {
-      key: `${provider === 'openrouter' ? 'or' : 'ollama'}-${slug(m)}`,
+      key: `${backend === 'openrouter' ? 'or' : 'ollama'}-${slug(m)}`,
       label: m,
       model: m,
       desc: 'Custom',
@@ -192,10 +214,10 @@ export default function AddModelSheet({
       const existing = currentPresets.find((p) => p.id === opt.key)
       const base: ModelPreset = existing
         ? { ...existing, enabled: true }
-        : { id: opt.key, provider, label: opt.label, enabled: true }
+        : { id: opt.key, provider: backend, label: opt.label, enabled: true }
       base.model = opt.model
       base.label = opt.label
-      if (provider === 'ollama') base.serverUrl = value
+      if (backend === 'ollama') base.serverUrl = value
       else base.apiKey = value
       presets.push(base)
     }
@@ -204,7 +226,7 @@ export default function AddModelSheet({
   }
 
   const atMax = selected.size >= maxAdd
-  const usesSearch = provider === 'openrouter' || provider === 'ollama'
+  const usesSearch = backend === 'openrouter' || backend === 'ollama'
   const filtered = usesSearch && search.trim()
     ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()) || o.model.toLowerCase().includes(search.toLowerCase()))
     : options
@@ -252,12 +274,28 @@ export default function AddModelSheet({
         {/* ── Provider select ────────────────────────────────────────────────────── */}
         {phase === 'provider' && (
           <div className="px-5 pb-2 flex flex-col gap-2 overflow-y-auto">
-            <p className="text-[12px] text-text-muted mb-1">Pick a provider — Drift works with any of them.</p>
-            {PROVIDERS.map((p) => (
+            <p className="text-[12px] text-text-muted mb-1">Pick a provider — one key unlocks the frontier labs.</p>
+            {LAB_PROVIDERS.map((p) => (
               <button
                 key={p.id}
                 onClick={() => pickProvider(p)}
                 className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-dark-elevated border border-dark-border/60 active:opacity-70 hover:border-accent-violet/40 transition-all text-left"
+              >
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${p.dot}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-medium text-text-primary">{p.name}</p>
+                  <p className="text-[11px] text-text-muted mt-0.5">{p.tagline}</p>
+                </div>
+                <ChevronRight size={16} className="text-text-muted flex-shrink-0" />
+              </button>
+            ))}
+
+            <p className="text-[10px] font-semibold tracking-widest uppercase text-text-muted/70 mt-3 mb-0.5 px-1">More options</p>
+            {MORE_PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => pickProvider(p)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-dark-elevated/60 border border-dark-border/50 active:opacity-70 hover:border-accent-violet/40 transition-all text-left"
               >
                 <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${p.dot}`} />
                 <div className="flex-1 min-w-0">
@@ -279,15 +317,20 @@ export default function AddModelSheet({
                 <span className={`w-3 h-3 rounded-full ${meta.dot}`} />
               </span>
               <div>
-                <p className="text-[13px] font-semibold text-text-primary">{meta.name}</p>
-                {meta.hint && <p className="text-[11px] text-text-muted">{meta.hint}</p>}
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[13px] font-semibold text-text-primary">{meta.name}</p>
+                  {meta.orPrefix && (
+                    <span className="text-[9px] font-semibold uppercase tracking-wider text-accent-violet-300 bg-accent-violet/15 border border-accent-violet/25 rounded px-1.5 py-0.5">via OpenRouter</span>
+                  )}
+                </div>
+                {meta.hint && <p className="text-[11px] text-text-muted mt-0.5">{meta.hint}</p>}
               </div>
             </div>
 
             {/* Credential input */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[11px] font-semibold tracking-widest uppercase text-text-muted">
-                {meta.needs === 'serverUrl' ? 'Server URL' : 'API Key'}
+                {meta.needs === 'serverUrl' ? 'Server URL' : meta.orPrefix ? 'OpenRouter API Key' : 'API Key'}
               </label>
               <div className="relative flex items-center">
                 <input
@@ -313,6 +356,11 @@ export default function AddModelSheet({
                   </button>
                 )}
               </div>
+              {meta.orPrefix && !error && (
+                <p className="text-[11px] text-text-muted/70 leading-snug">
+                  {meta.name} is reached through OpenRouter — paste your OpenRouter key (<span className="text-text-secondary">sk-or-…</span>), not a native {meta.name} key.
+                </p>
+              )}
               {error && <p className="text-[12px] text-red-400">{error}</p>}
             </div>
 
@@ -352,7 +400,7 @@ export default function AddModelSheet({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !exactMatch && search.trim()) addCustom() }}
-                  placeholder={provider === 'openrouter' ? 'Search or paste a model ID…' : 'Search or type a model name…'}
+                  placeholder={backend === 'openrouter' ? 'Search or paste a model ID…' : 'Search or type a model name…'}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}

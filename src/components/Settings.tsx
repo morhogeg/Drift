@@ -63,20 +63,23 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 // ─── Section header ───────────────────────────────────────────────────────────
-function SectionHeader({ label }: { label: string }) {
+function SectionHeader({ label, hint }: { label: string; hint?: string }) {
   return (
-    <div className="px-4 pt-5 pb-1.5">
-      <span className="text-[10px] font-semibold tracking-widest uppercase text-text-muted">
+    <div className="px-5 pt-6 pb-2 flex items-baseline justify-between">
+      <span className="text-[11px] font-semibold tracking-[0.18em] uppercase text-text-muted/80">
         {label}
       </span>
+      {hint && <span className="text-[11px] text-text-muted/50">{hint}</span>}
     </div>
   )
 }
 
 // ─── Grouped card wrapper ─────────────────────────────────────────────────────
+// A quiet, dark surface that lights from within — hairlines barely there, the
+// content does the talking.
 function SettingsGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-4 rounded-xl bg-dark-elevated/50 border border-dark-border/50 divide-y divide-dark-border/40 overflow-hidden">
+    <div className="mx-4 rounded-2xl bg-gradient-to-b from-white/[0.045] to-white/[0.015] border border-white/[0.06] divide-y divide-white/[0.05] overflow-hidden shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]">
       {children}
     </div>
   )
@@ -114,14 +117,43 @@ function SettingsRow({
   )
 }
 
-// ─── Provider dot ─────────────────────────────────────────────────────────────
-function ProviderDot({ provider }: { provider: Provider }) {
-  const color =
-    provider === 'gemini' ? 'bg-sky-400' :
-    provider === 'openrouter' ? 'bg-blue-400' :
-    provider === 'ollama' ? 'bg-emerald-400' :
-    'bg-violet-400'
-  return <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${color}`} />
+// ─── Brand identity ───────────────────────────────────────────────────────────
+// The frontier labs route through OpenRouter, but each still gets its own colour +
+// name so a preset reads as "OpenAI" / "Anthropic" / "Grok", not a generic router.
+interface Brand { key: string; label: string; color: string; glow: string }
+function brandOf(preset: ModelPreset): Brand {
+  const m = preset.model ?? ''
+  if (preset.provider === 'gemini') return { key: 'gemini', label: 'Gemini', color: '#38bdf8', glow: 'rgba(56,189,248,0.5)' }
+  if (preset.provider === 'ollama') return { key: 'ollama', label: 'Ollama', color: '#22c55e', glow: 'rgba(34,197,94,0.5)' }
+  if (preset.provider === 'dummy') return { key: 'dummy', label: 'Demo', color: '#a78bfa', glow: 'rgba(167,139,250,0.5)' }
+  if (preset.provider === 'openrouter') {
+    if (m.startsWith('openai/')) return { key: 'openai', label: 'OpenAI', color: '#10b981', glow: 'rgba(16,185,129,0.5)' }
+    if (m.startsWith('anthropic/')) return { key: 'anthropic', label: 'Anthropic', color: '#d97757', glow: 'rgba(217,119,87,0.55)' }
+    if (m.startsWith('x-ai/')) return { key: 'xai', label: 'Grok', color: '#d4d4d8', glow: 'rgba(212,212,216,0.45)' }
+    if (m.startsWith('google/')) return { key: 'google', label: 'Gemini', color: '#38bdf8', glow: 'rgba(56,189,248,0.5)' }
+    return { key: 'openrouter', label: 'OpenRouter', color: '#818cf8', glow: 'rgba(129,140,248,0.5)' }
+  }
+  return { key: 'openrouter', label: 'OpenRouter', color: '#818cf8', glow: 'rgba(129,140,248,0.5)' }
+}
+
+// A luminous brand tile — light from within, dimmed when the preset is off.
+function ProviderGlyph({ brand, active = true, size = 34 }: { brand: Brand; active?: boolean; size?: number }) {
+  return (
+    <span
+      className="relative flex items-center justify-center rounded-xl flex-shrink-0 transition-all duration-300"
+      style={{
+        width: size, height: size,
+        background: `${brand.color}${active ? '1c' : '10'}`,
+        border: `1px solid ${brand.color}${active ? '3a' : '22'}`,
+        boxShadow: active ? `0 0 16px -3px ${brand.glow}` : 'none',
+      }}
+    >
+      <span
+        className="rounded-full transition-all duration-300"
+        style={{ width: 8, height: 8, background: brand.color, opacity: active ? 1 : 0.5, boxShadow: active ? `0 0 8px ${brand.glow}` : 'none' }}
+      />
+    </span>
+  )
 }
 
 // ─── Provider label ───────────────────────────────────────────────────────────
@@ -154,7 +186,7 @@ function PresetForm({
     <div className="border border-dark-border/50 rounded-xl overflow-hidden bg-dark-elevated/40">
       {/* Preset header row */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-dark-border/40 bg-dark-bg/40">
-        <ProviderDot provider={preset.provider} />
+        <ProviderGlyph brand={brandOf(preset)} active={preset.enabled} size={30} />
         <input
           type="text"
           value={preset.label}
@@ -448,21 +480,21 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
       />
 
       {/* Panel — slides in from the right */}
-      <div className="relative ml-auto w-full max-w-md h-full flex flex-col bg-dark-surface border-l border-dark-border/60 shadow-[−20px_0_60px_rgba(0,0,0,0.5)] animate-slide-in overflow-hidden">
+      <div className="relative ml-auto w-full max-w-md h-full flex flex-col bg-dark-surface border-l border-dark-border/60 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] animate-slide-in overflow-hidden">
         {/* Subtle gradient accent at top */}
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent-violet/60 to-transparent" />
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-dark-border/40">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/[0.05]">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={handleCancel}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-dark-elevated transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-full text-text-muted hover:text-text-primary hover:bg-white/[0.06] active:scale-90 transition-all"
               aria-label="Close"
             >
-              <X className="w-5 h-5" />
+              <X className="w-[18px] h-[18px]" />
             </button>
-            <h2 className="text-[17px] font-semibold text-text-primary tracking-tight">Settings</h2>
+            <h2 className="text-[19px] font-semibold text-text-primary tracking-tight">Settings</h2>
           </div>
           {connectionStatus && (
             <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
@@ -484,24 +516,36 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
         <div className="flex-1 overflow-y-auto overscroll-contain pb-28">
 
           {/* ── MODELS section ── */}
-          <SectionHeader label="Models" />
+          <SectionHeader
+            label="Models"
+            hint={presets.length ? `${presets.filter(p => p.enabled).length} active` : undefined}
+          />
           <SettingsGroup>
             {presets.length === 0 ? (
-              <div className="px-4 py-5 text-center">
-                <p className="text-sm text-text-muted">No models configured yet.</p>
-                <p className="text-xs text-text-muted/60 mt-1">Tap the button below to add your first model.</p>
+              <div className="px-5 py-8 text-center">
+                <div className="w-11 h-11 mx-auto mb-3 rounded-2xl flex items-center justify-center bg-accent-violet/10 border border-accent-violet/20">
+                  <Plus className="w-5 h-5 text-accent-violet" />
+                </div>
+                <p className="text-sm text-text-secondary">No models yet</p>
+                <p className="text-xs text-text-muted/70 mt-1">Add one below — OpenAI, Claude, Gemini or Grok.</p>
               </div>
             ) : (
-              presets.map((preset, idx) => (
+              presets.map((preset) => (
                 <div key={preset.id}>
                   {/* Collapsed row */}
                   {expandedPreset !== preset.id ? (
-                    <div className="flex items-center gap-3 px-4 min-h-[52px] py-2.5 transition-colors hover:bg-dark-elevated/40">
-                      <ProviderDot provider={preset.provider} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-text-primary truncate">{preset.label}</p>
-                        <p className="text-xs text-text-muted">{PROVIDER_LABELS[preset.provider]}{preset.model ? ` · ${preset.model.split('/').pop()}` : ''}</p>
-                      </div>
+                    <div className={`flex items-center gap-3 px-3.5 min-h-[60px] py-2.5 transition-colors ${preset.enabled ? '' : 'opacity-60'} hover:bg-white/[0.02]`}>
+                      <ProviderGlyph brand={brandOf(preset)} active={preset.enabled} />
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPreset(preset.id)}
+                        className="flex-1 min-w-0 text-left"
+                      >
+                        <p className="text-[14px] font-medium text-text-primary truncate leading-tight">{preset.label}</p>
+                        <p className="text-[11.5px] text-text-muted mt-0.5 truncate">
+                          {brandOf(preset).label}{preset.model ? ` · ${preset.model.split('/').pop()}` : ''}
+                        </p>
+                      </button>
                       <Toggle
                         checked={preset.enabled}
                         onChange={(v) => updatePreset(preset.id, { enabled: v })}
@@ -509,7 +553,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
                       <button
                         type="button"
                         onClick={() => setExpandedPreset(preset.id)}
-                        className="p-1.5 rounded-md text-text-muted hover:text-text-primary transition-colors"
+                        className="p-1 -mr-0.5 rounded-md text-text-muted/70 hover:text-text-primary transition-colors"
                         title="Configure"
                       >
                         <ChevronRight className="w-4 h-4" />
@@ -535,23 +579,20 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
                       </button>
                     </div>
                   )}
-                  {idx < presets.length - 1 && expandedPreset !== preset.id && (
-                    <div className="h-px bg-dark-border/40 mx-4" />
-                  )}
                 </div>
               ))
             )}
           </SettingsGroup>
 
           {/* Add model button */}
-          <div className="mx-4 mt-2">
+          <div className="mx-4 mt-3">
             <button
               type="button"
               onClick={() => setAddModelSheetOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-dark-border/60 text-text-muted hover:text-accent-violet hover:border-accent-violet/40 transition-colors text-sm"
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium text-accent-violet-300 bg-accent-violet/[0.07] border border-accent-violet/25 hover:bg-accent-violet/[0.12] hover:border-accent-violet/40 active:scale-[0.99] transition-all"
             >
               <Plus className="w-4 h-4" />
-              Add Model
+              Add a model
             </button>
           </div>
 
@@ -574,7 +615,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           <SectionHeader label="Advanced" />
           <SettingsGroup>
             <SettingsRow
-              label="Dummy AI"
+              label="Demo AI"
               description="Simulate responses without API credits"
               right={
                 <Toggle

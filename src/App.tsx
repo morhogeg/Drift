@@ -222,9 +222,12 @@ function App() {
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
-  // ── Swipe gesture: left → open sidebar, right → close sidebar ───────────────
+  // ── Swipe gesture: right → close sidebar only ──────────────────────────────
+  // Swipe-to-OPEN was removed: a horizontal drag in the chat to select text was
+  // being read as an open-sidebar swipe, hijacking the drift selection tooltip.
+  // The sidebar still opens via the header menu button; close keeps the swipe.
   const swipeHandlers = useSwipeGesture(
-    () => uiStore.setSidebarOpen(true),   // swipe left → open
+    undefined,                            // swipe left → (disabled — collided with text selection)
     () => uiStore.setSidebarOpen(false),  // swipe right → close
   )
   const galleryOpen = uiStore.galleryOpen

@@ -1,13 +1,30 @@
 # Drift — Session Handoff
 
-**Date:** June 2, 2026
+**Date:** June 3, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 42 (iOS Xcode) / web
-**Status:** Four waves. (A) Screenshot polish. (B) Reliability — Gemini language match, Connect lens-switch preserves cards, map opens real drifts, scoped error boundary. (C) Connect redesign — relationship typing (5 kinds + icons), alive hub/edges, RTL mirroring, legend. (D) Content-quality + map-quality wave — transliteration of proper nouns into chat script, map bridge-node opens its conversation (not cards), meaningful map node/pill labels, filter-field redesign, and a full rewrite of every generation prompt (Connect/Simplify/Deep dive/highlights/suggestions/synthesis) for context-grounding + intent-fidelity. (Bundle: index ~783 kB / gzip ~234 kB.)
+**Build:** 44 (iOS Xcode) / web
+**Status:** Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+
+## ⚠️ Provider architecture (important context for next session)
+- **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
+- Branded labs are stored as `provider: 'openrouter'` presets with model ids `openai/* · anthropic/* · x-ai/*`; the live OpenRouter catalog is filtered by that prefix so line-ups never go stale. No dispatch changes — existing OpenRouter streaming path runs them.
 
 ---
 
 ## What Was Done This Session
+
+### 149. Settings — remove Ollama/Qwen3 default seeds + lab-key clarity (FIX)
+- `settingsStorage.ts`: dropped the default `ollama` (llama2) and `qwen3` presets from `defaultSettings.modelPresets`, AND added a migration in `get()` that strips `LEGACY_DEFAULT_PRESET_IDS = {ollama, qwen3}` from already-saved settings (stable ids; user-added Ollama/OpenRouter models get slugged ids so they're untouched). Ollama still available via "More options".
+- `AddModelSheet.tsx`: made the OpenRouter-key requirement for routed labs unmistakable — a **"via OpenRouter"** badge by the lab name, the field relabelled **"OpenRouter API Key"**, and a note: "{lab} is reached through OpenRouter — paste your OpenRouter key (sk-or-…), not a native {lab} key." (Pasting a native `sk-…`/`sk-ant…` key in a routed lab would fail validation.)
+
+### 148. Swipe-to-open-sidebar removed (FIX)
+- A horizontal drag in the chat to select text was being read as an open-sidebar swipe, hijacking the drift selection tooltip. `useSwipeGesture` in `App.tsx` now passes `undefined` for the left/open callback; swipe-right-to-close is kept (no collision — no text selection while the sidebar is open). Sidebar still opens via the header menu button.
+
+### 147. Settings screen redesign (DESIGN)
+- Reworked within the canonical `DESIGN_SYSTEM.md` ("light from within"), not the frontend-design skill, to stay on-brand. New **brand-aware luminous glyphs** (`brandOf` + `ProviderGlyph`): each preset emits its lab's hue (OpenAI emerald, Anthropic Claude-clay #d97757, Grok near-white, Gemini sky, OpenRouter indigo, Ollama green, Demo violet), dimming when toggled off — this also visually distinguishes OpenAI/Anthropic/Grok even though they share the OpenRouter backend. Softer group cards (gradient surface, faint hairlines, rounded-2xl), refined section headers with an "N active" count, taller tappable rows, premium "Add a model" CTA, polished empty state, larger title + circular close button. Fixed a latent bug: panel drop-shadow used a Unicode minus (`−`) so it never rendered → real `-20px`. "Dummy AI" → "Demo AI".
+
+### 146. Add Models — the four frontier labs (FEATURE)
+- `AddModelSheet.tsx` reorganised: `LAB_PROVIDERS` (OpenAI · Anthropic · Google Gemini · xAI Grok) lead, then `MORE_PROVIDERS` (OpenRouter full search · Ollama · Demo). Introduced a brand/backend split: `ProviderMeta.id` is the UI brand, `ProviderMeta.backend` is the actual `Provider` stored on the preset. OpenAI/Anthropic/xAI use `backend: 'openrouter'` + an `orPrefix` (`openai/`·`anthropic/`·`x-ai/`); their model list is the **live OpenRouter catalog filtered by prefix** (never stale). Gemini path is byte-for-byte unchanged (native, `checkGeminiConnection`, `GEMINI_OPTIONS`). No new `Provider` union members → no dispatch/Settings changes; existing OpenRouter streaming path runs the routed labs. Research-backed: confirmed OpenAI has no browser CORS, Anthropic/Gemini do, Grok unclear, `CapacitorHttp` breaks SSE.
 
 ### 144. Content-generation quality — full prompt rewrite (QUALITY)
 - Audited and rewrote every AI-generation surface for context-grounding, user-intent fidelity, and anti-generic output, within the existing parse contracts:
@@ -333,8 +350,10 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 42 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass for this wave** — in a Hebrew chat verify: (1) Connect concepts now render in Hebrew script (no Latin proper nouns); (2) map node/pill labels are meaningful (no "Barcelona 1/2/3"); (3) map "Open this drift" on a bridge node opens the bridge conversation, not the cards screen; (4) filter field placement/usability; (5) overall content quality of Connect edges + bridge answers, Simplify, and Deep dive (sharper, context-grounded, non-generic). Also re-verify the prior wave: typed Connect cards (icons/hues/legend), breathing hub, RTL mirroring.
+- [ ] **TestFlight submission** — archive build 44 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
+- [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.
+- [ ] **(Optional) Native Anthropic + Gemini** — if a native Anthropic key is wanted, wire `api.anthropic.com` directly (CORS ok with `anthropic-dangerous-direct-browser-access` header); would make OpenAI/Grok-via-OpenRouter a hybrid. Left as-is for now by request.
 - [ ] **Message editing + regeneration** — click to edit a sent message, regenerate the AI response. `updateMessage` already exists in chatStore.
 - [ ] **Custom system prompts per chat** — per-chat persona/instruction. Services already accept system messages.
 - [ ] **Export & Share** — export chat + its drift tree as Markdown/PDF. (Deferred by request.)
