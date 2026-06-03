@@ -360,6 +360,66 @@ function App() {
     handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
   }
 
+  // Rebuild the in-memory per-term lens registry from persisted driftInfos so
+  // returning to a term (and its lens threads) survives a reload — the registry
+  // is otherwise in-memory only. Fill-only: never clobber a live in-session map.
+  useEffect(() => {
+    if (!chatHistory.length) return
+    const reg = lensRegistryRef.current
+    for (const chat of chatHistory) {
+      for (const m of chat.messages) {
+        if (!m.driftInfos) continue
+        for (const d of m.driftInfos) {
+          if (!d.selectedText || !d.driftChatId) continue
+          const baseKey = `${m.id}::${d.selectedText}`
+          let lenses = reg.get(baseKey)
+          if (!lenses) { lenses = new Map(); reg.set(baseKey, lenses) }
+          const tpl = d.templateType ?? 'drift'
+          if (!lenses.has(tpl)) lenses.set(tpl, d.driftChatId)
+        }
+      }
+    }
+  }, [chatHistory])
+
+  // ── Continuity: "pick up where you left off" ─────────────────────────────────
+  // Unfinished drift trees — conversations with ≥2 explored drifts not yet woven
+  // into a synthesis. Surfaced on the empty state to invite the user back rather
+  // than letting hard-won exploration go cold. sortKey is a timestamp; the date
+  // is formatted in the JSX (formatDate is defined further down).
+  interface ResumableTree { rootId: string; title: string; driftCount: number; terms: string; sortKey: number }
+  const resumableTrees = useMemo<ResumableTree[]>(() => {
+    if (!chatHistory.length) return []
+    const byId = new Map(chatHistory.map(c => [c.id, c]))
+    const rootOf = (id: string): string => {
+      let cur = byId.get(id); const seen = new Set<string>()
+      while (cur?.metadata?.isDrift && cur.metadata.parentChatId && !seen.has(cur.id)) {
+        seen.add(cur.id); cur = byId.get(cur.metadata.parentChatId)
+      }
+      return cur?.id ?? id
+    }
+    const groups = new Map<string, ChatSession[]>()
+    for (const c of chatHistory) {
+      if (!c.metadata?.isDrift) continue
+      const root = rootOf(c.id)
+      if (!groups.has(root)) groups.set(root, [])
+      groups.get(root)!.push(c)
+    }
+    const out: ResumableTree[] = []
+    for (const [rootId, drifts] of groups) {
+      const root = byId.get(rootId)
+      if (!root || root.metadata?.isDrift || rootId === activeChatId) continue
+      const synthesized = root.messages.some(m => m.id.startsWith('synth-')) || /✦\s*Synthesis/i.test(root.lastMessage || '')
+      if (synthesized) continue
+      const real = drifts.filter(d => (d.messages?.length ?? 0) > 0 || !!d.lastMessage)
+      if (real.length < 2) continue
+      const times = real.map(d => new Date(d.createdAt as unknown as string).getTime()).filter(n => !Number.isNaN(n))
+      const sortKey = times.length ? Math.max(...times) : 0
+      const terms = real.map(d => d.metadata?.selectedText || d.title).filter(Boolean).slice(0, 3).join(' · ')
+      out.push({ rootId, title: root.title || 'Untitled', driftCount: real.length, terms, sortKey })
+    }
+    return out.sort((a, b) => b.sortKey - a.sortKey).slice(0, 3)
+  }, [chatHistory, activeChatId])
+
   // ── Lateral term-walking: sibling drifts ──────────────────────────────────────
   // The other terms that branch from the same parent as the open drift. Lets the
   // user walk sideways term→term without returning to the map. Resolved from the
@@ -2866,6 +2926,44 @@ function App() {
                       Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
                     </p>
                   </div>
+                  {resumableTrees.length > 0 && (
+                    <div className="w-full max-w-[340px] mt-9 text-left">
+                      <div className="flex items-center gap-2 mb-3 px-1">
+                        <CornerUpLeft className="w-3.5 h-3.5 text-accent-violet/60 shrink-0" />
+                        <span className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold">Pick up where you left off</span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {resumableTrees.map(t => (
+                          <div
+                            key={t.rootId}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => { haptics.selection(); switchChat(t.rootId) }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); haptics.selection(); switchChat(t.rootId) } }}
+                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-text-primary text-[14px] font-medium truncate" dir="auto">{t.title}</span>
+                              <span className="text-text-muted text-[11px] shrink-0 tabular-nums">{formatDate(new Date(t.sortKey || Date.now()))}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <span className="text-text-muted text-[12px] truncate" dir="auto">{t.terms}</span>
+                              <span className="flex items-center gap-1 shrink-0 text-accent-violet/80 text-[11px] font-medium">
+                                <GitBranch className="w-3 h-3" /> {t.driftCount}
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
+                              disabled={synthesizing}
+                              className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
+                            >
+                              <span className="text-[13px] leading-none">✦</span> Bring it home
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
