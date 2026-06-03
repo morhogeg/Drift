@@ -1,48 +1,30 @@
 # Drift — Quick Status
 
-**Date:** June 3, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 44 (iOS + web)
+**Date:** June 3, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 46 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-> ⚠️ iOS bundles a copy of `dist/`. After ANY web change you MUST run `npm run build && npx cap sync ios` before Run/Archive in Xcode — a clean+rebuild in Xcode alone keeps the stale bundle.
+> ⚠️ iOS bundles a copy of `dist/`. After ANY web change run `npm run build && npx cap sync ios` before Run/Archive — a clean+rebuild in Xcode alone keeps the stale bundle.
 
-## Last Session (Jun 3 PM) — Bug-fix wave + usability/map + web QA
-Ran as 4 parallel agents in isolated git worktrees (sidebar / map / panel / web-QA), merged sequentially with no conflicts.
-- **Sidebar overhaul** — new `SidebarChatRow.tsx`: three distinct row types (Chat / Drift / Synthesis) with own icon+treatment; drifts nest under their source chat (resolves up `parentChatId` to root) with a violet rail + `from <parent>` caption. Synthesis detected via `/✦ Synthesis/i` on `lastMessage`.
-- **Drift Map (`DriftKnowledgeGraph.tsx`)** — (a) fixed mobile open-then-close: 450ms re-entrancy-guarded toggle + removed `ErrorBoundary onError→close` (boundary was conditionally mounted, yanking the map on any transient throw). (b) Node **lineage**: `<title>` breadcrumb on hover/long-press + breadcrumb trail in DetailCard. (c) Clickable AI terms (`InlineListLink`) now dispatch `drift:start-from-term` → routed to `handleStartDrift`, so they record as map nodes/edges. (d) **At-a-glance** parent-term context label rendered ABOVE each drift node (e.g. `↳ PSG` over the goals question), RTL-safe, parent-hue.
-- **Drift panel (`DriftPanel.tsx`)** — Connect/term keying: added `driftChatId` to the init effect deps; `skipStaleCardParseRef` stops the parser keying the old drift's cards onto a newly-selected term; `messagesThreadRef` stamps the loading thread so per-term saves never land under the wrong key. Fixes: Connect showing wrong drift's content, lens/pill out of sync, and per-term conversation vanishing on term switch.
-- **Web QA fixes** — added `dummy` (Demo) provider branch in DriftPanel (drifts were throwing "No Gemini key" in keyless Demo mode); `100dvh` viewport (input bar no longer clipped by mobile browser chrome); `navigator.clipboard?.` guard; **removed console statements that logged API keys / full settings** to the browser console.
-- **State persistence verified** — per-(term × lens) threads persist + restore across term switches (`navigateToSiblingDrift` → `resolveDriftRestore`) and lens switches (`handleSwitchLens` + `lensRegistryRef`). Connect cards + visited-bridge answers cached in `connectCardsCache`/`connectAnswersCache` + `driftInfos`.
-
-### Intelligence + usability roadmap — ALL THREE SHIPPED (Jun 3 PM)
-1. **Semantic concept layer ✅** — `src/services/embeddings.ts` (Gemini `gemini-embedding-001`, 768-dim via `outputDimensionality`, batch `:batchEmbedContents`, graceful `[]` on error) + `cosineSimilarity`. IDB vector cache: `db.ts` DB_VERSION 1→2, additive `drift-embeddings` store + `embeddingDB` CRUD. `src/lib/embeddingBackfill.ts` (debounced fire-and-forget backfill, djb2 hash for re-embed, in-memory cache). `src/lib/semanticRecall.ts` merges lexical-first + semantic (threshold 0.62). Wired into "you explored this before" (`relatedDrifts`, lexical instant + semantic fills in) and `SearchModal` ("Related by meaning" section). **Degrades to lexical without a key.** Live test: sim(Messi, Argentine fwd)=0.75, sim(Messi, PSG)=0.64, sim(Messi, photosynthesis)=0.49 → PASS. `scripts/test-embeddings.mjs` is the live self-test. **TODO(semantic) seams left** in `DriftPanel.tsx` (Connect-lens seeding) + `DriftKnowledgeGraph.tsx` (semantic edges) — deliberately out of scope, separate pass.
-2. **Continuity ✅** — `App.tsx`: effect rebuilds `lensRegistryRef` from persisted `driftInfos` on load (per-term/lens threads survive reload). "Pick up where you left off" resume surface in the empty state: `resumableTrees` memo finds un-synthesized trees with ≥2 real drifts; cards switch to the chat + a "✦ Bring it home" synthesize action.
-3. **Discoverability ✅** — `src/lib/onceFlags.ts` (localStorage one-time flags + `useOnceFlag` hook). Two coachmarks: a drift-gesture hint above the composer once a reply is on screen (auto-dismisses when any drift opens), and a lens-bar hint in `DriftPanel` (dismissed on first lens use). Map already had a teaching empty state ("No drifts yet…") — left as-is.
-
-### Next candidates
-- TODO(semantic): Connect-lens seeding from semantic neighbors + semantic edges on the Drift Map.
-- Composite lens-thread (`{id}__connect`) connect-state isn't persisted to `driftInfos` (in-memory cache only) → survives session, not reload. Minor.
-- Bundle is one ~790 kB chunk (no code-split); voice mic false-positive "supported" on Firefox; login wall on first web visit.
-
-## Earlier Session (Jun 3 AM) — Providers + Settings wave
-- **Add Models → 4 frontier labs:** OpenAI · Anthropic · Google Gemini · xAI Grok lead the picker (then OpenRouter/Ollama/Demo under "More options"). OpenAI/Anthropic/Grok route through **OpenRouter** (one `sk-or-…` key) — they block direct browser CORS; their model lists are the live OpenRouter catalog filtered by `openai/`·`anthropic/`·`x-ai/` prefix. **Gemini stays native & untouched.**
-- **Settings redesign:** brand-aware luminous glyphs (each lab its own hue, dims when off), softer cards, "N active" header, premium CTA, fixed unrendered panel shadow (Unicode-minus bug).
-- **Swipe-to-open-sidebar removed** — collided with text selection / drift tooltip. Close-swipe kept; opens via header menu.
-- **Removed Ollama/Qwen3** default presets (seed + migration strips them from saved settings).
-- **Lab-key clarity:** routed labs show "via OpenRouter" badge + "OpenRouter API Key" label + a note (native `sk-…` keys won't work there).
-
-## Provider architecture (key context)
-OpenAI/Grok = no client-side native keys possible (no CORS; `CapacitorHttp` breaks SSE). Anthropic/Gemini *can* go native (Anthropic needs `anthropic-dangerous-direct-browser-access` header). Current: all 4 as brands, OpenAI/Anthropic/Grok via OpenRouter, Gemini native. Future options open: hybrid (native Anthropic+Gemini) or +proxy (native all 4).
+## Last Session (Jun 3 PM) — bug-fix + intelligence wave
+- **Sidebar redesign** — `SidebarChatRow.tsx`: distinct Chat / Drift / Synthesis rows; drifts nest under their source chat with origin caption.
+- **Drift Map fixes** — single-tap open (no flicker-close); node lineage (`<title>` + breadcrumb + at-a-glance `↳ parent` label); clickable AI terms now record as map nodes.
+- **Connect / lens / state** — `driftChatId`-keyed init so Connect shows the selected term's cards; per-(term×lens) conversations persist across term/lens switches.
+- **Semantic concept layer** — Gemini embeddings (`gemini-embedding-001`, 768-dim) + IDB vector cache + debounced backfill; meaning-based recall ("you explored before") + "Related by meaning" search. Degrades to lexical without a key. Live test PASS.
+- **Continuity** — lens registry rebuilt from `driftInfos` on load; "Pick up where you left off" resume cards in the empty state.
+- **Discoverability** — one-time coachmarks (`onceFlags.ts`) for the drift gesture + lens switcher.
+- **Web QA** — keyless Demo provider in drift panel; `100dvh`; clipboard guard; stop logging secrets.
 
 ## Pending (priority order)
-- [ ] TestFlight: archive build 44 → App Store Connect
-- [ ] On-device: providers/settings wave (OpenRouter key streams; Settings; no Ollama/Qwen3; no swipe-open) + content wave (Hebrew)
-- [ ] (Optional) native Anthropic+Gemini hybrid
+- [ ] TestFlight: archive build 46 → App Store Connect
+- [ ] On-device pass — this session's features (see HANDOFF for the checklist)
+- [ ] TODO(semantic): Connect-lens seeding + semantic map edges; persist composite lens-thread connect-state
+- [ ] On-device pass — providers/settings wave (OpenRouter key streams; Settings; no Ollama/Qwen3)
 - [ ] Message editing + regeneration (`updateMessage` exists) · Custom system prompts per chat
-- [ ] Export & Share (deferred) · Security: client-side key (deferred) · Real auth
-- [ ] App.tsx refactor (~3.9k lines) · Voice output · Dead code cleanup
+- [ ] Export & Share (deferred) · Security: client-side Gemini key (deferred) · Real auth
+- [ ] App.tsx refactor (~4.1k lines) · Voice output · Bundle code-split (~804 kB single chunk)
 
 ## Stack snapshot
-React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs + others:** OpenRouter (OpenAI-compatible, streaming). **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb. Drift Map = pure SVG bioluminescent graph. App.tsx ~3.9k lines · DriftPanel.tsx ~1.7k.
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Primary LLM:** Gemini REST+SSE (native). **Embeddings:** Gemini `gemini-embedding-001` → IndexedDB vector cache. **Routed labs + others:** OpenRouter (streaming). **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb. Drift Map = pure SVG. App.tsx ~4.1k lines · DriftPanel.tsx ~1.8k.
 
 ## Key files
-`src/components/Settings.tsx` (`brandOf`/`ProviderGlyph`, redesign) · `src/components/AddModelSheet.tsx` (LAB_PROVIDERS/MORE_PROVIDERS, brand/backend split, orPrefix) · `src/services/settingsStorage.ts` (defaults + legacy-seed migration) · `src/App.tsx` (`useSwipeGesture` open removed; provider dispatch) · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/services/gemini.ts` (`LANGUAGE_DIRECTIVE`)
+`src/services/embeddings.ts` · `src/lib/embeddingBackfill.ts` · `src/lib/semanticRecall.ts` · `src/lib/onceFlags.ts` · `src/components/SidebarChatRow.tsx` · `src/services/db.ts` (v2 + `embeddingDB`) · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/services/gemini.ts` · `src/App.tsx`
