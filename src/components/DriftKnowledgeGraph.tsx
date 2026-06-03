@@ -171,6 +171,11 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
 // make a good node label.
 const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i
 
+/** True if the string contains Hebrew/Arabic characters (for SVG text direction,
+ *  which has no `dir="auto"` — we set `direction` explicitly instead). */
+const RTL_RE = /[֐-׿؀-ۿ܀-ݏ]/
+function isRtl(s: string): boolean { return RTL_RE.test(s) }
+
 function clipLabel(s: string, n: number): string {
   const t = s.trim()
   return t.length > n ? t.slice(0, n).trim() + '…' : t
@@ -218,6 +223,35 @@ function nodeTopic(chat: ChatSession): string {
     break
   }
   return term
+}
+
+/** A node's own short label (origin term for the root, explored topic for drifts). */
+function nodeOwnLabel(node: TreeNode): string {
+  if (node.chat.id === ALL_ROOT_ID) return node.chat.title || 'All explorations'
+  if (node.chat.metadata?.isDrift) return nodeTopic(node.chat)
+  return (node.chat.title || 'Untitled').trim()
+}
+
+/**
+ * Bug 7: the lineage (breadcrumb) of origin terms leading to a node, oldest→newest.
+ * Walks the laid-out parent chain so a leaf question carries its whole chain
+ * (e.g. ["Messi", "PSG", "how many goals…"]). The synthetic global root is
+ * skipped. Returns just the node's own label when it has no meaningful ancestry.
+ */
+function lineageChain(laid: Laid): string[] {
+  const chain: string[] = []
+  let cur: Laid | null = laid
+  while (cur) {
+    if (cur.node.chat.id !== ALL_ROOT_ID) chain.unshift(nodeOwnLabel(cur.node))
+    cur = cur.parent
+  }
+  return chain.length ? chain : [nodeOwnLabel(laid.node)]
+}
+
+/** RTL-safe breadcrumb string. `dir="auto"` on the host element keeps Hebrew/
+ *  Arabic chains correctly ordered; the arrow renders fine in both directions. */
+function lineageLabel(laid: Laid): string {
+  return lineageChain(laid).join('  →  ')
 }
 
 /** Number duplicate phrases so chips are distinguishable: "guitarist", "guitarist 2" */
@@ -745,6 +779,11 @@ function GraphCanvas({
                 }}
                 onPointerUp={(e) => { e.stopPropagation(); handleSelect(laid) }}
               >
+                {/* Bug 7: native tooltip carries the full lineage chain
+                    (Messi → PSG → goals question) so a hover/long-press on any
+                    leaf reveals where it came from, even when the label is
+                    truncated. */}
+                <title>{lineageLabel(laid)}</title>
                 {/* wide ambient halo */}
                 <circle
                   cx={laid.x} cy={laid.y} r={r * (focused ? 2.5 : 1.95)}
@@ -802,6 +841,8 @@ function GraphCanvas({
                     fontWeight: focused ? 700 : 600,
                     fill: focused ? '#ffffff' : h.core,
                     opacity: depthDim ? 0.6 : focused ? 1 : 0.92,
+                    direction: isRtl(label) ? 'rtl' : 'ltr',
+                    unicodeBidi: 'plaintext',
                   }}
                 >
                   {label}
@@ -847,6 +888,9 @@ function DetailCard({
   const h = hueAt(laid.depth)
   const isDrift = laid.depth > 0
   const title = isDrift ? nodeTopic(laid.node.chat) : (laid.node.chat.title || 'Untitled')
+  // Bug 7: ancestry leading to this node, minus the node itself (shown as title).
+  const lineage = lineageChain(laid)
+  const trail = lineage.slice(0, -1)
   const preview = lastAiPreview(laid.node.chat)
   const ts = laid.node.chat.createdAt ? timeAgo(laid.node.chat.createdAt) : null
   const msgs = laid.node.chat.messages.length
@@ -882,7 +926,25 @@ function DetailCard({
               <X className="w-3 h-3" />
             </button>
           </div>
+          {trail.length > 0 && (
+            <div
+              dir="auto"
+              className="leading-snug mb-1"
+              style={{
+                fontSize: 10.5, color: 'rgba(255,255,255,0.5)', fontWeight: 600,
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              } as React.CSSProperties}
+            >
+              {trail.map((step, i) => (
+                <span key={i}>
+                  <span style={{ color: i === trail.length - 1 ? h.core : 'rgba(255,255,255,0.55)' }}>{step}</span>
+                  <span style={{ opacity: 0.5, padding: '0 4px' }}>→</span>
+                </span>
+              ))}
+            </div>
+          )}
           <div
+            dir="auto"
             className="font-semibold leading-snug mb-1"
             style={{
               fontSize: 14, color: '#fff',

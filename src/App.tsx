@@ -222,6 +222,19 @@ function App() {
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
+  // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
+  // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
+  // same gesture (open → immediately close). Guard the toggle so it can't flip
+  // more than once per gesture (~450ms), and always read the *latest* state via
+  // the store (never a stale closure value).
+  const graphToggleLockRef = useRef(0)
+  const toggleKnowledgeGraph = () => {
+    const now = Date.now()
+    if (now - graphToggleLockRef.current < 450) return
+    graphToggleLockRef.current = now
+    setKnowledgeGraphOpen(!useUIStore.getState().knowledgeGraphOpen)
+  }
+
   // ── Swipe gesture: right → close sidebar only ──────────────────────────────
   // Swipe-to-OPEN was removed: a horizontal drag in the chat to select text was
   // being read as an open-sidebar swipe, hijacking the drift selection tooltip.
@@ -624,6 +637,23 @@ function App() {
     return () => { unsubNav() }
   }, [])
 
+  // Bug 8: clickable AI terms (InlineListLink) open a drift on the tapped term.
+  // Route them through the SAME entry point as a text-selection drift so the
+  // drift is recorded in driftInfos + registered as a session — which is exactly
+  // what makes it appear as a node/edge (with lineage) in the Drift Map.
+  useEffect(() => {
+    const onStartFromTerm = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const term: string = (detail.term || '').trim()
+      const messageId: string = detail.messageId || ''
+      if (!term || !messageId) return
+      handleStartDrift(term, messageId)
+    }
+    window.addEventListener('drift:start-from-term', onStartFromTerm as EventListener)
+    return () => window.removeEventListener('drift:start-from-term', onStartFromTerm as EventListener)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Track active message id by viewport center ──────────────────────────────
   useEffect(() => {
     let ticking = false
@@ -654,6 +684,7 @@ function App() {
 
   // ── Inline list link processing ─────────────────────────────────────────────
   const processEntityText = (children: React.ReactNode, _messageId: string): React.ReactNode => {
+    const fromMessageId = _messageId
     let remaining = 5
 
     const renderString = (text: string): React.ReactNode => {
@@ -677,7 +708,7 @@ function App() {
       for (const u of used) {
         if (u.s > cursor) out.push(text.slice(cursor, u.s))
         if (u.list) {
-          out.push(<InlineListLink key={`list-${u.list.to}-${u.list.anchor}-${u.s}-${u.e}`} toMessageId={u.list.to} anchorId={u.list.anchor} surface={u.list.surface} />)
+          out.push(<InlineListLink key={`list-${u.list.to}-${u.list.anchor}-${u.s}-${u.e}`} toMessageId={u.list.to} fromMessageId={fromMessageId} anchorId={u.list.anchor} surface={u.list.surface} />)
         }
         cursor = u.e
       }
@@ -791,7 +822,7 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
         e.preventDefault()
-        setKnowledgeGraphOpen(!knowledgeGraphOpen)
+        toggleKnowledgeGraph()
       }
       // ⌘K / Ctrl-K — full-text search across all chats and drifts.
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
@@ -2545,7 +2576,7 @@ function App() {
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
                 <Pressable
-                  onClick={() => { haptics.selection(); setKnowledgeGraphOpen(!knowledgeGraphOpen) }}
+                  onClick={() => { haptics.selection(); toggleKnowledgeGraph() }}
                   haptic={null}
                   title="Drift Map (⌘⌥G)"
                   className={`h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition-all duration-150 relative
@@ -3780,7 +3811,12 @@ function App() {
 
       {/* Knowledge Graph */}
       {knowledgeGraphOpen && (
-        <ErrorBoundary fallback={null} onError={() => setKnowledgeGraphOpen(false)}>
+        // Bug 2: do NOT auto-close on a render error. The boundary is remounted
+        // every time the panel opens, so an onError→close turned any transient
+        // render throw into an "opens then immediately closes" loop. Containing
+        // the error in place (empty fallback) keeps a single tap stable and makes
+        // a real failure visible/diagnosable instead of silently yanking the map.
+        <ErrorBoundary fallback={null}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
