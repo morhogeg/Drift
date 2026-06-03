@@ -4,6 +4,7 @@ import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
+import { sendMessageToDummy } from '../services/dummyAI'
 import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
@@ -64,7 +65,7 @@ interface DriftPanelProps {
   /** Called whenever the drift conversation messages change — used to keep the temp store in sync. */
   onMessagesChange?: (messages: Message[]) => void
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
+  selectedProvider?: 'openrouter' | 'ollama' | 'gemini' | 'dummy'
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
@@ -744,13 +745,10 @@ Rules:
       const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
       const effectiveApiKey = envKey || aiSettings.openRouterApiKey
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
+      const provider: 'openrouter' | 'ollama' | 'gemini' | 'dummy' = selectedProvider
         ? selectedProvider
         : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
 
-      console.log('Drift panel - provider chosen:', provider)
-      console.log('Drift panel - API messages:', apiMessages)
-      
       try {
         // Create abort controller for this request
         const abortController = new AbortController()
@@ -805,6 +803,8 @@ Rules:
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel
           )
+        } else if (provider === 'dummy') {
+          await sendMessageToDummy(apiMessages as any, onChunk, abortController.signal)
         }
       // Fire-and-forget: fetch key-term highlights for this AI response
       const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey

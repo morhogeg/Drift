@@ -80,9 +80,7 @@ export const settingsStorage = {
 
   save(settings: AISettings): void {
     try {
-      console.log('Saving settings to localStorage:', settings)
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
-      console.log('Settings saved successfully')
     } catch (error) {
       console.error('Error saving settings:', error)
     }

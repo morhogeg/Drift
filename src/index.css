@@ -90,7 +90,8 @@ input, textarea, select {
 
 /* iOS safe area and viewport height fixes */
 html, body {
-  height: 100vh; /* layout viewport — with viewport-fit:cover this reaches physical bottom */
+  height: 100vh; /* fallback */
+  height: 100dvh; /* dynamic viewport — avoids mobile-browser chrome clipping the input bar */
 }
 #root {
   height: 100%;

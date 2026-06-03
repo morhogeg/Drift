@@ -3725,10 +3725,11 @@ function App() {
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1 && targets[0].provider !== 'dummy') return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini' | 'dummy'
           if (targets.some(t => t.provider === 'gemini')) return 'gemini'
           if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
           if (targets.some(t => t.provider === 'ollama')) return 'ollama'
+          if (targets.some(t => t.provider === 'dummy')) return 'dummy'
           return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
