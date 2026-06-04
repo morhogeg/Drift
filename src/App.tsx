@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
@@ -121,6 +121,9 @@ function App() {
   // Lets the in-panel "View as" switcher keep a separate thread per lens and
   // return to the original one, without touching the inline-link / map model.
   const lensRegistryRef = useRef<Map<string, Map<string, string>>>(new Map())
+  // Debounces flushing a growing drift conversation into chatHistory/IDB (so it
+  // survives reload — the temp store is in-memory only). Coalesces stream chunks.
+  const driftPersistTimerRef = useRef<number | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
@@ -600,11 +603,10 @@ function App() {
     const existingMessages: Message[] =
       templateType === 'connect'
         ? []
-        : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
-            ? chatHistory.find(c => c.id === driftChatId)!.messages
-            : null)
-          ?? driftStore.getTempConversation(driftChatId)
-          ?? [])
+        : [
+            chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+            driftStore.getTempConversation(driftChatId) ?? [],
+          ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
 
     return {
       existingMessages,
@@ -1199,14 +1201,15 @@ function App() {
   }
 
   // ── sendMessage ─────────────────────────────────────────────────────────────
-  const sendMessage = async () => {
-    if (message.trim()) {
+  const sendMessage = async (overrideText?: string) => {
+    const text = overrideText ?? message
+    if (text.trim()) {
       if (continueFromMessageId) setContinueFromMessageId(null)
       const canvasIdSnapshot = activeCanvasId || undefined
 
       const newMessage: Message = {
         id: Date.now().toString(),
-        text: message,
+        text: text,
         isUser: true,
         timestamp: new Date(),
         strandId: activeStrandId || undefined,
@@ -1226,10 +1229,10 @@ function App() {
       // Update chat title if first user message
       const currentChat = chatHistory.find(c => c.id === activeChatId)
       if (currentChat && currentChat.title === 'New Chat' && updatedMessages.filter(m => m.isUser).length === 1) {
-        const newTitle = message.slice(0, 50) + (message.length > 50 ? '...' : '')
-        chatStore.updateChat(activeChatId, { title: newTitle, lastMessage: message, messages: updatedMessages })
+        const newTitle = text.slice(0, 50) + (text.length > 50 ? '...' : '')
+        chatStore.updateChat(activeChatId, { title: newTitle, lastMessage: text, messages: updatedMessages })
       } else {
-        chatStore.updateChat(activeChatId, { lastMessage: message, messages: updatedMessages })
+        chatStore.updateChat(activeChatId, { lastMessage: text, messages: updatedMessages })
       }
 
       userHasScrolled.current = false
@@ -2991,6 +2994,11 @@ function App() {
                 )
                 const isPlainAI = !msg.isUser && !isDriftMessage
                 const isSynthesis = isPlainAI && msg.id.startsWith('synth-')
+                // Synthesis ends with a "**Next:**" open question — pull it out so it
+                // can be rendered as a tappable "explore next" chip (and stripped from
+                // the prose body so it isn't duplicated).
+                const synthNext = isSynthesis ? (msg.text.match(/\*\*Next:\*\*\s*([\s\S]+?)\s*$/)?.[1]?.trim() || null) : null
+                const synthBody = synthNext ? msg.text.replace(/\n*\*\*Next:\*\*[\s\S]*$/, '').trim() : msg.text
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
@@ -3249,10 +3257,10 @@ function App() {
                                   }))
 
                                 const finalDriftConversation = driftConversation.length > 0 &&
-                                  !driftConversation[0].text.includes('What would you like to know about') ?
+                                  !(driftConversation[0].text.includes('What would you like to know about') || driftConversation[0].text.includes('מה תרצה לדעת על')) ?
                                   [{
                                     id: 'drift-system-reconstructed',
-                                    text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                    text: /[֐-׿]/.test(msg.driftPushMetadata!.selectedText) ? `מה תרצה לדעת על "${msg.driftPushMetadata!.selectedText}"?` : `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
                                     isUser: false,
                                     timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
                                   }, ...driftConversation] :
@@ -3378,10 +3386,10 @@ function App() {
                                     }))
 
                                   const finalDriftConversation = driftConversation.length > 0 &&
-                                    !driftConversation[0].text.includes('What would you like to know about') ?
+                                    !(driftConversation[0].text.includes('What would you like to know about') || driftConversation[0].text.includes('מה תרצה לדעת על')) ?
                                     [{
                                       id: 'drift-system-reconstructed',
-                                      text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                      text: /[֐-׿]/.test(msg.driftPushMetadata!.selectedText) ? `מה תרצה לדעת על "${msg.driftPushMetadata!.selectedText}"?` : `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
                                       isUser: false,
                                       timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
                                     }, ...driftConversation] :
@@ -3575,8 +3583,33 @@ function App() {
                                   }
                                 })()}
                               >
-                                {sanitizeText(msg.text)}
+                                {sanitizeText(isSynthesis && synthNext ? synthBody : msg.text)}
                               </ReactMarkdown>
+                            </div>
+                          )}
+
+                          {/* Synthesis "Next" — the open question the synthesis ends on,
+                              made tappable so one tap asks it in the main chat. */}
+                          {isSynthesis && synthNext && (
+                            <div className="mt-3.5">
+                              <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
+                                <Sparkles className="w-3 h-3" />
+                                Explore next
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); haptics.selection(); sendMessage(synthNext) }}
+                                dir={getTextDirection(synthNext)}
+                                className="group flex items-start gap-2 w-full text-start px-3.5 py-2.5 rounded-2xl
+                                  text-[13px] font-medium leading-snug text-accent-violet/90
+                                  border border-accent-violet/25 bg-accent-violet/[0.07]
+                                  shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                  hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                  active:scale-[0.99] transition-all duration-150"
+                                title="Ask this next"
+                              >
+                                <span className="flex-1 min-w-0">{synthNext}</span>
+                                <ArrowUpRight className="w-4 h-4 flex-shrink-0 mt-0.5 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                              </button>
                             </div>
                           )}
 
@@ -3827,7 +3860,7 @@ function App() {
                 {/* Send button */}
                 {!isTyping && (
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={!message.trim() && !voiceInput.isListening}
                     className={`
                       w-9 h-9 rounded-xl flex items-center justify-center
@@ -3908,6 +3941,19 @@ function App() {
                   selectedText,
                 },
               })
+            } else if (alreadyRegistered) {
+              // Already in chatHistory — keep its messages current so the full
+              // conversation (incl. the streamed answer) survives a reload, not
+              // just the question captured at registration. Debounced to coalesce
+              // streaming chunks into a single IDB write.
+              if (driftPersistTimerRef.current) clearTimeout(driftPersistTimerRef.current)
+              const snapshot = msgs as Message[]
+              driftPersistTimerRef.current = window.setTimeout(() => {
+                chatStore.updateChat(chatId, {
+                  messages: snapshot,
+                  lastMessage: (snapshot[snapshot.length - 1]?.text ?? '').slice(0, 100),
+                })
+              }, 700)
             }
           }
         }}
@@ -4099,14 +4145,15 @@ function App() {
             const templateType = di?.templateType
               ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
 
-            // The drift's own conversation (chat history → temp store → node payload).
-            const driftMsgs: Message[] =
-              ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
-                  ? chatHistory.find(c => c.id === driftChatId)!.messages
-                  : null)
-                ?? driftStore.getTempConversation(driftChatId)
-                ?? (driftChat.messages?.length ? driftChat.messages : null)
-                ?? [])
+            // The drift's own conversation. The chatHistory copy is a snapshot from
+            // first-message registration (often just the question — the streamed
+            // answer only lives in the temp store), so pick the FULLEST of the three
+            // sources rather than preferring chatHistory and losing the answer.
+            const driftMsgs: Message[] = [
+              chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+              driftStore.getTempConversation(driftChatId) ?? [],
+              driftChat.messages ?? [],
+            ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
 
             // A Connect *bridge* node is itself a focused Q&A thread ("How does X
             // connect to Y?") — NOT the connections list. Detect its question and

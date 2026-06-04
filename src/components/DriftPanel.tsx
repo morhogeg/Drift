@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
+import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
 import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, X, type LucideIcon } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import type { AncestryEntry } from '../types/chat'
@@ -34,6 +34,35 @@ const CONNECT_TYPES: Record<string, ConnectKind> = {
 }
 const CONNECT_FALLBACK: ConnectKind = { label: 'Link', icon: Waypoints, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' }
 const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? CONNECT_FALLBACK
+
+// ── Drift scaffolding labels (language-aware) ────────────────────────────────
+// The opener + template-trigger messages shown/sent inside a drift are localized
+// to the chat's language so a Hebrew chat reads "הסבר בפשטות", not "Simplify this".
+// Detection is script-based (Hebrew today; extend with more languages as needed).
+interface DriftLabels {
+  opener: (term: string) => string
+  connectFinding: (term: string) => string
+  prefixes: Record<string, string> // simplify | research | connect
+}
+const DRIFT_LABELS_EN: DriftLabels = {
+  opener: (t) => `What would you like to know about "${t}"?`,
+  connectFinding: (t) => `Finding connections for "${t}"…`,
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to' },
+}
+const DRIFT_LABELS_HE: DriftLabels = {
+  opener: (t) => `מה תרצה לדעת על "${t}"?`,
+  connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר' },
+}
+const driftLabelsFor = (sample: string): DriftLabels =>
+  /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
+
+// Every language variant of the opener / template-trigger prefixes, so the filters
+// that strip scaffolding from the API conversation work regardless of chat language.
+const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding connections for', 'מה תרצה לדעת על', 'מחפש קשרים עבור']
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר']
+const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
+const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
 interface Message {
   id: string
@@ -250,11 +279,12 @@ Rules:
 - Output raw JSON array of strings only. Any other text breaks the app.`,
   }
 
-  const TEMPLATE_USER_PREFIXES: Record<string, string> = {
-    'simplify': 'Simplify this',
-    'research': 'Deep dive into this',
-    'connect': 'Show me what this connects to',
-  }
+  // Localize the drift scaffolding to the chat's language (sampled from the term +
+  // recent parent context), so the opener and "Simplify this"/etc. match Hebrew chats.
+  const driftLabels = useMemo(
+    () => driftLabelsFor(`${selectedText} ${(contextMessages ?? []).slice(-3).map(m => m.text).join(' ')}`.slice(0, 400)),
+    [selectedText, contextMessages]
+  )
 
   // Initialize Drift with existing messages or system message
   useEffect(() => {
@@ -280,10 +310,10 @@ Rules:
       } else {
         // Add system context message for new drift
         const systemMessageText = templateType === 'connect'
-          ? `Finding connections for "${selectedText}"…`
+          ? driftLabels.connectFinding(selectedText)
           : templateType
-          ? `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Exploring'}: "${selectedText}"`
-          : `What would you like to know about "${selectedText}"?`
+          ? `${driftLabels.prefixes[templateType] ?? 'Exploring'}: "${selectedText}"`
+          : driftLabels.opener(selectedText)
         const systemMessage: Message = {
           id: 'drift-system-' + Date.now(),
           text: systemMessageText,
@@ -374,7 +404,7 @@ Rules:
     // In connect chip-chat mode, send the chosen question directly
     const autoText = (templateType === 'connect' && connectQuestion)
       ? connectQuestion
-      : `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Explore this'}: "${selectedText}"`
+      : `${driftLabels.prefixes[templateType] ?? 'Explore this'}: "${selectedText}"`
 
     const timer = window.setTimeout(() => {
       if (!autoSentRef.current) {
@@ -568,7 +598,7 @@ Rules:
     if (pushedToMain && pushedMessageCount > 0) {
       // Filter out the system message
       const currentMessageCount = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about')
+        msg => !isDriftOpenerText(msg.text)
       ).length
       
       // If there are more messages now than when we pushed, reset the button
@@ -588,7 +618,7 @@ Rules:
       const messageIndex = driftOnlyMessages.findIndex(m => m.id === message.id)
       const allMessagesUpToThis = driftOnlyMessages
         .slice(0, messageIndex + 1)
-        .filter(msg => !msg.text.startsWith('What would you like to know about'))
+        .filter(msg => !isDriftOpenerText(msg.text))
       
       // Mark only the selected message as visible, others as hidden context
       const messagesToPush = allMessagesUpToThis.map((msg) => ({
@@ -691,7 +721,7 @@ Rules:
       // Only use drift-specific messages, not the context messages
       // Filter out the system message and any context messages
       const driftConversation = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Finding connections for') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Deep dive into this') && !msg.text.startsWith('Show me what this connects to') && msg.id !== newMessage.id
+        msg => !isDriftScaffoldText(msg.text) && msg.id !== newMessage.id
       )
       
       // Build context string from parent conversation (last ~8 messages). Cap each
@@ -892,7 +922,7 @@ Rules:
       const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
       return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
     }).join('\n')
-    const baseConversation = workingDrift.filter(msg => !msg.text.startsWith('What would you like to know about'))
+    const baseConversation = workingDrift.filter(msg => !isDriftOpenerText(msg.text))
     const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
       {
         role: 'system',
@@ -1041,7 +1071,7 @@ Rules:
     if (onPushToMain && driftOnlyMessages.length > 0) {
       // Filter out the system message when pushing to main
       const messagesToPush = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about')
+        msg => !isDriftOpenerText(msg.text)
       )
       
       if (messagesToPush.length > 0) {
