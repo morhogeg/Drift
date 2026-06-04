@@ -209,6 +209,7 @@ function nodeTopic(chat: ChatSession): string {
   for (const m of msgs) {
     if (!m.isUser) continue
     const bridge = m.text.trim().match(/connect(?:s|ed)?\s+to\s+(.+?)[?.]?$/i)
+      || m.text.trim().match(/קשור\s+ל-?\s*(.+?)[?.]?$/)
     if (bridge?.[1]) return `${term} → ${bridge[1].trim()}`
   }
   // 2) A genuine user follow-up question (not a template opener).

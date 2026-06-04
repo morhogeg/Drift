@@ -1,6 +1,6 @@
 # Drift — Quick Status
 
-**Date:** June 4, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 49 (iOS + web)
+**Date:** June 4, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 50 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ iOS bundles a copy of `dist/`. After ANY web change run `npm run build && npx cap sync ios` before Run/Archive — a clean+rebuild in Xcode alone keeps the stale bundle.
@@ -12,7 +12,7 @@
 
 ## Pending (priority order)
 - [ ] On-device pass: map/synthesis/localization fixes + prior session features
-- [ ] TestFlight: archive build 49 → App Store Connect
+- [ ] TestFlight: archive build 50 → App Store Connect
 - [ ] TODO(semantic): Connect-lens seeding + semantic edges; persist composite lens-thread state
 - [ ] Providers/settings on-device pass (OpenRouter key, Settings UI, Ollama/Qwen3 gone)
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share

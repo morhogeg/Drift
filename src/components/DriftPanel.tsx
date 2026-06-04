@@ -42,16 +42,19 @@ const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? CONNECT_
 interface DriftLabels {
   opener: (term: string) => string
   connectFinding: (term: string) => string
+  bridge: (term: string, concept: string) => string
   prefixes: Record<string, string> // simplify | research | connect
 }
 const DRIFT_LABELS_EN: DriftLabels = {
   opener: (t) => `What would you like to know about "${t}"?`,
   connectFinding: (t) => `Finding connections for "${t}"…`,
+  bridge: (t, c) => `How does "${t}" connect to ${c}?`,
   prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
+  bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
   prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר' },
 }
 const driftLabelsFor = (sample: string): DriftLabels =>
@@ -479,7 +482,7 @@ Rules:
 
   // A bridge question frames the connection between the term and a concept —
   // it doubles as the displayed label and the prompt sent to the model.
-  const bridgeQuestion = (concept: string) => `How does "${selectedText}" connect to ${concept}?`
+  const bridgeQuestion = (concept: string) => driftLabels.bridge(selectedText, concept)
 
   // Open (or restore) a focused Connect thread for a given question/bridge.
   const openConnectThread = (question: string) => {
@@ -1453,7 +1456,7 @@ Rules:
                               borderColor: visited ? `${k.color}66` : 'rgba(255,255,255,0.07)',
                               background: visited ? `${k.color}14` : 'rgba(26,26,26,0.4)',
                             }}
-                            title={`See how "${selectedText}" connects to ${e.concept}`}
+                            title={bridgeQuestion(e.concept)}
                           >
                             {/* connector + glowing synapse node sitting on the rail */}
                             <span

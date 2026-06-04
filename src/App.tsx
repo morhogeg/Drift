@@ -4159,7 +4159,7 @@ function App() {
             // connect to Y?") — NOT the connections list. Detect its question and
             // open the thread on its answer (connectQuestion set → chip-chat view),
             // instead of dropping back to the cards screen.
-            const bridgeUserMsg = driftMsgs.find(m => m.isUser && /connect(?:s|ed)?\s+to\s+.+/i.test(m.text))
+            const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
             const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
 
             // The connections-LIST drift rebuilds its chips from cached cards, and

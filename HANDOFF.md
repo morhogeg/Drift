@@ -2,8 +2,8 @@
 
 **Date:** June 4, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 49 (iOS Xcode) / web
-**Status:** This session (Jun 4) — three on-device bug fixes, entries 158–160: map "Open drift" losing answer (+ reload durability); synthesis "Next" now clickable; lens labels localized to chat language (Hebrew/English). sidebar redesign; Drift-Map fixes (mobile open/close, lineage, clickable-term nodes); Connect/lens/state-persistence fixes; web-QA fixes; **semantic embeddings layer**; continuity (resume surface); discoverability coachmarks. (Bundle: index ~804 kB / gzip ~240 kB.) Prior context — Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+**Build:** 50 (iOS Xcode) / web
+**Status:** This session (Jun 4) — on-device bug fixes, entries 158–161: map "Open drift" losing answer (+ reload durability); synthesis "Next" now clickable; lens labels + Connect bridge question localized to chat language (Hebrew/English). Prior session (Jun 3 PM, entries 150–157): sidebar redesign; Drift-Map fixes (mobile open/close, lineage, clickable-term nodes); Connect/lens/state-persistence fixes; web-QA fixes; **semantic embeddings layer**; continuity (resume surface); discoverability coachmarks. (Bundle: index ~806 kB / gzip ~241 kB.) Earlier context — Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,10 @@
 ---
 
 ## What Was Done This Session
+
+### 161. Connect bridge question — localized to chat language (FIX, build 50)
+- The Connect bridge question was still hardcoded English (`How does "X" connect to Y?`) → mixed LTR/RTL in Hebrew chats (per TestFlight screenshot). Added `bridge` to `DriftLabels` (EN/HE: `איך "X" קשור ל-Y?`); `bridgeQuestion()` now uses it; the connect-card tooltip uses the localized question too.
+- **Critical companion fix:** two regexes detect a bridge thread by the English "connect to" text — `App.tsx` `bridgeUserMsg` (sets `connectQuestion` on open) and `DriftKnowledgeGraph.tsx` `nodeTopic` (map "X → Y" label). Both now also match the Hebrew `קשור ל-` form, so a localized bridge still opens as a conversation (not the cards list) and still labels correctly on the map. English alternation kept for back-compat with already-created bridges.
 
 ### 160. Map "Open this drift" bug — losing the answer (FIX)
 - **Root cause:** Drift sessions registered into `chatHistory` at first-message (question only); answer only lived in temp store. `onOpenDrift` wrongly preferred the stale chatHistory snapshot over the fuller temp store.
@@ -393,7 +397,7 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 49 in Xcode → upload to App Store Connect.
+- [ ] **TestFlight submission** — archive build 50 in Xcode → upload to App Store Connect.
 - [ ] **On-device pass — this session (Jun 4)** — verify the three bug fixes: (1) tap map node → "Open this drift" shows the full conversation (question + answer), not just the question; (2) tap synthesis "Next:" chip and it sends a real LLM question; (3) Hebrew chat shows lens labels like "הסבר בפשטות" not "Simplify this", and pushed drifts don't have duplicate English openers.
 - [ ] **On-device pass — last session (Jun 3 PM)** — verify: sidebar row types (Chat/Drift/Synthesis) + drift nesting; Drift Map opens on a single tap (no flicker-close); map node `↳ parent` labels + breadcrumb; clickable AI terms appear on the map; Connect shows the *selected* term's cards (no cross-term bleed); per-term/lens conversation persists when switching terms; "Pick up where you left off" resume cards in the empty state; the two coachmarks (drift gesture + lens bar) appear once; "Related by meaning" in search + "you explored before" recall.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
