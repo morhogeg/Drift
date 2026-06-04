@@ -1,14 +1,14 @@
 # Drift — Quick Status
 
-**Date:** June 4, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 50 (iOS + web)
+**Date:** June 4, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 51 (iOS + web) — ready for TestFlight
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ iOS bundles a copy of `dist/`. After ANY web change run `npm run build && npx cap sync ios` before Run/Archive — a clean+rebuild in Xcode alone keeps the stale bundle.
 
-## Last Session (Jun 4) — on-device bug fixes
-- **Map "Open drift" losing answer** — root cause: drift registered to `chatHistory` at first message (Q only); answer in temp store. `onOpenDrift` wrongly preferred stale snapshot. Fixed: pick fullest of 3 sources + debounced flush to IDB (survives reload).
-- **Synthesis "Next" clickable** — extract `**Next:**` from prose, render as "Explore next" chip. Tap sends the question (RTL-safe, Hebrew works).
-- **Lens labels localized** — "הסבר בפשטות" in Hebrew chat, "Simplify this" in English. Detected by script, language-agnostic scaffold filters prevent duplication in pushed drifts.
+## Last Session (Jun 4) — on-device bug fixes (builds 48–51)
+- **Map "Open drift" losing answer** — drift registered at Q only, answer in temp store. Fixed: fullest of 3 sources + debounced IDB flush (survives reload).
+- **Synthesis "Next" clickable** — extract `**Next:**` from prose, render "Explore next" chip. Tap sends the question (RTL-safe, Hebrew).
+- **Lens labels + Connect bridge question localized** — "הסבר בפשטות"/"איך קשור ל-" in Hebrew; language-agnostic filters. Bilingual regex detects bridge threads.
 
 ## Pending (priority order)
 - [ ] On-device pass: map/synthesis/localization fixes + prior session features
