@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 3, 2026
+**Date:** June 4, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 46 (iOS Xcode) / web
-**Status:** This session (Jun 3 PM) — bug-fix + intelligence wave, entries 150–157: sidebar redesign; Drift-Map fixes (mobile open/close, lineage, clickable-term nodes); Connect/lens/state-persistence fixes; web-QA fixes; **semantic embeddings layer**; continuity (resume surface); discoverability coachmarks. (Bundle: index ~804 kB / gzip ~240 kB.) Prior context — Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+**Build:** 49 (iOS Xcode) / web
+**Status:** This session (Jun 4) — three on-device bug fixes, entries 158–160: map "Open drift" losing answer (+ reload durability); synthesis "Next" now clickable; lens labels localized to chat language (Hebrew/English). sidebar redesign; Drift-Map fixes (mobile open/close, lineage, clickable-term nodes); Connect/lens/state-persistence fixes; web-QA fixes; **semantic embeddings layer**; continuity (resume surface); discoverability coachmarks. (Bundle: index ~804 kB / gzip ~240 kB.) Prior context — Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,18 @@
 ---
 
 ## What Was Done This Session
+
+### 160. Map "Open this drift" bug — losing the answer (FIX)
+- **Root cause:** Drift sessions registered into `chatHistory` at first-message (question only); answer only lived in temp store. `onOpenDrift` wrongly preferred the stale chatHistory snapshot over the fuller temp store.
+- **Fixes:** (a) `onOpenDrift` + `resolveDriftRestore` now pick the FULLEST of three sources (ensures answer comes back). (b) Added debounced flush of growing drift conversation into chatHistory/IDB (survives reload; was in-memory only). `App.tsx`: new `driftPersistTimerRef`, 700ms debounce on each incoming message.
+
+### 159. Synthesis "Next:" is now clickable (FEATURE)
+- Extract the `**Next:**` open question from synthesis prose using a regex, strip it from the body (no duplication), render as a dedicated "Explore next" chip with the question text. Tap sends it as a real LLM call (`sendMessage` now accepts optional override text). RTL-aware (Hebrew question renders correctly).
+
+### 158. Lens labels localized to chat language (FEATURE)
+- Drift scaffolding (the opener + "Simplify this" / "Deep dive into this" / etc.) is now localized: Hebrew chat gets Hebrew labels, English chat gets English. Detected by script (Hebrew range `[֐-׿]`) sampled from the term + recent parent messages.
+- **New module-level helpers:** `DRIFT_LABELS_EN` / `DRIFT_LABELS_HE` dicts, `driftLabelsFor()` sampler, `isDriftOpenerText()` / `isDriftScaffoldText()` predicates. All four internal filters that strip scaffolding from the API conversation now use language-agnostic predicates (so localizing doesn't leak the opener or create duplicates in pushed drifts). Hebrew labels: `opener`, `connectFinding`, `prefixes` dict.
+- (Bundle: index ~806 kB / gzip ~241 kB — minimal change.)
 
 ### 157. Discoverability — one-time coachmarks (FEATURE)
 - New `src/lib/onceFlags.ts` (`hasSeen`/`markSeen` + `useOnceFlag` hook, localStorage-backed, fails safe to "seen"). Two first-run hints for invisible affordances: (a) `App.tsx` — a drift-gesture pill above the composer once a reply is on screen, auto-dismissed forever the first time any drift opens; (b) `DriftPanel.tsx` — a lens-switcher hint under the "View as" bar, dismissed on first lens use. Map already had a teaching empty state — left as-is.
@@ -381,10 +393,10 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 46 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass — this session (Jun 3 PM)** — verify on device: sidebar row types (Chat/Drift/Synthesis) + drift nesting; Drift Map opens on a single tap (no flicker-close); map node `↳ parent` labels + breadcrumb; clickable AI terms appear on the map; Connect shows the *selected* term's cards (no cross-term bleed); per-term/lens conversation persists when switching terms; "Pick up where you left off" resume cards in the empty state; the two coachmarks (drift gesture + lens bar) appear once; "Related by meaning" in search + "you explored before" recall (needs a Gemini key + a few drifts).
+- [ ] **TestFlight submission** — archive build 49 in Xcode → upload to App Store Connect.
+- [ ] **On-device pass — this session (Jun 4)** — verify the three bug fixes: (1) tap map node → "Open this drift" shows the full conversation (question + answer), not just the question; (2) tap synthesis "Next:" chip and it sends a real LLM question; (3) Hebrew chat shows lens labels like "הסבר בפשטות" not "Simplify this", and pushed drifts don't have duplicate English openers.
+- [ ] **On-device pass — last session (Jun 3 PM)** — verify: sidebar row types (Chat/Drift/Synthesis) + drift nesting; Drift Map opens on a single tap (no flicker-close); map node `↳ parent` labels + breadcrumb; clickable AI terms appear on the map; Connect shows the *selected* term's cards (no cross-term bleed); per-term/lens conversation persists when switching terms; "Pick up where you left off" resume cards in the empty state; the two coachmarks (drift gesture + lens bar) appear once; "Related by meaning" in search + "you explored before" recall.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
-- [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
 - [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
 - [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.
 - [ ] **(Optional) Native Anthropic + Gemini** — if a native Anthropic key is wanted, wire `api.anthropic.com` directly (CORS ok with `anthropic-dangerous-direct-browser-access` header); would make OpenAI/Grok-via-OpenRouter a hybrid. Left as-is for now by request.
