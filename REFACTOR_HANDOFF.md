@@ -1,13 +1,18 @@
 # Refactor + Security Handoff
 
 **Branch:** `feature/apple-level-overhaul` · **As of:** June 5, 2026
-**Pick it up next session with:** `/continue-refactor` (next target = **`DriftPanel.tsx`**)
+**Pick it up next session with:** `/continue-refactor` (next target = **`DriftPanel.tsx` slices 4–5**)
 
-> **Where we are:** Tier B steps 1–3 are DONE (`useChatActions`, `useDriftActions`,
-> `useMessageStream`). Multi-model broadcast + continue-with-model were then
-> **removed** (product decision — single-model only). **App.tsx is now 2948 lines**
-> (was 4195 at the start of the refactor). `DriftPanel.tsx` (~1,916 lines) is the
-> last untouched monolith → **that's Tier B step 4, the next session's job.**
+> **Where we are:** Tier B steps 1–3 (App.tsx) are DONE (`useChatActions`,
+> `useDriftActions`, `useMessageStream`); App.tsx is **2948 lines** (was 4195).
+> **Tier B step 4 — `DriftPanel.tsx` decomposition — is now IN PROGRESS:**
+> - **Slice 1+2 DONE** (commit `00965d9`): pure helpers + `TEMPLATE_SYSTEM_PROMPTS`
+>   → `src/lib/driftPanel.ts`.
+> - **Slice 3 DONE** (commit `ae686a0`): send/stream pipeline → `src/hooks/useDriftMessageStream.ts`.
+> - **DriftPanel.tsx is now 1504 lines** (was 1916 at the start of step 4).
+> - **Next = slice 4** (push/save actions → `useDriftPanelActions`), then optional
+>   **slice 5** (Connect-mode logic → `useConnectThreads`). Full slice plan is in the
+>   `Plan` from this session; lowest-risk-first, one concern per commit.
 
 ---
 
@@ -57,8 +62,32 @@ Behavior-preserving faithful copies. The App-owned pieces the handlers need are 
 
 ## What's left — next session
 
-### ⭐ NEXT: `DriftPanel.tsx` (~1,916 lines) — Tier B step 4
-The last untouched monolith. Same playbook as the App.tsx hooks: orient first, then pull cohesive concerns into focused hooks/modules one-per-commit, behavior-preserving. **Before starting, read it and map its concerns** (likely candidates: the drift conversation send/stream loop, the Connect/Simplify/Deep-dive template logic + `TEMPLATE_SYSTEM_PROMPTS`, the lens/"View as" switcher, the connect-cards parser, and the breadcrumb/ancestry UI). Then propose a slice order (lowest-risk first) and confirm before cutting. **Requires a live drift smoke** (create a drift → ask a question → watch it stream) on any send/stream change.
+### ⭐ NEXT: `DriftPanel.tsx` slices 4–5 (now 1504 lines) — Tier B step 4, continued
+Slices 1–3 are done (see top). Remaining cohesive concerns, lowest-risk first:
+
+- **Slice 4 — push/save actions → `src/hooks/useDriftPanelActions.ts`** (medium risk,
+  no network). Extract `handlePushSingleMessage`, `handleToggleSaveMessage`,
+  `handleSaveAsChat`, `handlePushToMain` + the push/save state cluster (`pushedToMain`,
+  `savedAsChat`, `savedChatId`, `savedMessageIds`, `pushedMessageCount`,
+  `lastPushSourceId`, `isPushing`, `pushedContentSignature`) and the "reset push button
+  when new messages arrive" effect. Reuses `snippetStorage` + `isDriftOpenerText`.
+  Optional separate cleanup commit: drop the noisy `[BUTTON-CLICK …]` console.logs.
+  **Verify:** tsc + build + Playwright push→undo→save smoke.
+- **Slice 5 — Connect-mode logic → `useConnectThreads.ts`** (highest risk; do last,
+  only if 4 lands clean). `openConnectThread`, `bridgeQuestion`, the connect-card JSON
+  parse effect, the `chipSessionRef` sync/persist effects, `connectAnswersRef`. Carries
+  subtle stale-render guards (`skipStaleCardParseRef`, `messagesThreadRef`, the
+  `!raw.startsWith('[')` prose guard) — copy comments verbatim, don't "simplify".
+  **Verify:** tsc + build + **live Connect smoke** (cards render → tap bridge → answer
+  streams → back → cards still present, not re-fetched).
+
+> Reference pattern for new hooks: `src/hooks/useDriftMessageStream.ts` (this session) and
+> `src/hooks/useDriftActions.ts`. **Live smoke recipe** (Playwright `.mjs` in-repo, set
+> `localStorage` `driftUser`+`drift_onboarded='true'`; trigger a drift by selecting text
+> in an assistant bubble and dispatching `mouseup`, then click
+> `button[title^="Drift on selected text"]`; drift input is
+> `textarea[placeholder="Explore this drift…"]`; drift bubbles carry
+> `[data-drift-message-id]`) — proven working this session.
 
 > Tip: `src/hooks/useMessageStream.ts` and `src/hooks/useDriftActions.ts` are the
 > reference pattern for the deps-interface + JSDoc style to match.
@@ -78,4 +107,4 @@ The last untouched monolith. Same playbook as the App.tsx hooks: orient first, t
 - Push each verified step. Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
 ## Already extracted into `src/hooks/` (do NOT re-extract)
-`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — single-model send/stream: `sendMessage` / `stopGeneration`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
+`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — App's single-model send/stream), **`useDriftMessageStream`** (COMPLETE — DriftPanel's send/stream: `sendMessage` / `retryLastMessage` / `stopGeneration` / `handleCompareAcrossModels`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`, **`src/lib/driftPanel.ts`** (DriftPanel pure helpers + `TEMPLATE_SYSTEM_PROMPTS`).
