@@ -254,9 +254,6 @@ function PresetForm({
                   <button type="button" onClick={() => setShowKey(v => !v)} className="p-1.5 rounded-md text-text-muted hover:text-text-primary transition-colors">
                     {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
-                  <button type="button" onClick={() => navigator.clipboard?.writeText(preset.apiKey || settings.geminiApiKey || '')} className="p-1.5 rounded-md text-text-muted hover:text-text-primary transition-colors">
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
               <p className="text-[11px] text-text-muted/60 mt-1">Used as the global Gemini key</p>
