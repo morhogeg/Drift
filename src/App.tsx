@@ -40,6 +40,7 @@ import { useCoachMark } from '@/hooks/useCoachMark'
 import { useAuth } from '@/hooks/useAuth'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useOnOutsideClick } from '@/hooks/useOnOutsideClick'
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -916,26 +917,6 @@ function App() {
     }
   }, [streamingResponse])
 
-  // ── Keyboard shortcuts ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'n') {
-        e.preventDefault()
-        createNewChat()
-      }
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
-        e.preventDefault()
-        toggleKnowledgeGraph()
-      }
-      // ⌘K / Ctrl-K — full-text search across all chats and drifts.
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault()
-        setSearchOpen(v => !v)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chatHistory, activeChatId, messages, knowledgeGraphOpen])
 
   // ── Snippet count / saved IDs ───────────────────────────────────────────────
   useEffect(() => {
@@ -1422,6 +1403,13 @@ function App() {
     }
     chatStore.createChat()
   }
+
+  // Global keyboard shortcuts (⌘⌥N new chat · ⌘⌥G map · ⌘K search)
+  useKeyboardShortcuts({
+    onNewChat: createNewChat,
+    onToggleMap: toggleKnowledgeGraph,
+    onToggleSearch: () => setSearchOpen(v => !v),
+  })
 
   const switchChat = (chatId: string) => {
     if (chatId === activeChatId) return
