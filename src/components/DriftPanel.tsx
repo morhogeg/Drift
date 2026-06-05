@@ -6,15 +6,11 @@ import {
   connectKind,
   driftLabelsFor,
   isDriftOpenerText,
-  isDriftScaffoldText,
-  friendlyDriftError,
-  TEMPLATE_SYSTEM_PROMPTS,
 } from '../lib/driftPanel'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
-import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
-import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
+import { getDriftSuggestions } from '../services/gemini'
+import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
@@ -25,7 +21,7 @@ import { Stagger, staggerChild } from './motion'
 import { haptics } from '../lib/haptics'
 import { motion } from 'framer-motion'
 
-interface Message {
+export interface Message {
   id: string
   text: string
   isUser: boolean
@@ -159,13 +155,11 @@ export default function DriftPanel({
   const [pushedContentSignature, setPushedContentSignature] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
-  const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
   const [connectCards, setConnectCards] = useState<string[] | null>(null)
@@ -196,6 +190,28 @@ export default function DriftPanel({
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
   /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
   const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
+
+  // Drift conversation send / stream pipeline (owns the abort controllers).
+  const { sendMessage, retryLastMessage, stopGeneration, handleCompareAcrossModels } = useDriftMessageStream({
+    message,
+    driftOnlyMessages,
+    isTyping,
+    selectedText,
+    contextMessages,
+    templateType,
+    connectQuestion,
+    relatedDrifts,
+    selectedProvider,
+    selectedTargets,
+    aiSettings,
+    setMessage,
+    setMessages,
+    setDriftOnlyMessages,
+    setIsTyping,
+    setIsComparing,
+    setStreamingMsgId,
+    setMsgHighlights,
+  })
 
   // Localize the drift scaffolding to the chat's language (sampled from the term +
   // recent parent context), so the opener and "Simplify this"/etc. match Hebrew chats.
@@ -615,331 +631,6 @@ export default function DriftPanel({
       setSavedMessageIds(prev => new Set(prev).add(message.id))
       // Update the snippet count in the parent component
       onSnippetCountUpdate?.()
-    }
-  }
-
-  const sendMessage = async (overrideText?: string, isRetry = false) => {
-    const textToSend = (overrideText ?? message).trim()
-    if (textToSend) {
-      // Sending a message has weight — a light, confident thunk.
-      haptics.impact('light')
-
-      let newMessage: Message
-      if (isRetry) {
-        // Re-run the last user turn: clear the error bubble and reuse the existing
-        // user message rather than appending a duplicate.
-        setMessages(prev => prev.filter(m => !m.isError))
-        setDriftOnlyMessages(prev => prev.filter(m => !m.isError))
-        const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
-        newMessage = lastUser ?? { id: 'drift-' + Date.now().toString(), text: textToSend, isUser: true, timestamp: new Date() }
-      } else {
-        newMessage = {
-          id: 'drift-' + Date.now().toString(),
-          text: textToSend,
-          isUser: true,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, newMessage])
-        setDriftOnlyMessages(prev => [...prev, newMessage])
-        if (!overrideText) setMessage('')
-      }
-      setIsTyping(true)
-
-      // Only use drift-specific messages, not the context messages.
-      // Filter out the system message, context messages, any prior error
-      // bubble, and the current turn (re-appended below as the user prompt).
-      const driftConversation = driftOnlyMessages.filter(
-        msg => !isDriftScaffoldText(msg.text) && !msg.isError && msg.id !== newMessage.id
-      )
-      
-      // Build context string from parent conversation (last ~8 messages). Cap each
-      // message so one very long answer can't crowd out the rest of the context.
-      const parentContext = contextMessages.slice(-8).map(msg => {
-        const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
-        return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
-      }).join('\n')
-
-      // Use template system prompt if set, otherwise use default context-aware prompt
-      // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
-      // History-aware Connect: feed prior same/related-term drifts into the chip
-      // prompt so the directions are ones the user has NOT already taken.
-      const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
-      // TODO(semantic): seed the Connect lens directly from semantic neighbors
-      // (e.g. pass the top semantic matches/their answer snippets, not just term
-      // labels, so "back" links can reference meaning-related drifts the lexical
-      // pass missed). Out of scope for this pass — relatedDrifts already carries
-      // merged semantic matches, so this benefits indirectly for now.
-      // Disambiguation: "Barcelona" inside a Messi conversation means FC Barcelona
-      // the club — not the city. Force the model to read the term through context.
-      const connectDisambiguation = parentContext
-        ? `\n\nCRITICAL — DISAMBIGUATE BY CONTEXT: The user selected "${selectedText}" while reading the conversation below. Interpret "${selectedText}" ONLY in the sense the conversation implies — use the surrounding text to resolve which specific entity is meant (e.g. a football club vs. a city, a person vs. a namesake, a company vs. a common word). Every connection MUST be about that contextual meaning, NOT the most generic/popular meaning of the word.\n\nConversation context:\n${parentContext}`
-        : ''
-      const connectChipsPrompt = (priorTerms.length
-        ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
-        : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
-
-      const baseSystemContent = (templateType === 'connect' && connectQuestion)
-        ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
-        : (templateType === 'connect')
-        ? connectChipsPrompt
-        : templateType
-        ? TEMPLATE_SYSTEM_PROMPTS[templateType]
-        : (parentContext
-            ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
-            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
-      // Connect branches already embed their own context above; only the
-      // non-connect templates need it appended here.
-      const systemContent = (templateType && templateType !== 'connect' && parentContext)
-        ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
-        : baseSystemContent
-
-      // Convert messages to API format with special Drift context
-      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
-        {
-          role: 'system',
-          content: systemContent
-        },
-        ...driftConversation.map(msg => ({
-          role: msg.isUser ? 'user' as const : 'assistant' as const,
-          content: msg.text
-        })),
-        { role: 'user' as const, content: textToSend }
-      ]
-      
-      const envGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
-      const geminiKey = envGeminiKey || aiSettings.geminiApiKey
-      const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
-      const effectiveApiKey = envKey || aiSettings.openRouterApiKey
-      // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
-        ? selectedProvider
-        : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
-
-      try {
-        // Create abort controller for this request
-        const abortController = new AbortController()
-        abortControllerRef.current = abortController
-        
-        const aiResponseId = 'drift-ai-' + Date.now().toString()
-        let accumulatedResponse = ''
-        
-        // Add empty AI message
-        const aiMessage: Message = {
-          id: aiResponseId,
-          text: '',
-          isUser: false,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, aiMessage])
-        setDriftOnlyMessages(prev => [...prev, aiMessage])
-        setStreamingMsgId(aiResponseId)
-
-        let firstToken = true
-        const onChunk = (chunk: string) => {
-          if (firstToken) {
-            firstToken = false
-            // A thought materializing — a light tick as the first token lands.
-            haptics.selection()
-          }
-          accumulatedResponse += chunk
-          setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-          setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-        }
-
-        // Stream the response using the chosen provider
-        if (provider === 'gemini') {
-          const apiKey = geminiKey
-          if (!apiKey) throw new Error('No Gemini API key found. Please set it in Settings.')
-          const sTargets = selectedTargets || []
-          const preset = sTargets.length === 1 ? sTargets[0] : null
-          const model = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
-          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
-        } else if (provider === 'openrouter') {
-          const apiKey = effectiveApiKey
-          if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          const sTargets = selectedTargets || []
-          const useQwen3 = (sTargets.length === 1 && (sTargets[0].key === 'qwen3' || sTargets[0].label === 'Qwen3'))
-          const model = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
-          await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, abortController.signal, model)
-        } else if (provider === 'ollama') {
-          await sendMessageToOllama(
-            apiMessages as OllamaMessage[],
-            onChunk,
-            abortController.signal,
-            aiSettings.ollamaUrl,
-            aiSettings.ollamaModel
-          )
-        }
-      // Fire-and-forget: fetch key-term highlights for this AI response
-      const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
-      if (geminiKeyForHL && accumulatedResponse.length > 80) {
-        const capturedId = aiResponseId
-        const capturedText = accumulatedResponse
-        getSuggestedHighlights(capturedText, geminiKeyForHL).then(hl => {
-          if (hl.length > 0) {
-            setMsgHighlights(prev => {
-              const next = new Map(prev)
-              next.set(capturedId, hl)
-              return next
-            })
-          }
-        })
-      }
-    } catch (error) {
-        console.error('Drift panel error:', error)
-        const friendly = friendlyDriftError(error, provider)
-        // An aborted request (user pressed Stop) isn't worth surfacing.
-        if (friendly) {
-          const aiResponse: Message = {
-            id: 'drift-error-' + Date.now().toString(),
-            text: friendly,
-            isUser: false,
-            isError: true,
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, aiResponse])
-          setDriftOnlyMessages(prev => [...prev, aiResponse])
-        }
-      } finally {
-        setIsTyping(false)
-        setStreamingMsgId(null)
-        abortControllerRef.current = null
-      }
-    }
-  }
-
-  // Re-run the most recent user turn after a failed request (the inline error
-  // bubble's "Try again"). Reuses the existing user message — no duplicate turn.
-  const retryLastMessage = () => {
-    if (isTyping) return
-    const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
-    if (!lastUser) return
-    sendMessage(lastUser.text, true)
-  }
-
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-      setIsTyping(false)
-      setIsComparing(false)
-      setStreamingMsgId(null)
-    }
-    if (compareAbortControllersRef.current) {
-      for (const c of Object.values(compareAbortControllersRef.current)) {
-        try { c.abort() } catch {}
-      }
-      compareAbortControllersRef.current = null
-    }
-  }
-
-  // Run the current prompt across multiple selected targets and stream results
-  const handleCompareAcrossModels = async () => {
-    const targets = (selectedTargets || []).filter(Boolean)
-    if (!targets || targets.length < 2) return
-
-    // Determine question: use current input if present; otherwise last user message
-    const trimmed = message.trim()
-    const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
-    const questionText = trimmed || lastUser?.text || ''
-    if (!questionText) return
-
-    // If using new input, append it to the drift conversation for continuity
-    let workingDrift: Message[] = driftOnlyMessages
-    if (trimmed) {
-      const newMsg: Message = { id: 'drift-' + Date.now().toString(), text: questionText, isUser: true, timestamp: new Date() }
-      setMessages(prev => [...prev, newMsg])
-      setDriftOnlyMessages(prev => [...prev, newMsg])
-      workingDrift = [...driftOnlyMessages, newMsg]
-      setMessage('')
-    }
-
-    // Build API messages with system context. Mirror the single-model path:
-    // ground the answer in the parent conversation so each model disambiguates
-    // "${selectedText}" the same way the user means it.
-    const compareContext = contextMessages.slice(-8).map(msg => {
-      const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
-      return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
-    }).join('\n')
-    const baseConversation = workingDrift.filter(msg => !isDriftOpenerText(msg.text))
-    const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
-      {
-        role: 'system',
-        content: compareContext
-          ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${compareContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies. Don't repeat the basic definition they can already see; add NEW value — the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate; don't invent facts.`
-          : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`
-      },
-      ...baseConversation.map(msg => ({ role: msg.isUser ? 'user' as const : 'assistant' as const, content: msg.text }))
-    ]
-
-    // If the last message in baseConversation isn't the question (when input was empty), ensure the API sees the question
-    if (!trimmed && (!lastUser || lastUser.text !== questionText)) {
-      apiMessages.push({ role: 'user', content: questionText })
-    } else if (trimmed) {
-      // When we just appended the user input locally, also reflect it in apiMessages
-      apiMessages.push({ role: 'user', content: questionText })
-    }
-
-    // Prepare per-target abort controllers for concurrent streaming
-    const controllers: Record<string, AbortController> = {}
-    compareAbortControllersRef.current = controllers
-    setIsTyping(true)
-    setIsComparing(true)
-
-    try {
-      // Compare group id for this run
-      const groupId = `cmp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
-
-      // Create placeholders and start all streams concurrently
-      const tasks = targets.map(t => {
-        const aiId = `drift-compare-${t.key}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
-        const placeholder: Message = { 
-          id: aiId, text: '', isUser: false, timestamp: new Date(), 
-          modelTag: t.label, compareGroupId: groupId, laneKey: t.key 
-        }
-        setMessages(prev => [...prev, placeholder])
-        setDriftOnlyMessages(prev => [...prev, placeholder])
-
-        const onChunk = (chunk: string) => {
-          setMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
-          setDriftOnlyMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
-        }
-        const controller = new AbortController()
-        controllers[t.key] = controller
-
-        const run = async () => {
-          try {
-            if (t.provider === 'openrouter') {
-              const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
-              const settingsKey = aiSettings.openRouterApiKey
-              const apiKey = envKey || settingsKey
-              if (!apiKey) {
-                onChunk('[OpenRouter] Missing API key. Configure in Settings.')
-              } else {
-                const model = (t.key === 'qwen3' || t.label === 'Qwen3')
-                  ? OPENROUTER_MODELS.QWEN3
-                  : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
-                await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, controller.signal, model)
-              }
-            } else if (t.provider === 'ollama') {
-              await sendMessageToOllama(apiMessages as OllamaMessage[], onChunk, controller.signal, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-            } else {
-              // no-op
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Failed to get response.'
-            onChunk(`\n\n[${t.label}] ${msg}`)
-          }
-        }
-
-        return run()
-      })
-
-      await Promise.allSettled(tasks)
-    } finally {
-      setIsTyping(false)
-      setIsComparing(false)
-      compareAbortControllersRef.current = null
     }
   }
 
