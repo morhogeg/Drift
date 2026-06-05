@@ -9,7 +9,7 @@ You are helping design system prompts for Drift, an exploratory AI chat app wher
 - All prompts receive the `selectedText` and optionally `parentContext` (last 6 messages of the parent conversation).
 
 ## Location of prompts
-`src/components/DriftPanel.tsx` → `TEMPLATE_SYSTEM_PROMPTS` object (around line 124)
+`src/lib/driftPanel.ts` → `TEMPLATE_SYSTEM_PROMPTS` object
 
 ## Workflow
 1. Ask what template the user is working on (Connect, Simplify, Deep dive, or new)
