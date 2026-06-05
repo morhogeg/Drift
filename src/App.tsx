@@ -18,7 +18,6 @@ import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
-import MultiModelCarousel from './components/MultiModelCarousel'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
 import SearchModal from './components/SearchModal'
@@ -81,27 +80,16 @@ function App() {
   // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
   const keyboardVisible = useKeyboardVisibility()
 
-  // Broadcast / canvas transient state
-  const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
-  const [, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
-  const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
-  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
-  const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
   // Drift just promoted to the main thread — drives a one-time settle-in arrival
   // animation (cleared shortly after, so reloads/scroll don't re-animate it).
   const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
   const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const prevContinueTargetsRef = useRef<typeof modelStore.selectedTargets | null>(null)
 
-  // Mobile carousel + model picker state
-  const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
+  // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
   const [synthesizing, setSynthesizing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-
-  // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
 
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
@@ -983,78 +971,19 @@ function App() {
   }
 
   // ── Message send / stream pipeline ──────────────────────────────────────────
-  // The send + streaming layer: primary send (single + broadcast), stream-one-
-  // target (for late-added models), retroactive broadcast upgrade, and stop.
-  // Extracted into useMessageStream; the App-owned settings, strand/canvas/
-  // continue setters, the abort + scroll refs and stripMarkdown are passed in so
-  // behavior is identical to the inline implementation.
+  // Single-model send + streaming. Extracted into useMessageStream; the App-owned
+  // settings, the abort + scroll refs and stripMarkdown are passed in so behavior
+  // is identical to the inline implementation.
   const {
-    retroactivelyUpgradeToBroadcast,
-    sendToTarget,
     sendMessage,
     stopGeneration,
   } = useMessageStream({
     aiSettings,
-    activeStrandId,
-    activeCanvasId,
-    setActiveCanvasId,
-    continueFromMessageId,
-    setContinueFromMessageId,
-    setActiveBroadcastGroupId,
-    setContinuedModelByGroup,
     abortControllerRef,
     userHasScrolled,
     scrollToBottom,
     stripMarkdown,
   })
-
-  // ── continueWithModel ───────────────────────────────────────────────────────
-  const continueWithModel = (modelTag?: string, messageId?: string) => {
-    if (!modelTag) return
-    prevContinueTargetsRef.current = selectedTargets
-    let targetId = messageId || ''
-    if (messageId) {
-      const msg = messages.find(m => m.id === messageId)
-      const gid = msg?.broadcastGroupId
-      if (gid) {
-        setContinuedModelByGroup(prev => ({ ...prev, [gid]: modelTag }))
-        setActiveBroadcastGroupId(gid)
-      }
-      if (gid && msg?.modelTag && !isTouchDevice) {
-        // Canvas view is desktop-only; on mobile messages flow into main thread
-        const canvasId = `${gid}:${msg.modelTag}`
-        setActiveCanvasId(canvasId)
-        const lastAssistant = [...messages].reverse().find(m => m.canvasId === canvasId && !m.isUser)
-        if (lastAssistant) targetId = lastAssistant.id
-      }
-      setActiveStrandId(messageId)
-    }
-    if (targetId) setContinueFromMessageId(targetId)
-    // Try preset lookup first — handles any user-added model
-    const matchingPreset = (aiSettings.modelPresets || []).find((p) => p.label === modelTag && p.enabled)
-    if (matchingPreset) {
-      setSelectedTargetsPersist([{ provider: matchingPreset.provider, key: matchingPreset.id, label: matchingPreset.label }])
-    } else if (modelTag === 'Qwen3') {
-      setSelectedTargetsPersist([{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
-    } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
-      setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
-    } else if (modelTag === 'Ollama') {
-      setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
-    } else if (modelTag === 'Gemini Flash Lite' || modelTag === 'gemini-flash-lite') {
-      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash-lite', label: 'Gemini Flash Lite' }])
-    } else if (modelTag === 'Gemini Flash' || modelTag === 'gemini-flash') {
-      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash', label: 'Gemini Flash' }])
-    }
-    setTimeout(() => {
-      if (!targetId) return
-      const el = document.querySelector(`[data-message-id="${targetId}"]`)
-      if (el) {
-        el.classList.add('highlight-message')
-        setTimeout(() => el.classList.remove('highlight-message'), 1500)
-      }
-      textareaRef.current?.focus()
-    }, 30)
-  }
 
   // ── Settings ────────────────────────────────────────────────────────────────
   const handleSaveSettings = (newSettings: AISettings) => {
@@ -1077,12 +1006,10 @@ function App() {
       else merged.push(p)
     }
     handleSaveSettings({ ...aiSettings, modelPresets: merged })
-    // Auto-select first newly added preset (not already selected)
+    // Single-model: switch to the first newly added preset (not already selected)
     const firstNew = newPresets.find((p) => !selectedTargets.some((t) => t.key === p.id))
-    if (firstNew && selectedTargets.length < 3) {
-      setSelectedTargetsPersist(
-        [...selectedTargets, { provider: firstNew.provider, key: firstNew.id, label: firstNew.label }].slice(0, 3),
-      )
+    if (firstNew) {
+      setSelectedTargetsPersist([{ provider: firstNew.provider, key: firstNew.id, label: firstNew.label }])
     }
   }
 
@@ -1898,7 +1825,6 @@ function App() {
 
               {/* Message list */}
               {messages.map((msg, index) => {
-                if (msg.canvasId) return null
                 const isDriftHeader = msg.isDriftPush && msg.text.startsWith('📌')
                 const isDriftMessage = msg.isDriftPush && !msg.text.startsWith('📌')
                 const prevMsg = index > 0 ? messages[index - 1] : null
@@ -1922,144 +1848,9 @@ function App() {
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
-                // Broadcast group rendering
-                if (msg.broadcastGroupId) {
-                  if (index > 0 && messages[index - 1]?.broadcastGroupId === msg.broadcastGroupId) return null
-                  const groupId = msg.broadcastGroupId
-                  const groupMessages: Message[] = []
-                  for (let j = index; j < messages.length; j++) {
-                    const m = messages[j]
-                    if (m.broadcastGroupId === groupId) groupMessages.push(m)
-                    else break
-                  }
-                  return (
-                    <div
-                      key={`bg-${groupId}-${index}`}
-                      className="max-w-5xl mx-auto px-6"
-                      data-broadcast-group={groupId}
-                    >
-                      {/* Mobile: horizontal scroll-snap carousel */}
-                      <div className="md:hidden">
-                        <MultiModelCarousel
-                          messages={groupMessages}
-                          broadcastGroupId={groupId}
-                          activeBroadcastGroupId={activeBroadcastGroupId}
-                          onContinueWith={continueWithModel}
-                          onActiveCardChange={(modelTag) => setActiveCarouselModel(modelTag)}
-                        />
-                      </div>
-
-                      {/* Desktop: existing 2-column grid */}
-                      <div className="hidden md:block">
-                      <div className="grid gap-4 items-start md:grid-cols-2">
-                        {groupMessages.map((gm) => (
-                          <div key={`resp-${gm.id}`} className="w-full">
-                            <div className={`flex justify-start animate-fade-up relative group`}>
-                              <div
-                                className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 ${gm.modelTag ? 'pt-7 pb-3' : 'py-3'} relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
-                                data-message-id={gm.id}
-                              >
-                                {gm.modelTag && (() => {
-                                  const canvasId = `${groupId}:${gm.modelTag}`
-                                  return (
-                                    <button
-                                      onClick={() => setActiveCanvasId(canvasId)}
-                                      className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
-                                      title={`Show ${gm.modelTag} thread`}
-                                    >
-                                      {gm.modelTag}
-                                    </button>
-                                  )
-                                })()}
-                                {gm.modelTag && gm.broadcastGroupId === activeBroadcastGroupId && (
-                                  <button
-                                    onClick={() => continueWithModel(gm.modelTag, gm.id)}
-                                    className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
-                                    title={`Continue with ${gm.modelTag}`}
-                                  >
-                                    Continue
-                                  </button>
-                                )}
-                                {gm.text && gm.text.length > 0 ? (
-                                  <div className="prose prose-invert prose-sm max-w-none relative text-[13px] leading-6">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}
-                                      components={{
-                                        p: ({ children }) => <p>{processEntityText(children, gm.id)}</p>,
-                                        li: ({ children }) => <li>{processEntityText(children, gm.id)}</li>,
-                                        th: ({ children }) => <th>{processEntityText(children, gm.id)}</th>,
-                                        td: ({ children }) => <td>{processEntityText(children, gm.id)}</td>,
-                                      }}
-                                    >
-                                      {gm.text.replace(/```([\s\S]*?)```/g, (_m, p1) => `\n\n\`\`\`\n${p1}\n\`\`\`\n\n`)}
-                                    </ReactMarkdown>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-1 py-1">
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Per-model continuation canvases */}
-                        {groupMessages.map((gm) => {
-                          const canvasId = `${groupId}:${gm.modelTag}`
-                          const canvasMsgs = messages.filter(m => m.canvasId === canvasId)
-                          const lastAssistant = [...canvasMsgs].reverse().find(m => !m.isUser && m.modelTag)
-                          return (
-                            <div key={`canvas-${gm.id}`} className="w-full">
-                              {canvasMsgs.length > 0 && (
-                                <div className={`mt-3 pl-3 border-l ${activeCanvasId === canvasId ? 'border-accent-violet/15' : 'border-dark-border/30'} transition-colors`}>
-                                  {canvasMsgs.map((cm) => (
-                                    <div key={cm.id} className="mb-3">
-                                      <div className={`flex ${cm.isUser ? 'justify-end' : 'justify-start'} relative`}>
-                                        <div data-message-id={cm.id} className={`${cm.isUser
-                                          ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white'
-                                          : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary'} rounded-2xl px-5 py-3 shadow-lg max-w-[85%] ${continueFromMessageId === cm.id ? 'ring-1 ring-accent-violet/25' : ''}`}
-                                        >
-                                          <div className={`${getRTLClassName(cm.text)}`} dir={getTextDirection(cm.text)}>
-                                            <ReactMarkdown className="prose prose-sm prose-invert max-w-none text-[13px] leading-6"
-                                              remarkPlugins={[remarkGfm]}
-                                              components={{
-                                                p: ({ children }) => <p>{processEntityText(children, cm.id)}</p>,
-                                                li: ({ children }) => <li>{processEntityText(children, cm.id)}</li>,
-                                                th: ({ children }) => <th>{processEntityText(children, cm.id)}</th>,
-                                                td: ({ children }) => <td>{processEntityText(children, cm.id)}</td>,
-                                              }}
-                                            >
-                                              {cm.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
-                                            </ReactMarkdown>
-                                          </div>
-                                        </div>
-                                        {lastAssistant && cm.id === lastAssistant.id && (
-                                          <button
-                                            onClick={() => continueWithModel(lastAssistant.modelTag, lastAssistant.id)}
-                                            className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
-                                          >
-                                            Continue
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      </div> {/* end hidden md:block */}
-                    </div>
-                  )
-                }
-
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
                     data-drift-promoted={isDriftMessage ? 'true' : undefined}
                     key={msg.id}
                   >
@@ -2201,76 +1992,6 @@ function App() {
                             }
                           }}
                         >
-
-
-                          {/* Strand bead */}
-                          {msg.strandId && msg.strandId === activeStrandId && (
-                            <>
-                              {(!messages[index - 1] || messages[index - 1]?.strandId !== msg.strandId) && (
-                                <div className="absolute -left-2 top-2 w-2 h-2 rounded-full bg-accent-violet/60" />
-                              )}
-                            </>
-                          )}
-
-                          {/* Model tag */}
-                          {!msg.isUser && !isPlainAI && msg.modelTag && !isDriftMessage && !isSinglePushMessage && (
-                            msg.broadcastGroupId ? (
-                              <button
-                                onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
-                                className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
-                                title={`Show ${msg.modelTag} thread`}
-                              >
-                                {msg.modelTag}
-                              </button>
-                            ) : (
-                              <div className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted whitespace-nowrap">
-                                {msg.modelTag}
-                              </div>
-                            )
-                          )}
-
-                          {/* Continue action when broadcast is active */}
-                          {!msg.isUser && msg.modelTag && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
-                            <button
-                              onClick={() => continueWithModel(msg.modelTag, msg.id)}
-                              className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
-                              title={`Continue with ${msg.modelTag}`}
-                            >
-                              Continue
-                            </button>
-                          )}
-
-                          {/* Inline Continue context banner */}
-                          {!msg.isUser && continueFromMessageId === msg.id && (
-                            <div className="mt-2 text-[11px] px-3 py-2 rounded-lg bg-dark-elevated/60 border border-accent-violet/30 text-text-secondary flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 rounded-full bg-dark-bubble border border-dark-border/50 text-[10px] text-accent-violet">
-                                  Continuing with {msg.modelTag}
-                                </span>
-                                <span className="text-text-muted">Your next message will use this model</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => {
-                                    textareaRef.current?.focus()
-                                    scrollToBottom()
-                                  }}
-                                  className="px-2 py-0.5 rounded bg-accent-violet/20 text-accent-violet border border-accent-violet/40 hover:bg-accent-violet/30 transition-colors"
-                                >
-                                  Write reply
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (prevContinueTargetsRef.current) setSelectedTargetsPersist(prevContinueTargetsRef.current)
-                                    setContinueFromMessageId(null)
-                                  }}
-                                  className="px-2 py-0.5 rounded bg-dark-bubble border border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated transition-colors"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          )}
 
 
                           {/* Inline drift header — removed, label is now above the bubble */}
@@ -2677,37 +2398,8 @@ function App() {
             <div className="lg:hidden">
               <ModelPillRow
                 selectedTargets={selectedTargets}
-                onToggleTarget={(target) => {
-                  const exists = selectedTargets.some(t => t.key === target.key)
-                  const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
-                  setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-                  if (!exists) {
-                    if (activeBroadcastGroupId) {
-                      // Existing broadcast group — send to newly added model
-                      const currentMessages = useChatStore.getState().messages
-                      const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-                      const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-                      const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-                      if (userMsg && userMsg.isUser) {
-                        const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-                        sendToTarget(target, contextMsgs, activeBroadcastGroupId)
-                      }
-                    } else {
-                      // Single-model mode — retroactively upgrade last exchange to broadcast
-                      const upgraded = retroactivelyUpgradeToBroadcast()
-                      if (upgraded) {
-                        sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
-                      }
-                    }
-                  }
-                }}
                 onOpenPicker={() => setModelPickerOpen(true)}
               />
-              {selectedTargets.length > 1 && activeCarouselModel && (
-                <div className="px-1 pb-1 text-[11px] text-text-muted">
-                  Replying to: <span className="text-accent-violet font-medium">{activeCarouselModel}</span>
-                </div>
-              )}
             </div>
             <div className="relative">
               <textarea
@@ -2999,29 +2691,10 @@ function App() {
         selectedTargets={selectedTargets}
         availableTargets={availableTargets}
         onOpenAddModel={() => setAddModelSheetOpen(true)}
-        onToggleTarget={(target) => {
-          const exists = selectedTargets.some(t => t.key === target.key)
-          const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
-          setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-          if (!exists) {
-            if (activeBroadcastGroupId) {
-              // Existing broadcast group — send to newly added model
-              const currentMessages = useChatStore.getState().messages
-              const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-              const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-              const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-              if (userMsg && userMsg.isUser) {
-                const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-                sendToTarget(target, contextMsgs, activeBroadcastGroupId)
-              }
-            } else {
-              // Single-model mode — retroactively upgrade last exchange to broadcast
-              const upgraded = retroactivelyUpgradeToBroadcast()
-              if (upgraded) {
-                sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
-              }
-            }
-          }
+        onSelectTarget={(target) => {
+          // Single-model: selecting a model replaces the current selection.
+          setSelectedTargetsPersist([target])
+          setModelPickerOpen(false)
         }}
       />
 
@@ -3031,7 +2704,7 @@ function App() {
         onClose={() => setAddModelSheetOpen(false)}
         currentPresets={aiSettings.modelPresets || []}
         onPresetsAdded={handlePresetsAdded}
-        maxAdd={Math.max(0, 3 - selectedTargets.length)}
+        maxAdd={3}
       />
 
       {/* Knowledge Graph */}

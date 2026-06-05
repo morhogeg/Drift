@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Check, Megaphone } from 'lucide-react'
+import { ChevronDown, Check } from 'lucide-react'
 type Provider = 'openrouter' | 'ollama' | 'gemini'
 type Target = { provider: Provider, key: string, label: string }
 
@@ -30,17 +30,15 @@ export default function HeaderControls(props: Props) {
 
   const allowedKeys = new Set(items.map(i => i.key))
   const visibleTargets = (selectedTargets || []).filter(t => allowedKeys.has(t.key))
-  const isBroadcast = (visibleTargets.length || 0) > 1
   // Resolve label from current items to avoid stale persisted labels
   const first = visibleTargets[0]
   const resolvedFirstLabel = first ? (items.find(i => i.key === first.key)?.label || first.label) : undefined
-  const summaryLabel = isBroadcast ? `Broadcast · ${visibleTargets.length}` : (resolvedFirstLabel || 'Model')
+  const summaryLabel = resolvedFirstLabel || 'Model'
 
-  const toggleTarget = (t: Target) => {
-    const has = visibleTargets.some(x => x.key === t.key)
-    const next = has ? visibleTargets.filter(x => x.key !== t.key) : [...visibleTargets, t]
-    // Ensure at least one
-    setSelectedTargets(next.length ? next : [{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
+  const selectTarget = (t: Target) => {
+    // Single-model: choosing a model replaces the current selection.
+    setSelectedTargets([t])
+    setMenuOpen(false)
   }
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -78,10 +76,8 @@ export default function HeaderControls(props: Props) {
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           className="px-3 py-1 rounded-full bg-dark-elevated/60 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer flex items-center gap-1"
-          title="Choose models"
+          title="Choose model"
         >
-          {isBroadcast && <Megaphone className="w-3.5 h-3.5 text-accent-pink" />}
-          {!isBroadcast && null}
           <span>{summaryLabel}</span>
           <ChevronDown className={`w-3.5 h-3.5 text-text-muted ${menuOpen ? 'rotate-180' : ''}`} />
         </button>
@@ -102,7 +98,7 @@ export default function HeaderControls(props: Props) {
                 return (
                   <button
                     key={t.key}
-                    onClick={() => toggleTarget(t)}
+                    onClick={() => selectTarget(t)}
                     className={`w-full flex items-center justify-between px-3 py-1.5 text-[13px] hover:bg-dark-elevated/60 transition-colors ${active ? accent : 'text-text-primary'}`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
