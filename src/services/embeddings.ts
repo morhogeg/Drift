@@ -58,7 +58,7 @@ export async function embedTexts(
       const onAbort = () => controller.abort()
       signal?.addEventListener('abort', onAbort)
 
-      const url = `${GEMINI_BASE}/${EMBEDDING_MODEL}:batchEmbedContents?key=${apiKey.trim()}`
+      const url = `${GEMINI_BASE}/${EMBEDDING_MODEL}:batchEmbedContents`
       const body = {
         requests: chunk.map((text) => ({
           model: EMBEDDING_MODEL_PATH,
@@ -71,7 +71,7 @@ export async function embedTexts(
       try {
         response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
           body: JSON.stringify(body),
           signal: controller.signal,
         })

@@ -86,10 +86,10 @@ export async function checkGeminiConnection(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 6000)
 
-    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const url = `${GEMINI_BASE}/${model}:generateContent`
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
         generationConfig: { maxOutputTokens: 1 },
@@ -124,7 +124,7 @@ export async function getSuggestedHighlights(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000)
 
-    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const url = `${GEMINI_BASE}/${model}:generateContent`
 
     const body = {
       systemInstruction: {
@@ -151,7 +151,7 @@ ${LANGUAGE_DIRECTIVE}`,
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -194,7 +194,7 @@ export async function getDriftSuggestions(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000)
 
-    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const url = `${GEMINI_BASE}/${model}:generateContent`
 
     const body = {
       systemInstruction: {
@@ -221,7 +221,7 @@ ${LANGUAGE_DIRECTIVE}`,
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -273,7 +273,7 @@ export async function getConnections(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 6000)
 
-    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const url = `${GEMINI_BASE}/${model}:generateContent`
 
     const priorLine = priorTerms.length
       ? `\nAlready explored elsewhere (do NOT repeat these — find fresh ground): ${priorTerms.slice(0, 12).join(', ')}`
@@ -303,7 +303,7 @@ ${LANGUAGE_DIRECTIVE}`,
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -345,7 +345,7 @@ export async function synthesizeDrifts(
   if (!apiKey?.trim() || branches.length === 0) return ''
 
   try {
-    const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey.trim()}`
+    const url = `${GEMINI_BASE}/${model}:generateContent`
     const branchText = branches
       .map((b, i) => `### Branch ${i + 1}: ${b.term}\n${b.content.substring(0, 1600)}`)
       .join('\n\n')
@@ -377,7 +377,7 @@ ${LANGUAGE_DIRECTIVE}`,
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify(body),
       signal,
     })
@@ -407,7 +407,7 @@ export async function sendMessageToGemini(
 
   const { contents, systemInstruction } = toGeminiContents(messages)
 
-  const url = `${GEMINI_BASE}/${model}:streamGenerateContent?key=${apiKey.trim()}&alt=sse`
+  const url = `${GEMINI_BASE}/${model}:streamGenerateContent?alt=sse`
 
   const body: Record<string, unknown> = {
     contents,
@@ -426,7 +426,7 @@ export async function sendMessageToGemini(
   const doFetch = (b: Record<string, unknown>) =>
     fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify(b),
       signal,
     })
