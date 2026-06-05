@@ -1,12 +1,13 @@
 # Refactor + Security Handoff
 
 **Branch:** `feature/apple-level-overhaul` · **As of:** June 5, 2026
-**Pick it up next session with:** `/continue-refactor`
-(or target a specific piece: `/continue-refactor handleStartDrift`)
+**Pick it up next session with:** `/continue-refactor` (next target = **`DriftPanel.tsx`**)
 
-> **Latest (Jun 5):** `useMessageStream` — message send/stream pipeline extracted
-> (commit `b551bfa`). App.tsx **3579 → 3275**. Tier B core-logic extraction is now
-> essentially complete; remaining targets are smaller (see "What's left").
+> **Where we are:** Tier B steps 1–3 are DONE (`useChatActions`, `useDriftActions`,
+> `useMessageStream`). Multi-model broadcast + continue-with-model were then
+> **removed** (product decision — single-model only). **App.tsx is now 2948 lines**
+> (was 4195 at the start of the refactor). `DriftPanel.tsx` (~1,916 lines) is the
+> last untouched monolith → **that's Tier B step 4, the next session's job.**
 
 ---
 
@@ -21,9 +22,16 @@ After rotating: add a Google Cloud API-key restriction (Generative Language API 
 
 ---
 
-## What was done this session (1 commit, pushed)
+## What was done this session (pushed)
 
-### Refactor — decomposing the `App.tsx` monolith (Tier B)
+| Commit | Change | Result |
+|---|---|---|
+| `b551bfa` | **`useMessageStream`** — extracted the message send/stream pipeline (Tier B step 3) | App.tsx 3579 → 3275 |
+| `f0e19d7` | **Removed multi-model broadcast + continue-with-model** (single-model only; pickers single-select) | App.tsx 3275 → **2948** |
+
+Both verified with `tsc -b` + `vite build` + a live Gemini Playwright smoke. Surgical removal: `selectedTargets` stays a length-1 array and the unused `Message` fields (`broadcastGroupId`/`canvasId`/`strandId`) remain in the type + DB schema, so multi-model is trivial to reintroduce later.
+
+### Earlier (prior session)
 | Commit | Hook | Result |
 |---|---|---|
 | `33e1015` | **`useDriftActions` (slice 2)** — `handleStartDrift`, `handleCloseDrift`, `handlePushDriftToMain`, `handleSaveDriftAsChat`, `handleSavePushedDriftAsChat` | App.tsx 4075 → **3579** |
@@ -49,15 +57,18 @@ Behavior-preserving faithful copies. The App-owned pieces the handlers need are 
 
 ## What's left — next session
 
-### ✅ Message send / stream pipeline (Tier B step 3) — DONE (commit `b551bfa`)
-Extracted into `src/hooks/useMessageStream.ts`. **Then trimmed to single-model only** (commit `f0e19d7`, see below) — it now owns just `sendMessage` + `stopGeneration`.
+### ⭐ NEXT: `DriftPanel.tsx` (~1,916 lines) — Tier B step 4
+The last untouched monolith. Same playbook as the App.tsx hooks: orient first, then pull cohesive concerns into focused hooks/modules one-per-commit, behavior-preserving. **Before starting, read it and map its concerns** (likely candidates: the drift conversation send/stream loop, the Connect/Simplify/Deep-dive template logic + `TEMPLATE_SYSTEM_PROMPTS`, the lens/"View as" switcher, the connect-cards parser, and the breadcrumb/ancestry UI). Then propose a slice order (lowest-risk first) and confirm before cutting. **Requires a live drift smoke** (create a drift → ask a question → watch it stream) on any send/stream change.
 
-### ✅ Multi-model broadcast + continue-with-model REMOVED (commit `f0e19d7`)
-Per product decision (single-model for now, may return later): removed the broadcast send path, `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `continueWithModel`, the broadcast-group render branch, `MultiModelCarousel` (deleted), per-model canvases, Continue buttons/banner, strand beads, and all the related App state. Pickers (HeaderControls / ModelPickerSheet / ModelPillRow) are now single-select. **Surgical scope:** `selectedTargets` stays a length-1 array and the unused `Message` fields (`broadcastGroupId`/`canvasId`/`strandId`) remain in the type + DB schema, so multi-model is trivial to reintroduce. `continueWithModel` no longer exists — the previously-planned `useModelActions` extraction is moot.
+> Tip: `src/hooks/useMessageStream.ts` and `src/hooks/useDriftActions.ts` are the
+> reference pattern for the deps-interface + JSDoc style to match.
 
-### RECOMMENDED NEXT
-- `DriftPanel.tsx` (~1,900 lines) — same hook-extraction treatment.
-- `handleStartDrift` is ~200 lines with three branches (nested-drift / found-message / fallback) — a candidate to split into smaller private helpers inside the hook, but only as a separate, clearly-labeled commit (not while it's still warm from the move).
+### ✅ Already complete (this + prior sessions)
+- **Tier B step 3** — message send/stream pipeline → `src/hooks/useMessageStream.ts` (commit `b551bfa`; later trimmed to single-model, now just `sendMessage` + `stopGeneration`).
+- **Multi-model broadcast + continue-with-model REMOVED** (commit `f0e19d7`) — single-model only (may return later). Removed the broadcast send path, `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `continueWithModel`, the broadcast-group render branch, `MultiModelCarousel` (deleted), per-model canvases, Continue buttons/banner, strand beads, and the related App state. Pickers are single-select. `selectedTargets` is still a length-1 array and the unused `Message` fields (`broadcastGroupId`/`canvasId`/`strandId`) remain in the type + DB schema, so multi-model is trivial to reintroduce. **`continueWithModel` no longer exists — the previously-planned `useModelActions` extraction is moot.**
+
+### Optional follow-up (separate, clearly-labeled commit)
+- `handleStartDrift` (in `useDriftActions`) is ~200 lines with three branches (nested-drift / found-message / fallback) — could split into smaller private helpers. Only as its own commit, not bundled with an extraction.
 
 ---
 
