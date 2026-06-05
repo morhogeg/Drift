@@ -17,15 +17,19 @@ After rotating: add a Google Cloud API-key restriction (Generative Language API 
 
 ---
 
-## What was done this session (6 commits, all pushed)
+## What was done this session (1 commit, pushed)
 
 ### Refactor — decomposing the `App.tsx` monolith (Tier B)
 | Commit | Hook | Result |
 |---|---|---|
-| `2054b86` | **`useChatActions`** — sidebar CRUD: rename / save-rename / duplicate / delete / pin / star / context-menu | App.tsx 4195 → 4162 |
-| `3886b5b` | **`useDriftActions` (slice 1)** — `reopenLastDrift`, `handleNavigateToBreadcrumb`, `handleUndoPushToMain`, `handleUndoSaveAsChat` | App.tsx 4162 → **4075** |
+| `33e1015` | **`useDriftActions` (slice 2)** — `handleStartDrift`, `handleCloseDrift`, `handlePushDriftToMain`, `handleSaveDriftAsChat`, `handleSavePushedDriftAsChat` | App.tsx 4075 → **3579** |
 
-Both are behavior-preserving faithful copies. Each verified: `tsc --noEmit` clean + `npm run build` + a live Playwright smoke. The drift smoke drove a real Gemini drift conversation → close → reopen and confirmed `reopenLastDrift` restores the drift with its messages, no console errors.
+Behavior-preserving faithful copies. The App-owned pieces the handlers need are now passed through the hook deps interface: `mainScrollPosition`, `connectCardsCache`, `setLastDrift`, `setJustPromotedChatId`, `justPromotedTimerRef`, `stripMarkdown`. Verified: `tsc --noEmit` clean + `npm run build` + a live Gemini Playwright smoke that drove the full flow — create drift → push-to-main → undo → save-as-chat — with no console/page errors. `useDriftActions` now owns the entire drift action layer (9 handlers).
+
+### Prior session (6 commits, pushed)
+- `2054b86` **`useChatActions`** — sidebar CRUD (rename / duplicate / delete / pin / star / context-menu). App.tsx 4195 → 4162.
+- `3886b5b` **`useDriftActions` (slice 1)** — `reopenLastDrift`, `handleNavigateToBreadcrumb`, `handleUndoPushToMain`, `handleUndoSaveAsChat`. App.tsx 4162 → 4075.
+- Security: `07b4905` strip API keys from backup export · `f00f499` Gemini key via `x-goog-api-key` header · `364b366` remove copy-API-key button · `22a6803` `npm audit fix`.
 
 ### Security hardening (code-level fixes I could safely make)
 | Commit | Fix |
@@ -41,17 +45,12 @@ Both are behavior-preserving faithful copies. Each verified: `tsc --noEmit` clea
 
 ## What's left — next session
 
-### `useDriftActions` slice 2 (the big, entangled handlers) — RECOMMENDED NEXT
-Still inline in `App.tsx`, intentionally deferred because they're the signature feature with the highest blast radius:
-- `handleStartDrift` (~line 1430, ~200 lines — nested-drift + Connect + fallback paths)
-- `handleCloseDrift` (~line 1642 — arms `lastDrift`, persists drift, registers session)
-- `handlePushDriftToMain` (~line 1790 — push-to-main with undo)
-- `handleSaveDriftAsChat` (~line 1715) and `handleSavePushedDriftAsChat`
-- Move them into the **existing** `useDriftActions` hook (extend its deps interface).
-- **Must** run a live drift smoke (create drift → push-to-main → undo → save-as-chat). There's a live Gemini key in `.env`.
+### Message send / stream pipeline (Tier B step 3) — RECOMMENDED NEXT
+The biggest remaining concern still inline in `App.tsx`: the message send function(s) + streaming loop. Extract into a focused hook/module (e.g. `useMessageStream`). Highest blast radius after drift — **requires a live AI smoke** that actually sends a message and watches it stream (live Gemini key in `.env`).
 
-### Then (Tier B step 3)
-- **Message send / stream pipeline** — the big send function(s) + streaming in `App.tsx`. Requires a live AI smoke.
+### Optional after that
+- Same hook-extraction treatment on `DriftPanel.tsx` (~1,900 lines).
+- `handleStartDrift` is ~200 lines with three branches (nested-drift / found-message / fallback) — a candidate to split into smaller private helpers inside the hook, but only as a separate, clearly-labeled commit (not while it's still warm from the move).
 
 ### Optional after App.tsx shrinks
 - Same hook-extraction treatment on `DriftPanel.tsx` (~1,900 lines).
@@ -64,4 +63,4 @@ Still inline in `App.tsx`, intentionally deferred because they're the signature 
 - Push each verified step. Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
 ## Already extracted into `src/hooks/` (do NOT re-extract)
-`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (partial — slice 1 only). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
+`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.

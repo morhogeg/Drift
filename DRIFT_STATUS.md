@@ -17,7 +17,7 @@
 - [ ] Providers/settings on-device pass (OpenRouter key, Settings UI, Ollama/Qwen3 gone)
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 - [ ] Real auth · Security: Gemini key behind proxy · Light theme polish
-- [ ] **App.tsx refactor IN PROGRESS** — see `REFACTOR_HANDOFF.md`; resume with `/continue-refactor` (next: useDriftActions slice 2). ⚠️ Two Gemini keys exposed — **rotate in Google AI Studio** (details in handoff).
+- [ ] **App.tsx refactor IN PROGRESS** — see `REFACTOR_HANDOFF.md`; resume with `/continue-refactor`. useDriftActions COMPLETE (slice 2 done, App.tsx 4075→3579). Next: message send/stream pipeline. ⚠️ Two Gemini keys exposed — **rotate in Google AI Studio** (details in handoff).
 - [ ] Voice output · Code cleanup (dead DriftMapPanel, etc.)
 
 ## Stack snapshot
