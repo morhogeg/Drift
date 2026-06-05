@@ -7,15 +7,15 @@ You are resuming a **staged, production-grade refactor** of the Drift web app. C
 
 ## 1. Orient yourself (do this first)
 - Repo: `/Users/morhogeg/Drift`. Branch: **`feature/apple-level-overhaul`** (confirm with `git branch --show-current`; do not switch).
-- Read `DRIFT_STATUS.md` and run `git log --oneline -12` to see recent work.
+- Read `REFACTOR_HANDOFF.md` (latest progress + what's next) and `DRIFT_STATUS.md`, then run `git log --oneline -12`.
 - The refactor checkpoint is commit **`b3db9e2`** ("Map drag fix, drift error UX, onboarding, backup + code-quality pass"). Everything after it is one-hook-per-commit.
-- Already extracted into `src/hooks/` (do NOT re-extract): `useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`. Also `src/lib/format.ts` and `src/lib/onboardingFlag.ts`.
-- The monolith is `src/App.tsx` (~4,195 lines, ALL inside one `App()` component). Secondary: `src/components/DriftPanel.tsx` (~1,900 lines).
+- Already extracted into `src/hooks/` (do NOT re-extract): `useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, `useChatActions`, **`useDriftActions` (PARTIAL — slice 1 only: reopen/breadcrumb/undo handlers)**. Also `src/lib/format.ts` and `src/lib/onboardingFlag.ts`.
+- The monolith is `src/App.tsx` (~4,075 lines, ALL inside one `App()` component). Secondary: `src/components/DriftPanel.tsx` (~1,900 lines).
 
 ## 2. The task — Tier B (core logic), in this order
 Extract the remaining cohesive concerns out of `App.tsx` into focused hooks/modules. Suggested order (lowest risk first):
-1. **`useChatActions`** — sidebar CRUD: rename / save-rename / duplicate / delete / pin / star / context-menu (`handleRenameChat`, `handleDuplicateChat`, `handleDeleteChat`, `handleTogglePin`, `handleToggleStar`, `handleContextMenu`, `handleSaveRename`). These mostly delegate to `chatStore`/`uiStore` — UI-verifiable without AI.
-2. **`useDriftActions`** — the signature feature: `handleStartDrift`, `handleCloseDrift`, `reopenLastDrift`, `handleNavigateToBreadcrumb`, push/save/undo drift handlers. **Large + entangled — requires live drift smoke.**
+1. ✅ **`useChatActions`** — DONE (commit `2054b86`). Sidebar CRUD.
+2. **`useDriftActions`** — the signature feature. **Slice 1 DONE** (commit `3886b5b`: `reopenLastDrift`, `handleNavigateToBreadcrumb`, `handleUndoPushToMain`, `handleUndoSaveAsChat`). **NEXT = slice 2:** move the big entangled handlers into the EXISTING `useDriftActions` hook — `handleStartDrift`, `handleCloseDrift`, `handlePushDriftToMain`, `handleSaveDriftAsChat`, `handleSavePushedDriftAsChat`. **Large + entangled — requires a live drift smoke (create → push-to-main → undo → save-as-chat).**
 3. **Message send / stream pipeline** — the big send function(s) + streaming. **Requires live AI smoke.**
 4. If `App.tsx` is meaningfully smaller, optionally start the same treatment on `DriftPanel.tsx`.
 (If the user passed an argument — `$ARGUMENTS` — start with that target instead.)

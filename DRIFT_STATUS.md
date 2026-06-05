@@ -17,7 +17,8 @@
 - [ ] Providers/settings on-device pass (OpenRouter key, Settings UI, Ollama/Qwen3 gone)
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 - [ ] Real auth · Security: Gemini key behind proxy · Light theme polish
-- [ ] App.tsx refactor (~4.1k lines) · Voice output · Code cleanup (dead DriftMapPanel, etc.)
+- [ ] **App.tsx refactor IN PROGRESS** — see `REFACTOR_HANDOFF.md`; resume with `/continue-refactor` (next: useDriftActions slice 2). ⚠️ Two Gemini keys exposed — **rotate in Google AI Studio** (details in handoff).
+- [ ] Voice output · Code cleanup (dead DriftMapPanel, etc.)
 
 ## Stack snapshot
 React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache + semantic recall. **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs:** OpenRouter (OpenAI/Anthropic/Grok streaming). **Local:** Ollama · **Demo:** DummyAI. **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb (v2 schema). Drift Map = pure SVG. **Localization:** Hebrew + English lens scaffolding. App.tsx ~4.1k lines · DriftPanel.tsx ~1.8k.
