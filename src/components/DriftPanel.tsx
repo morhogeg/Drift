@@ -1,13 +1,11 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, X, type LucideIcon } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, X, AlertCircle, RefreshCw, type LucideIcon } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToDummy } from '../services/dummyAI'
 import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
-import { type ChatMessage as DummyMessage } from '../services/dummyAI'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
@@ -67,6 +65,24 @@ const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show
 const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
+/** Turn a raw provider/network error into a clean, human sentence — never dump
+ *  a raw API JSON body into the conversation. Returns '' for user aborts (Stop),
+ *  which the caller treats as "don't show anything". */
+function friendlyDriftError(error: unknown, provider: string): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (/abort/i.test(raw)) return ''
+  // Our own pre-flight messages ("No Gemini API key found…") are already clean.
+  if (/api key/i.test(raw)) return raw
+  const name = provider === 'gemini' ? 'Gemini'
+    : provider === 'ollama' ? 'Ollama'
+    : 'the model'
+  if (/\b(401|403)\b/.test(raw)) return `Couldn't reach ${name} — the API key looks invalid. Check it in Settings.`
+  if (/\b429\b/.test(raw)) return `${name} is rate-limited right now. Give it a moment, then try again.`
+  if (/\b5\d\d\b/.test(raw)) return `${name} hit a server error. Please try again in a moment.`
+  if (/\b404\b/.test(raw)) return `Couldn't reach ${name} — that model may be unavailable. Check your model in Settings.`
+  return `Couldn't get a response from ${name}. Check your connection and try again.`
+}
+
 interface Message {
   id: string
   text: string
@@ -76,6 +92,8 @@ interface Message {
   // For compare layout
   compareGroupId?: string
   laneKey?: string
+  // Marks a failed request rendered as a recoverable inline error (with retry).
+  isError?: boolean
 }
 
 interface DriftPanelProps {
@@ -98,7 +116,7 @@ interface DriftPanelProps {
   /** Called whenever the drift conversation messages change — used to keep the temp store in sync. */
   onMessagesChange?: (messages: Message[]) => void
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'openrouter' | 'ollama' | 'gemini' | 'dummy'
+  selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
@@ -703,28 +721,38 @@ Rules:
     }
   }
 
-  const sendMessage = async (overrideText?: string) => {
+  const sendMessage = async (overrideText?: string, isRetry = false) => {
     const textToSend = (overrideText ?? message).trim()
     if (textToSend) {
       // Sending a message has weight — a light, confident thunk.
       haptics.impact('light')
 
-      const newMessage: Message = {
-        id: 'drift-' + Date.now().toString(),
-        text: textToSend,
-        isUser: true,
-        timestamp: new Date()
+      let newMessage: Message
+      if (isRetry) {
+        // Re-run the last user turn: clear the error bubble and reuse the existing
+        // user message rather than appending a duplicate.
+        setMessages(prev => prev.filter(m => !m.isError))
+        setDriftOnlyMessages(prev => prev.filter(m => !m.isError))
+        const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
+        newMessage = lastUser ?? { id: 'drift-' + Date.now().toString(), text: textToSend, isUser: true, timestamp: new Date() }
+      } else {
+        newMessage = {
+          id: 'drift-' + Date.now().toString(),
+          text: textToSend,
+          isUser: true,
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, newMessage])
+        setDriftOnlyMessages(prev => [...prev, newMessage])
+        if (!overrideText) setMessage('')
       }
-
-      setMessages(prev => [...prev, newMessage])
-      setDriftOnlyMessages(prev => [...prev, newMessage])
-      if (!overrideText) setMessage('')
       setIsTyping(true)
 
-      // Only use drift-specific messages, not the context messages
-      // Filter out the system message and any context messages
+      // Only use drift-specific messages, not the context messages.
+      // Filter out the system message, context messages, any prior error
+      // bubble, and the current turn (re-appended below as the user prompt).
       const driftConversation = driftOnlyMessages.filter(
-        msg => !isDriftScaffoldText(msg.text) && msg.id !== newMessage.id
+        msg => !isDriftScaffoldText(msg.text) && !msg.isError && msg.id !== newMessage.id
       )
       
       // Build context string from parent conversation (last ~8 messages). Cap each
@@ -769,7 +797,7 @@ Rules:
         : baseSystemContent
 
       // Convert messages to API format with special Drift context
-      const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
+      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
         {
           role: 'system',
           content: systemContent
@@ -786,7 +814,7 @@ Rules:
       const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
       const effectiveApiKey = envKey || aiSettings.openRouterApiKey
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' | 'dummy' = selectedProvider
+      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
         ? selectedProvider
         : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
 
@@ -844,8 +872,6 @@ Rules:
             aiSettings.ollamaUrl,
             aiSettings.ollamaModel
           )
-        } else if (provider === 'dummy') {
-          await sendMessageToDummy(apiMessages as any, onChunk, abortController.signal)
         }
       // Fire-and-forget: fetch key-term highlights for this AI response
       const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
@@ -864,21 +890,34 @@ Rules:
       }
     } catch (error) {
         console.error('Drift panel error:', error)
-        const errorMessage = error instanceof Error ? error.message : "Failed to get response. Please check your connection."
-        const aiResponse: Message = {
-          id: 'drift-error-' + Date.now().toString(),
-          text: errorMessage,
-          isUser: false,
-          timestamp: new Date()
+        const friendly = friendlyDriftError(error, provider)
+        // An aborted request (user pressed Stop) isn't worth surfacing.
+        if (friendly) {
+          const aiResponse: Message = {
+            id: 'drift-error-' + Date.now().toString(),
+            text: friendly,
+            isUser: false,
+            isError: true,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiResponse])
+          setDriftOnlyMessages(prev => [...prev, aiResponse])
         }
-        setMessages(prev => [...prev, aiResponse])
-        setDriftOnlyMessages(prev => [...prev, aiResponse])
       } finally {
         setIsTyping(false)
         setStreamingMsgId(null)
         abortControllerRef.current = null
       }
     }
+  }
+
+  // Re-run the most recent user turn after a failed request (the inline error
+  // bubble's "Try again"). Reuses the existing user message — no duplicate turn.
+  const retryLastMessage = () => {
+    if (isTyping) return
+    const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
+    if (!lastUser) return
+    sendMessage(lastUser.text, true)
   }
 
   const stopGeneration = () => {
@@ -926,7 +965,7 @@ Rules:
       return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
     }).join('\n')
     const baseConversation = workingDrift.filter(msg => !isDriftOpenerText(msg.text))
-    const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
+    const apiMessages: (OpenRouterMessage | OllamaMessage)[] = [
       {
         role: 'system',
         content: compareContext
@@ -1641,6 +1680,23 @@ Rules:
                     >
                       <div className="px-4 py-2.5 bg-accent-violet/15 border border-accent-violet/25 rounded-2xl rounded-br-md">
                         <p className={`text-sm text-text-primary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>
+                      </div>
+                    </div>
+                  ) : msg.isError ? (
+                    /* Recoverable inline error — clearly an error, with retry */
+                    <div className="w-full" data-drift-message-id={msg.id}>
+                      <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-rose-500/[0.08] border border-rose-500/25">
+                        <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-text-secondary leading-relaxed">{msg.text}</p>
+                          <button
+                            onClick={retryLastMessage}
+                            disabled={isTyping}
+                            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Try again
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (

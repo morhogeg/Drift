@@ -1,18 +1,19 @@
-import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
+import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement, lazy, Suspense } from 'react'
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
 import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
 import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
-import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
 import DriftPanel from './components/DriftPanel'
-import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
+const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
 import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
 import { Login } from './components/Login'
+import { ONBOARDED_FLAG } from './lib/onboardingFlag'
+const Onboarding = lazy(() => import('./components/Onboarding'))
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
@@ -33,6 +34,7 @@ import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
 import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
+import { sanitizeText, formatDate } from '@/lib/format'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -54,6 +56,10 @@ function App() {
   // ── Local state (not in stores) ─────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<string | null>(null)
+  // First-run onboarding — shown once per device, only after login.
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
+  )
   const userMenuRef = useRef<HTMLDivElement | null>(null)
   const [apiConnected, setApiConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -159,10 +165,7 @@ function App() {
     const presetTargets = (aiSettings.modelPresets || [])
       .filter((p) => p.enabled)
       .map((p) => ({ provider: p.provider as import('@/types/chat').Target['provider'], key: p.id, label: p.label }))
-    // Always include Demo AI
-    const demoTarget = { provider: 'dummy' as const, key: 'dummy-lite', label: 'Demo AI' }
-    const hasDummy = presetTargets.some((t) => t.key === 'dummy-lite')
-    return hasDummy ? presetTargets : [...presetTargets, demoTarget]
+    return presetTargets
   }, [aiSettings.modelPresets])
 
   const totalDriftCount = useMemo(() => {
@@ -745,9 +748,6 @@ function App() {
   }
 
   // ── Sanitize stored message text (remove stale [object Object] grounding artifacts) ──
-  const sanitizeText = (text: string) =>
-    text.replace(/,?\[object Object\],?/g, '').replace(/<br\/?>$/gm, '\n')
-
   // ── Index assistant lists ───────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -985,13 +985,6 @@ function App() {
     const checkConnection = async (showConnecting = true) => {
       if (showConnecting) setIsConnecting(true)
       try {
-        if (aiSettings.useDummyAI) {
-          const connected = await checkDummyConnection()
-          setApiConnected(connected)
-          setIsConnecting(false)
-          return
-        }
-
         const hasGeminiPreset = (aiSettings.modelPresets || []).some((p: any) => p.provider === 'gemini' && p.enabled)
         if (hasGeminiPreset) {
           const apiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
@@ -1190,8 +1183,6 @@ function App() {
         const url = preset?.serverUrl || aiSettings.ollamaUrl
         const model = preset?.model || aiSettings.ollamaModel
         await sendMessageToOllama(contextMessages as any, onChunk, signal, url, model)
-      } else if (target.provider === 'dummy') {
-        await sendMessageToDummy(contextMessages as any, onChunk, signal)
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Error'
@@ -1343,12 +1334,6 @@ function App() {
                   await sendMessageToOllama(msgs, onChunk, signal!, url, model)
                 }, t.label, broadcastGroupId)
               )
-            } else if (t.provider === 'dummy') {
-              tasks.push(
-                streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                  sendMessageToDummy(msgs, onChunk, signal)
-                , t.label, broadcastGroupId)
-              )
             }
           }
           await Promise.allSettled(tasks)
@@ -1391,10 +1376,6 @@ function App() {
             await streamIntoNewMessage(async (msgs, onChunk, signal) => {
               await sendMessageToOllama(msgs, onChunk, signal!, url, model)
             }, t.label, undefined, activeStrandId || undefined, undefined)
-          } else if (t.provider === 'dummy') {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-              sendMessageToDummy(msgs, onChunk, signal)
-            , t.label, undefined, activeStrandId || undefined, undefined)
           }
         }
 
@@ -1462,14 +1443,12 @@ function App() {
     const matchingPreset = (aiSettings.modelPresets || []).find((p) => p.label === modelTag && p.enabled)
     if (matchingPreset) {
       setSelectedTargetsPersist([{ provider: matchingPreset.provider, key: matchingPreset.id, label: matchingPreset.label }])
-    } else if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
+    } else if (modelTag === 'Qwen3') {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
     } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
       setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
     } else if (modelTag === 'Ollama') {
       setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
-    } else if (modelTag === 'Demo AI' || modelTag === 'dummy-lite') {
-      setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-lite', label: 'Demo AI' }])
     } else if (modelTag === 'Gemini Flash Lite' || modelTag === 'gemini-flash-lite') {
       setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash-lite', label: 'Gemini Flash Lite' }])
     } else if (modelTag === 'Gemini Flash' || modelTag === 'gemini-flash') {
@@ -1517,16 +1496,6 @@ function App() {
   }
 
   // ── Dates ───────────────────────────────────────────────────────────────────
-  const formatDate = (date: Date) => {
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    if (days === 0) return 'Today'
-    if (days === 1) return 'Yesterday'
-    if (days < 7) return `${days} days ago`
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-
   // ── Chat management ─────────────────────────────────────────────────────────
   const createNewChat = () => {
     if (driftOpen) driftStore.closeDrift()
@@ -1573,7 +1542,7 @@ function App() {
     // ── Nested drift: selection came from within an open drift panel ──────────
     // If the panel is open, look for the source message in the active drift's
     // temp conversation first. If found, record driftInfos THERE (not on the
-    // main chat message) so the tree is correctly nested in DriftMapPanel.
+    // main chat message) so the tree is correctly nested in the Drift Map.
     const activeDriftChatId = driftStore.driftContext?.driftChatId
     if (driftStore.driftOpen && activeDriftChatId) {
       const activeDriftMessages = driftStore.getTempConversation(activeDriftChatId)
@@ -3886,6 +3855,27 @@ function App() {
         </div>
       </div>
 
+      {/* First-run onboarding — only after login, only when the flag is unset */}
+      {showOnboarding && (
+        <Suspense fallback={null}>
+        <Onboarding
+          settings={aiSettings}
+          onSaveGeminiKey={(key) => {
+            const presets = aiSettings.modelPresets || []
+            const idx = presets.findIndex((p) => p.provider === 'gemini')
+            const nextPresets = idx >= 0
+              ? presets.map((p, i) => (i === idx ? { ...p, apiKey: key, enabled: true } : p))
+              : [{ id: 'gemini-flash-lite', provider: 'gemini' as const, label: 'Gemini Flash Lite', apiKey: key, enabled: true }, ...presets]
+            handleSaveSettings({ ...aiSettings, geminiApiKey: key, modelPresets: nextPresets })
+          }}
+          onDone={() => {
+            localStorage.setItem(ONBOARDED_FLAG, 'true')
+            setShowOnboarding(false)
+          }}
+        />
+        </Suspense>
+      )}
+
       {/* Selection Tooltip */}
       <SelectionTooltip
         onStartDrift={(text, messageId, templateType) => handleStartDrift(text, messageId, undefined, undefined, templateType)}
@@ -3960,11 +3950,18 @@ function App() {
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini' | 'dummy'
-          if (targets.some(t => t.provider === 'gemini')) return 'gemini'
-          if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
-          if (targets.some(t => t.provider === 'ollama')) return 'ollama'
-          if (targets.some(t => t.provider === 'dummy')) return 'dummy'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          // Broadcast/multi-model: the drift panel can only use one provider, so
+          // pick one that can actually answer (has credentials) — otherwise a
+          // keyless Gemini would win by rank and the drift would 404.
+          const orKey = (import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey || '').trim()
+          const has = (p: string) => targets.some(t => t.provider === p)
+          if (has('gemini') && geminiApiKey) return 'gemini'
+          if (has('openrouter') && orKey) return 'openrouter'
+          if (has('ollama')) return 'ollama'
+          // Nothing has clear credentials — fall back to rank order.
+          if (has('gemini')) return 'gemini'
+          if (has('openrouter')) return 'openrouter'
           return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
@@ -4094,6 +4091,7 @@ function App() {
         // the error in place (empty fallback) keeps a single tap stable and makes
         // a real failure visible/diagnosable instead of silently yanking the map.
         <ErrorBoundary fallback={null}>
+        <Suspense fallback={null}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
@@ -4210,6 +4208,7 @@ function App() {
           onSynthesize={handleSynthesize}
           synthesizing={synthesizing}
         />
+        </Suspense>
         </ErrorBoundary>
       )}
 

@@ -4,7 +4,7 @@
  * without circular dependency issues.
  */
 
-export type Provider = 'openrouter' | 'ollama' | 'gemini' | 'dummy'
+export type Provider = 'openrouter' | 'ollama' | 'gemini'
 
 export interface Target {
   provider: Provider
@@ -51,6 +51,9 @@ export interface Message {
   originalDriftId?: string
   /** Phrases the AI suggests as worth exploring deeper (populated asynchronously after streaming). */
   suggestedHighlights?: string[]
+  /** Marks a message that represents a failed request, rendered as a recoverable
+   *  inline error (with retry) rather than a normal assistant answer. */
+  isError?: boolean
 }
 
 export interface ChatSession {

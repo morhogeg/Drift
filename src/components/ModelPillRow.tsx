@@ -10,7 +10,6 @@ const MODEL_DOT_COLORS: Record<string, string> = {
   gemini: 'bg-sky-400',
   openrouter: 'bg-blue-400',
   ollama: 'bg-emerald-400',
-  dummy: 'bg-violet-400',
 }
 
 export default function ModelPillRow({ selectedTargets, onToggleTarget, onOpenPicker }: ModelPillRowProps) {

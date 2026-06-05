@@ -438,6 +438,10 @@ function GraphCanvas({
   }
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return
+    // Self-heal: if the mouse button isn't actually held (a pointerup was
+    // swallowed somewhere), stop panning instead of dragging the map around a
+    // free-moving cursor.
+    if (e.pointerType === 'mouse' && e.buttons === 0) { drag.current = null; return }
     const dx = e.clientX - drag.current.x
     const dy = e.clientY - drag.current.y
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true
@@ -782,7 +786,15 @@ function GraphCanvas({
                   transition: reduce ? undefined : 'opacity 0.25s ease',
                   animation: reduce ? undefined : `dkgRise 0.6s cubic-bezier(0.16,1,0.3,1) ${0.05 + laid.index * 0.05}s both`,
                 }}
-                onPointerUp={(e) => { e.stopPropagation(); handleSelect(laid) }}
+                onPointerUp={(e) => {
+                  // This node handler stops propagation, so the wrapper's
+                  // onPointerUp won't run — we must clear the drag state here
+                  // ourselves, otherwise drag.current stays set and the map
+                  // pans on every subsequent (button-up) mouse move.
+                  e.stopPropagation()
+                  handleSelect(laid)
+                  drag.current = null
+                }}
               >
                 {/* Bug 7: native tooltip carries the full lineage chain
                     (Messi → PSG → goals question) so a hover/long-press on any

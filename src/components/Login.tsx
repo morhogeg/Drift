@@ -11,25 +11,49 @@ export function Login({ onLogin }: LoginProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  // Render only the layout for the current breakpoint so there aren't two
+  // copies of the login form (and duplicate "Username" fields) in the DOM.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  );
 
   useEffect(() => {
     setIsVisible(true);
   }, []);
 
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const handler = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
+
     if (!username || !password) {
       setError('Please fill in all fields');
       return;
     }
-    
+
     setIsLoading(true);
     setTimeout(() => {
       onLogin(username);
       setIsLoading(false);
     }, 800);
+  };
+
+  // "Quick demo" should be a single tap: prefill and sign straight in.
+  const handleQuickDemo = () => {
+    setUsername('demo');
+    setPassword('demo');
+    setError('');
+    setIsLoading(true);
+    setTimeout(() => {
+      onLogin('demo');
+      setIsLoading(false);
+    }, 500);
   };
 
   return (
@@ -60,6 +84,7 @@ export function Login({ onLogin }: LoginProps) {
       </div>
 
       {/* Main container with better layout — desktop only */}
+      {isDesktop && (
       <div className="hidden lg:flex relative z-10 w-full max-w-7xl mx-auto px-8 items-center justify-center">
         <div className="w-full grid lg:grid-cols-[1fr,480px,1fr] gap-16 items-center">
           
@@ -224,11 +249,9 @@ export function Login({ onLogin }: LoginProps) {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setUsername('demo');
-                      setPassword('demo');
-                    }}
-                    className="w-full py-1.5 text-xs text-gray-600 hover:text-gray-500 transition-colors"
+                    onClick={handleQuickDemo}
+                    disabled={isLoading}
+                    className="w-full py-1.5 text-xs text-gray-600 hover:text-gray-500 disabled:opacity-50 transition-colors"
                   >
                     Quick demo access
                   </button>
@@ -295,8 +318,10 @@ export function Login({ onLogin }: LoginProps) {
 
         </div>
       </div>
+      )}
 
       {/* Mobile version */}
+      {!isDesktop && (
       <div className="lg:hidden absolute inset-0 z-20 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="text-center mb-6">
@@ -336,11 +361,9 @@ export function Login({ onLogin }: LoginProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setUsername('demo');
-                  setPassword('demo');
-                }}
-                className="w-full py-1.5 text-xs text-gray-600"
+                onClick={handleQuickDemo}
+                disabled={isLoading}
+                className="w-full py-1.5 text-xs text-gray-600 disabled:opacity-50"
               >
                 Quick demo
               </button>
@@ -348,6 +371,7 @@ export function Login({ onLogin }: LoginProps) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

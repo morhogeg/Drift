@@ -6,7 +6,6 @@ const SETTINGS_KEY = 'drift_ai_settings'
 
 const defaultSettings: AISettings = {
   useOpenRouter: false,
-  useDummyAI: false,
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY || '',
   openRouterModel: OPENROUTER_MODELS.OSS,
   geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
@@ -30,6 +29,10 @@ export const settingsStorage = {
       if (!stored) return defaultSettings
       
       const parsed = JSON.parse(stored)
+      // Migrate retired Demo AI ("dummy") setting — fall back to Gemini.
+      if ('useDummyAI' in parsed) {
+        delete parsed.useDummyAI
+      }
       // Rescue API keys from defaults if missing in stored settings
       if (!parsed.openRouterApiKey && defaultSettings.openRouterApiKey) {
         parsed.openRouterApiKey = defaultSettings.openRouterApiKey
@@ -48,7 +51,7 @@ export const settingsStorage = {
         parsed.modelPresets = parsed.modelPresets.map((p: any) => ({
           id: p.id || p.key || `preset-${Math.random().toString(36).slice(2)}`,
           // Preserve all known providers — do NOT fall back to 'openrouter' for 'gemini'
-          provider: ['openrouter', 'ollama', 'gemini', 'dummy'].includes(p.provider) ? p.provider : 'openrouter',
+          provider: ['openrouter', 'ollama', 'gemini'].includes(p.provider) ? p.provider : 'gemini',
           label: p.label || 'Model',
           model: p.model || (p.provider === 'ollama' ? (parsed.ollamaModel || 'llama2') : parsed.openRouterModel || OPENROUTER_MODELS.OSS),
           serverUrl: p.serverUrl || (p.provider === 'ollama' ? (parsed.ollamaUrl || 'http://localhost:11434') : undefined),
@@ -68,6 +71,10 @@ export const settingsStorage = {
       // Drop the retired default Ollama/Qwen3 seeds from existing saved settings.
       if (Array.isArray(parsed.modelPresets)) {
         parsed.modelPresets = parsed.modelPresets.filter((p: any) => !LEGACY_DEFAULT_PRESET_IDS.has(p.id))
+      }
+      // Drop any retired Demo AI ("dummy") presets persisted from older builds.
+      if (Array.isArray(parsed.modelPresets)) {
+        parsed.modelPresets = parsed.modelPresets.filter((p: any) => p.provider !== 'dummy')
       }
 
       // Merge with defaults to ensure all fields exist
@@ -97,8 +104,9 @@ export const settingsStorage = {
   // Check if settings have been configured
   isConfigured(): boolean {
     const settings = this.get()
-    if (settings.useDummyAI) {
-      return true  // Dummy AI is always configured
+    const hasGeminiKey = (settings.modelPresets || []).some(p => p.provider === 'gemini' && p.enabled && (p.apiKey || settings.geminiApiKey)) || !!settings.geminiApiKey
+    if (hasGeminiKey) {
+      return true
     } else if (settings.useOpenRouter) {
       return !!settings.openRouterApiKey
     } else {
