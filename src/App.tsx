@@ -41,6 +41,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useOnOutsideClick } from '@/hooks/useOnOutsideClick'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useChatActions } from '@/hooks/useChatActions'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -2021,50 +2022,16 @@ function App() {
   }
 
   // ── Context menu handlers ───────────────────────────────────────────────────
-  const handleContextMenu = (e: React.MouseEvent, chatId: string) => {
-    e.preventDefault()
-    uiStore.setContextMenu({ x: e.clientX, y: e.clientY, chatId })
-  }
-
-  const handleRenameChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId)
-    if (chat) {
-      uiStore.setEditingChatId(chatId)
-      uiStore.setEditingTitle(chat.title)
-    }
-  }
-
-  const handleSaveRename = () => {
-    if (editingChatId && editingTitle.trim()) {
-      chatStore.updateChat(editingChatId, { title: editingTitle.trim() })
-    }
-    uiStore.setEditingChatId(null)
-    uiStore.setEditingTitle('')
-  }
-
-  const handleDuplicateChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId)
-    if (chat) {
-      const newChat: ChatSession = {
-        ...chat,
-        id: Date.now().toString(),
-        title: `${chat.title} (Copy)`,
-        createdAt: new Date()
-      }
-      useChatStore.setState(state => ({
-        chatHistory: [newChat, ...state.chatHistory]
-      }))
-    }
-  }
-
-  const handleDeleteChat = (chatId: string) => {
-    if (confirm('Are you sure you want to delete this chat?')) {
-      chatStore.deleteChat(chatId)
-    }
-  }
-
-  const handleTogglePin = (chatId: string) => uiStore.togglePinnedChat(chatId)
-  const handleToggleStar = (chatId: string) => uiStore.toggleStarredChat(chatId)
+  // Sidebar chat CRUD (rename/duplicate/delete/pin/star) + context menu.
+  const {
+    handleContextMenu,
+    handleRenameChat,
+    handleSaveRename,
+    handleDuplicateChat,
+    handleDeleteChat,
+    handleTogglePin,
+    handleToggleStar
+  } = useChatActions()
 
   const handleNavigateToSource = (chatId: string, messageId: string) => {
     switchChat(chatId)
