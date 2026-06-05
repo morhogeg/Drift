@@ -48,6 +48,29 @@ function readJSON(key: string): unknown | null {
   }
 }
 
+/**
+ * Strip API keys/secrets out of the settings object before it leaves the app.
+ * The export is a plaintext file that may land in Downloads, sync to iCloud, or
+ * be shared — an LLM key is a secret, not user data, so it must never ride
+ * along. Everything else (model presets minus their keys, theme, prefs) stays
+ * so a restore is still useful; the user just re-enters their key.
+ */
+function sanitizeSettings(settings: unknown): unknown | null {
+  if (!settings || typeof settings !== 'object') return settings ?? null
+  const s = settings as Record<string, unknown>
+  const { geminiApiKey: _g, openRouterApiKey: _o, ...rest } = s
+  if (Array.isArray(rest.modelPresets)) {
+    rest.modelPresets = rest.modelPresets.map((p) => {
+      if (p && typeof p === 'object') {
+        const { apiKey: _a, ...preset } = p as Record<string, unknown>
+        return preset
+      }
+      return p
+    })
+  }
+  return rest
+}
+
 /** Gather everything into a single backup object. */
 export async function buildBackup(): Promise<DriftBackup> {
   const chats = await chatDB.getAll()
@@ -59,7 +82,7 @@ export async function buildBackup(): Promise<DriftBackup> {
     data: {
       chats,
       snippets: Array.isArray(snippets) ? snippets : [],
-      settings: readJSON(SETTINGS_KEY),
+      settings: sanitizeSettings(readJSON(SETTINGS_KEY)),
       theme: localStorage.getItem(THEME_KEY),
     },
   }
