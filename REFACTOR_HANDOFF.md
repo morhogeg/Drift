@@ -4,6 +4,10 @@
 **Pick it up next session with:** `/continue-refactor`
 (or target a specific piece: `/continue-refactor handleStartDrift`)
 
+> **Latest (Jun 5):** `useMessageStream` — message send/stream pipeline extracted
+> (commit `b551bfa`). App.tsx **3579 → 3275**. Tier B core-logic extraction is now
+> essentially complete; remaining targets are smaller (see "What's left").
+
 ---
 
 ## 🔴 ACTION REQUIRED FROM YOU (not code — only you can do this)
@@ -45,15 +49,15 @@ Behavior-preserving faithful copies. The App-owned pieces the handlers need are 
 
 ## What's left — next session
 
-### Message send / stream pipeline (Tier B step 3) — RECOMMENDED NEXT
-The biggest remaining concern still inline in `App.tsx`: the message send function(s) + streaming loop. Extract into a focused hook/module (e.g. `useMessageStream`). Highest blast radius after drift — **requires a live AI smoke** that actually sends a message and watches it stream (live Gemini key in `.env`).
+### ✅ Message send / stream pipeline (Tier B step 3) — DONE (commit `b551bfa`)
+Extracted into `src/hooks/useMessageStream.ts`: `sendMessage` (single + broadcast, incl. inner `streamIntoNewMessage`), `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `stopGeneration`. Faithful copies; deps interface mirrors `useDriftActions`. Verified with tsc + build + a live Gemini Playwright smoke (sent a message, watched it stream, 0 non-noise console errors).
+
+### `continueWithModel` (Tier B step 4) — RECOMMENDED NEXT
+Still inline in `App.tsx` (~line 990). It's a model-*selection* action (sets selected targets + focuses the textarea), not part of the stream pipeline, so it was deliberately left out of `useMessageStream`. Candidate for its own small hook (e.g. `useModelActions`) alongside `setSelectedTargetsPersist` / `handlePresetsAdded`. Lower blast radius — a Playwright "continue with model X" smoke is enough.
 
 ### Optional after that
 - Same hook-extraction treatment on `DriftPanel.tsx` (~1,900 lines).
 - `handleStartDrift` is ~200 lines with three branches (nested-drift / found-message / fallback) — a candidate to split into smaller private helpers inside the hook, but only as a separate, clearly-labeled commit (not while it's still warm from the move).
-
-### Optional after App.tsx shrinks
-- Same hook-extraction treatment on `DriftPanel.tsx` (~1,900 lines).
 
 ---
 
@@ -63,4 +67,4 @@ The biggest remaining concern still inline in `App.tsx`: the message send functi
 - Push each verified step. Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
 ## Already extracted into `src/hooks/` (do NOT re-extract)
-`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
+`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — send/stream pipeline: `sendMessage` / `sendToTarget` / `retroactivelyUpgradeToBroadcast` / `stopGeneration`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
