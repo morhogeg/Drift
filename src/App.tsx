@@ -42,6 +42,7 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useOnOutsideClick } from '@/hooks/useOnOutsideClick'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useChatActions } from '@/hooks/useChatActions'
+import { useDriftActions } from '@/hooks/useDriftActions'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -1690,78 +1691,14 @@ function App() {
   // ── Reopen last drift ─────────────────────────────────────────────────────────
   // One tap returns the user to the branch they most recently left, switching to
   // its parent chat first if needed. Never make them hunt for where they were.
-  const reopenLastDrift = () => {
-    if (!lastDrift) return
-    haptics.impact('medium')
-    const { driftChatId, selectedText, parentChatId, sourceMessageId } = lastDrift
-
-    if (parentChatId && parentChatId !== activeChatId) {
-      switchChat(parentChatId)
-    }
-
-    const parentMessages = chatHistory.find(c => c.id === parentChatId)?.messages ?? messages
-    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
-
-    // Restore cached content (regular messages OR Connect cards/answers + the
-    // correct templateType) so the panel never re-fetches an explored drift.
-    const restore = resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages)
-
-    connectStateRef.current = { question: null, cards: null }
-    driftStore.openDrift({
-      selectedText,
-      sourceMessageId,
-      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
-      highlightMessageId: sourceMessageId || undefined,
-      driftChatId,
-      existingMessages: restore.existingMessages,
-      templateType: restore.templateType,
-      connectCards: restore.connectCards,
-      connectAnswers: restore.connectAnswers,
-      ancestry: [{
-        isMainChat: true,
-        label: chatHistory.find(c => c.id === parentChatId)?.title || 'Chat',
-        selectedText: '',
-        sourceMessageId: '',
-        contextMessages: [],
-      }],
-    })
-  }
-
-  // ── Breadcrumb navigation ────────────────────────────────────────────────────
-  const handleNavigateToBreadcrumb = (index: number) => {
-    const { ancestry } = driftStore.driftContext
-    if (!ancestry || index >= ancestry.length) return
-
-    if (index === 0) {
-      // Navigate to main chat — close the drift panel (temp messages already
-      // synced to driftStore via onMessagesChange, so no data loss)
-      driftStore.closeDrift()
-      return
-    }
-
-    // Navigate to an ancestor drift
-    const entry = ancestry[index]
-    if (!entry.driftChatId) return
-
-    const existingMsgs =
-      driftStore.getTempConversation(entry.driftChatId) ??
-      (chatHistory.find(c => c.id === entry.driftChatId)?.messages ?? [])
-
-    // Reset connect tracker — the restored drift will fire onConnectStateChange to update it
-    connectStateRef.current = { question: null, cards: null }
-
-    driftStore.openDrift({
-      selectedText: entry.selectedText,
-      sourceMessageId: entry.sourceMessageId,
-      contextMessages: entry.contextMessages,
-      driftChatId: entry.driftChatId,
-      existingMessages: existingMsgs,
-      ancestry: ancestry.slice(0, index),
-      templateType: entry.templateType,
-      connectQuestion: entry.connectQuestion,
-      connectCards: entry.connectCards,
-    })
-  }
+  // ── Drift navigation + undo actions (reopen last / breadcrumb / undo push /
+  //    undo save-as-chat). Extracted into useDriftActions. ──────────────────────
+  const {
+    reopenLastDrift,
+    handleNavigateToBreadcrumb,
+    handleUndoPushToMain,
+    handleUndoSaveAsChat,
+  } = useDriftActions({ lastDrift, switchChat, resolveDriftRestore, connectStateRef })
 
   // ── Message actions ─────────────────────────────────────────────────────────
   const handleCopyMessage = async (text: string, messageId: string) => {
@@ -1836,30 +1773,6 @@ function App() {
       return msg
     })
 
-    chatStore.setMessages(updatedMessages)
-  }
-
-  const handleUndoPushToMain = (sourceMessageId: string) => {
-    const updatedMessages = messages.filter(msg =>
-      !msg.isDriftPush || msg.driftPushMetadata?.sourceMessageId !== sourceMessageId
-    )
-    chatStore.setMessages(updatedMessages)
-  }
-
-  const handleUndoSaveAsChat = (chatId: string) => {
-    chatStore.deleteChat(chatId)
-    const updatedMessages = messages.map(msg => {
-      if (msg.hasDrift && msg.driftInfos?.some(d => d.driftChatId === chatId)) {
-        const remainingDrifts = msg.driftInfos.filter(d => d.driftChatId !== chatId)
-        if (remainingDrifts.length === 0) {
-          const { driftInfos, hasDrift, ...restMsg } = msg
-          return restMsg
-        } else {
-          return { ...msg, driftInfos: remainingDrifts }
-        }
-      }
-      return msg
-    })
     chatStore.setMessages(updatedMessages)
   }
 
