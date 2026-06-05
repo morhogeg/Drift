@@ -37,6 +37,7 @@ import { haptics } from '@/lib/haptics'
 import { sanitizeText, formatDate } from '@/lib/format'
 import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useCoachMark } from '@/hooks/useCoachMark'
+import { useAuth } from '@/hooks/useAuth'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -56,8 +57,7 @@ function App() {
   const uiStore = useUIStore()
 
   // ── Local state (not in stores) ─────────────────────────────────────────────
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [currentUser, setCurrentUser] = useState<string | null>(null)
+  const { isAuthenticated, currentUser, login: handleLogin, logout: handleLogout } = useAuth()
   // First-run onboarding — shown once per device, only after login.
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
@@ -2212,26 +2212,6 @@ function App() {
   }
 
   // ── Auth ────────────────────────────────────────────────────────────────────
-  const handleLogin = (username: string) => {
-    setCurrentUser(username)
-    setIsAuthenticated(true)
-    localStorage.setItem('driftUser', username)
-  }
-
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    setCurrentUser(null)
-    localStorage.removeItem('driftUser')
-  }
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem('driftUser')
-    if (savedUser) {
-      setCurrentUser(savedUser)
-      setIsAuthenticated(true)
-    }
-  }, [])
-
   // ── Close user menu on outside click ───────────────────────────────────────
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
