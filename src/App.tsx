@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement, lazy, Suspense } from 'react'
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles } from 'lucide-react'
 import { Pressable } from './components/motion'
-import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
-import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
+import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
+import { sendMessageToOllama, type ChatMessage as OllamaMessage } from './services/ollama'
+import { sendMessageToGemini, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
 const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
 import ErrorBoundary from './components/ErrorBoundary'
@@ -38,6 +38,7 @@ import { sanitizeText, formatDate } from '@/lib/format'
 import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useCoachMark } from '@/hooks/useCoachMark'
 import { useAuth } from '@/hooks/useAuth'
+import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -63,8 +64,6 @@ function App() {
     () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
   )
   const userMenuRef = useRef<HTMLDivElement | null>(null)
-  const [apiConnected, setApiConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
   const [aiSettings, setAiSettings] = useState<AISettings>(() => {
     const settings = settingsStorage.get()
     if (!settings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
@@ -72,6 +71,9 @@ function App() {
     }
     return settings
   })
+
+  // Live provider reachability (polls every 5s; opens Settings if creds missing)
+  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => uiStore.setSettingsOpen(true))
 
   // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
   const keyboardVisible = useKeyboardVisibility()
@@ -933,51 +935,6 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [chatHistory, activeChatId, messages, knowledgeGraphOpen])
-
-  // ── API connection check ────────────────────────────────────────────────────
-  useEffect(() => {
-    const checkConnection = async (showConnecting = true) => {
-      if (showConnecting) setIsConnecting(true)
-      try {
-        const hasGeminiPreset = (aiSettings.modelPresets || []).some((p: any) => p.provider === 'gemini' && p.enabled)
-        if (hasGeminiPreset) {
-          const apiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
-          if (!apiKey?.trim()) {
-            uiStore.setSettingsOpen(true)
-            setApiConnected(false)
-            setIsConnecting(false)
-            return
-          }
-          const connected = await checkGeminiConnection(apiKey, aiSettings.geminiModel)
-          setApiConnected(connected)
-        } else if (aiSettings.useOpenRouter) {
-          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-          if (!apiKey || apiKey.trim() === '') {
-            uiStore.setSettingsOpen(true)
-            setApiConnected(false)
-            setIsConnecting(false)
-            return
-          }
-          const connected = await checkOpenRouterConnection(apiKey, aiSettings.openRouterModel)
-          setApiConnected(connected)
-          if (!connected && !import.meta.env.VITE_OPENROUTER_API_KEY) {
-            uiStore.setSettingsOpen(true)
-          }
-        } else {
-          const connected = await checkOllamaConnection(aiSettings.ollamaUrl)
-          setApiConnected(connected)
-        }
-      } catch (error) {
-        console.error('Connection check error:', error)
-        setApiConnected(false)
-      } finally {
-        if (showConnecting) setIsConnecting(false)
-      }
-    }
-    checkConnection(true)
-    const interval = setInterval(() => checkConnection(false), 5000)
-    return () => clearInterval(interval)
-  }, [aiSettings])
 
   // ── Snippet count / saved IDs ───────────────────────────────────────────────
   useEffect(() => {
