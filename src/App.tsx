@@ -39,6 +39,7 @@ import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useCoachMark } from '@/hooks/useCoachMark'
 import { useAuth } from '@/hooks/useAuth'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
+import { useOnOutsideClick } from '@/hooks/useOnOutsideClick'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -2168,17 +2169,8 @@ function App() {
     chatStore.setMessages(updatedMessages)
   }
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
   // ── Close user menu on outside click ───────────────────────────────────────
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!userMenuOpen) return
-      const el = userMenuRef.current
-      if (el && !el.contains(e.target as Node)) uiStore.setUserMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [userMenuOpen])
+  useOnOutsideClick(userMenuRef, userMenuOpen, () => uiStore.setUserMenuOpen(false))
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const filteredChats = chatHistory.filter(chat =>
