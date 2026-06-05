@@ -35,6 +35,7 @@ import { embedTexts } from '@/services/embeddings'
 import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
 import { sanitizeText, formatDate } from '@/lib/format'
+import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -72,7 +73,7 @@ function App() {
   })
 
   // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
+  const keyboardVisible = useKeyboardVisibility()
 
   // Broadcast / canvas transient state
   const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
@@ -199,34 +200,6 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
-
-  // ── iOS keyboard: instant input lift via keyboardWillShow ───────────────────
-  useEffect(() => {
-    let cleanupFns: Array<() => void> = []
-    const setup = async () => {
-      try {
-        const { Keyboard } = await import('@capacitor/keyboard')
-        const show = await Keyboard.addListener('keyboardWillShow', (info) => {
-          document.documentElement.style.setProperty('--kb-h', `${info.keyboardHeight}px`)
-          setKeyboardVisible(true)
-          // Scroll to bottom so the last message stays visible
-          setTimeout(() => {
-            const c = document.querySelector('.chat-messages-container')
-            if (c) c.scrollTop = c.scrollHeight
-          }, 50)
-        })
-        const hide = await Keyboard.addListener('keyboardWillHide', () => {
-          document.documentElement.style.setProperty('--kb-h', '0px')
-          setKeyboardVisible(false)
-        })
-        cleanupFns = [() => show.remove(), () => hide.remove()]
-      } catch {
-        // Not running in Capacitor (web dev) — no-op
-      }
-    }
-    setup()
-    return () => cleanupFns.forEach(fn => fn())
-  }, [])
 
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
