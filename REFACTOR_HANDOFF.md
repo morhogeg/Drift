@@ -50,13 +50,13 @@ Behavior-preserving faithful copies. The App-owned pieces the handlers need are 
 ## What's left — next session
 
 ### ✅ Message send / stream pipeline (Tier B step 3) — DONE (commit `b551bfa`)
-Extracted into `src/hooks/useMessageStream.ts`: `sendMessage` (single + broadcast, incl. inner `streamIntoNewMessage`), `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `stopGeneration`. Faithful copies; deps interface mirrors `useDriftActions`. Verified with tsc + build + a live Gemini Playwright smoke (sent a message, watched it stream, 0 non-noise console errors).
+Extracted into `src/hooks/useMessageStream.ts`. **Then trimmed to single-model only** (commit `f0e19d7`, see below) — it now owns just `sendMessage` + `stopGeneration`.
 
-### `continueWithModel` (Tier B step 4) — RECOMMENDED NEXT
-Still inline in `App.tsx` (~line 990). It's a model-*selection* action (sets selected targets + focuses the textarea), not part of the stream pipeline, so it was deliberately left out of `useMessageStream`. Candidate for its own small hook (e.g. `useModelActions`) alongside `setSelectedTargetsPersist` / `handlePresetsAdded`. Lower blast radius — a Playwright "continue with model X" smoke is enough.
+### ✅ Multi-model broadcast + continue-with-model REMOVED (commit `f0e19d7`)
+Per product decision (single-model for now, may return later): removed the broadcast send path, `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `continueWithModel`, the broadcast-group render branch, `MultiModelCarousel` (deleted), per-model canvases, Continue buttons/banner, strand beads, and all the related App state. Pickers (HeaderControls / ModelPickerSheet / ModelPillRow) are now single-select. **Surgical scope:** `selectedTargets` stays a length-1 array and the unused `Message` fields (`broadcastGroupId`/`canvasId`/`strandId`) remain in the type + DB schema, so multi-model is trivial to reintroduce. `continueWithModel` no longer exists — the previously-planned `useModelActions` extraction is moot.
 
-### Optional after that
-- Same hook-extraction treatment on `DriftPanel.tsx` (~1,900 lines).
+### RECOMMENDED NEXT
+- `DriftPanel.tsx` (~1,900 lines) — same hook-extraction treatment.
 - `handleStartDrift` is ~200 lines with three branches (nested-drift / found-message / fallback) — a candidate to split into smaller private helpers inside the hook, but only as a separate, clearly-labeled commit (not while it's still warm from the move).
 
 ---
@@ -67,4 +67,4 @@ Still inline in `App.tsx` (~line 990). It's a model-*selection* action (sets sel
 - Push each verified step. Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
 ## Already extracted into `src/hooks/` (do NOT re-extract)
-`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — send/stream pipeline: `sendMessage` / `sendToTarget` / `retroactivelyUpgradeToBroadcast` / `stopGeneration`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
+`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — single-model send/stream: `sendMessage` / `stopGeneration`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`.
