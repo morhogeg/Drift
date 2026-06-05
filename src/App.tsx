@@ -36,6 +36,7 @@ import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanti
 import { haptics } from '@/lib/haptics'
 import { sanitizeText, formatDate } from '@/lib/format'
 import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
+import { useCoachMark } from '@/hooks/useCoachMark'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -100,13 +101,6 @@ function App() {
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
 
-  // ── Coach mark (first AI message) ───────────────────────────────────────────
-  const [coachMarkSeen, setCoachMarkSeen] = useState(
-    () => localStorage.getItem('driftCoachMarkSeen') === 'true'
-  )
-  const [coachMarkActive, setCoachMarkActive] = useState(false)
-  const coachMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   // ── Last opened drift (for one-tap "reopen") ────────────────────────────────
   // Remembers the most recently opened drift in this session so the user can
   // jump back into their last branch from anywhere — they never lose their place.
@@ -160,6 +154,9 @@ function App() {
   const message = chatStore.inputText
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
+
+  // First-AI-message coach mark (one-time drift-gesture hint)
+  const { coachMarkActive, dismissCoachMark } = useCoachMark({ isTyping, messages })
 
   // Targets derived from enabled presets — drives ModelPickerSheet dynamic list
   const availableTargets = useMemo(() => {
@@ -733,22 +730,6 @@ function App() {
       setContextLinkVersion(v => v + 1)
     })()
   }, [messages])
-
-  // ── Coach mark helpers ──────────────────────────────────────────────────────
-  const dismissCoachMark = () => {
-    setCoachMarkActive(false)
-    setCoachMarkSeen(true)
-    localStorage.setItem('driftCoachMarkSeen', 'true')
-    if (coachMarkTimerRef.current) clearTimeout(coachMarkTimerRef.current)
-  }
-
-  // Show coach mark on first completed AI message
-  useEffect(() => {
-    if (!isTyping && !coachMarkSeen && messages.some(m => !m.isUser)) {
-      setCoachMarkActive(true)
-      coachMarkTimerRef.current = setTimeout(() => dismissCoachMark(), 6000)
-    }
-  }, [isTyping]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Global navigation handlers ──────────────────────────────────────────────
   useEffect(() => {
