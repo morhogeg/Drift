@@ -1,28 +1,32 @@
 # Drift — Quick Status
 
-**Date:** June 4, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 51 (iOS + web) — ready for TestFlight
+**Date:** June 6, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 52 (iOS + web) — ready for TestFlight
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-> ⚠️ iOS bundles a copy of `dist/`. After ANY web change run `npm run build && npx cap sync ios` before Run/Archive — a clean+rebuild in Xcode alone keeps the stale bundle.
+> ⚠️ **CRITICAL ACTION REQUIRED:** Rotate both exposed Gemini API keys + raise spend cap in Google AI Studio. See HANDOFF.md entry 164.
 
-## Last Session (Jun 4) — on-device bug fixes (builds 48–51)
-- **Map "Open drift" losing answer** — drift registered at Q only, answer in temp store. Fixed: fullest of 3 sources + debounced IDB flush (survives reload).
-- **Synthesis "Next" clickable** — extract `**Next:**` from prose, render "Explore next" chip. Tap sends the question (RTL-safe, Hebrew).
-- **Lens labels + Connect bridge question localized** — "הסבר בפשטות"/"איך קשור ל-" in Hebrew; language-agnostic filters. Bilingual regex detects bridge threads.
+## Last Session (Jun 6) — Tier B refactor complete
+
+- **Slice 4 complete** — extracted push/save logic (282 lines) → `useDriftPanelActions.ts`; verified with live Gemini smoke test
+- **Slice 5 complete** — extracted Connect mode (198 lines) → `useConnectThreads.ts`; verified with mocked SSE (Gemini spend-capped)
+- **DriftPanel.tsx:** 1916 → **1199 lines** (717-line reduction across both slices)
+- **All 5 slices verified:** tsc clean, vite build clean, Playwright smoke tests (live AI + mocked SSE)
+- **Bundle:** index 752 kB / gzip 229 kB (minimal change from slice 3; main refactoring work done)
 
 ## Pending (priority order)
-- [ ] On-device pass: map/synthesis/localization fixes + prior session features
-- [ ] TestFlight: archive build 50 → App Store Connect
-- [ ] TODO(semantic): Connect-lens seeding + semantic edges; persist composite lens-thread state
-- [ ] Providers/settings on-device pass (OpenRouter key, Settings UI, Ollama/Qwen3 gone)
+
+- [ ] **🔴 Rotate Gemini keys + raise spend cap** (user action, not code) — two keys exposed
+- [ ] TestFlight: archive build 52 in Xcode → App Store Connect
+- [ ] On-device pass: verify refactored hooks (drift flow, Connect cache, no regressions)
+- [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
-- [ ] Real auth · Security: Gemini key behind proxy · Light theme polish
-- [x] **Refactor — Tier B COMPLETE** (see `REFACTOR_HANDOFF.md`). App.tsx hooks done (2948 lines); **DriftPanel.tsx step 4 done — all 5 slices** (lib/driftPanel.ts + useDriftMessageStream + useDriftPanelActions + useConnectThreads) → **DriftPanel now 1199 lines** (was 1916). Only optional polish left (drop debug logs, split `handleStartDrift`). ⚠️ Gemini key is **spend-capped (429)** AND two keys exposed — **rotate + raise cap in Google AI Studio** (details in handoff).
-- ✅ **Multi-model broadcast + continue-with-model REMOVED** (Jun 5, commit `f0e19d7`) — single-model only now. Pickers are single-select; `selectedTargets` kept as a length-1 array so multi-model is trivial to reintroduce later.
-- [ ] Voice output · Code cleanup (dead DriftMapPanel, etc.)
+- [ ] Real auth · Security: key behind proxy · Light theme polish
+- [ ] Voice output · Code cleanup (dead DriftMapPanel, dormant forest scope, debug logs)
 
 ## Stack snapshot
-React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache + semantic recall. **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs:** OpenRouter (OpenAI/Anthropic/Grok streaming). **Local:** Ollama · **Demo:** DummyAI. **Single-model only** (broadcast/continue removed Jun 5). **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb (v2 schema). Drift Map = pure SVG. **Localization:** Hebrew + English lens scaffolding. App.tsx ~2.95k lines · DriftPanel.tsx ~1.2k (decomposed into 4 hooks + lib/driftPanel).
+
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache + semantic recall. **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs:** OpenRouter (OpenAI/Anthropic/Grok streaming). **Single-model only** (broadcast removed Jun 5). **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb (v2 schema). Drift Map = pure SVG. **Localization:** Hebrew + English scaffolding. App.tsx ~2.95k lines · DriftPanel.tsx ~1.2k (decomposed into 4 hooks + lib/driftPanel).
 
 ## Key files
-`src/services/embeddings.ts` · `src/lib/embeddingBackfill.ts` · `src/lib/semanticRecall.ts` · `src/lib/onceFlags.ts` · `src/components/SidebarChatRow.tsx` · `src/components/DriftPanel.tsx` (localized labels + clickable synthesis) · `src/components/DriftKnowledgeGraph.tsx` (lineage) · `src/services/db.ts` (v2 + `embeddingDB`) · `src/App.tsx` (debounced drift persist + synthesis/next parsing)
+
+`src/hooks/useDriftPanelActions.ts` · `src/hooks/useConnectThreads.ts` · `src/hooks/useDriftMessageStream.ts` · `src/lib/driftPanel.ts` · `src/services/embeddings.ts` · `src/lib/semanticRecall.ts` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/services/db.ts` (v2) · `src/App.tsx`

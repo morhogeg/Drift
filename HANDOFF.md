@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 4, 2026
+**Date:** June 6, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 51 (iOS Xcode) / web
-**Status:** This session (Jun 4) — prepared build 51 for TestFlight (bundle unchanged from build 50). Build 50 had three on-device bug fixes, entries 158–161: map "Open drift" losing answer (+ reload durability); synthesis "Next" now clickable; lens labels + Connect bridge question localized to chat language (Hebrew/English). Prior session (Jun 3 PM, entries 150–157): sidebar redesign; Drift-Map fixes (mobile open/close, lineage, clickable-term nodes); Connect/lens/state-persistence fixes; web-QA fixes; **semantic embeddings layer**; continuity (resume surface); discoverability coachmarks. (Bundle: index ~806 kB / gzip ~241 kB.) Earlier context — Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+**Build:** 52 (iOS Xcode) / web
+**Status:** This session (Jun 6) — **Tier B refactor COMPLETE**: extracted DriftPanel.tsx slices 4–5 into `useConnectThreads` + `useDriftPanelActions` hooks (entries 162–164); DriftPanel 1916→1199 lines; all 5 slices verified (tsc + vite build + Playwright smoke). Security action required: two Gemini keys exposed (one in git history, one inlined in bundle); user must rotate both in Google AI Studio + raise spend cap (currently 429 RESOURCE_EXHAUSTED). Prior session (Jun 4, entries 158–161): on-device bug fixes (map "Open drift" losing answer + reload persistence, synthesis "Next" clickable, lens labels + Connect bridge localized). (Bundle: index ~752 kB / gzip ~229 kB.)
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,27 @@
 ---
 
 ## What Was Done This Session
+
+### 164. Refactor completion + security audit (REFACTOR SUMMARY, build 52)
+- **Tier B refactor complete:** All five `DriftPanel.tsx` decomposition slices extracted and verified (commits `00965d9` through `c99fb3d`). DriftPanel 1916→**1199 lines**. Behavior-preserving: every state movement + effect + handler shipped as-is; all five slices verified with tsc + vite build + Playwright smoke (mix of live Gemini and mocked SSE per slice). See `REFACTOR_HANDOFF.md` for detailed handoff + next optional polish.
+- **Security audit findings — ACTION REQUIRED:** Two Gemini API keys exposed:
+  1. **Key in git history** (`AIzaSyAAQ4C79…`): committed in pushed main (commit `0ff024e` + 3 later). Permanent — anyone who clones the repo can recover via `git log -S`. If repo is public, assume already harvested.
+  2. **Key in `.env` inlined into bundle**: Vite's `VITE_`-prefixed vars inline into the built JS plaintext. Every TestFlight/web build ships the key.
+- **User actions (not code — only the user can do this):**
+  1. Rotate **both keys** in Google AI Studio (https://ai.studio).
+  2. Raise/reset the Gemini **spend cap** (currently 429 RESOURCE_EXHAUSTED, blocking live AI). Raise cap at https://ai.studio/spend.
+  3. Long-term: move Gemini key behind a server-side proxy so no LLM key ships in the client bundle.
+- **Code-level hardening already completed:** (a) key sent via `x-goog-api-key` header, not URL `?key=` (avoids proxy/CDN logging); (b) API-key copy button removed from Settings; (c) API keys stripped from backup exports; (d) no dangerouslySetInnerHTML/XSS sinks, no telemetry exfiltrating chats.
+
+### 163. Extract Connect-mode logic into useConnectThreads (REFACTOR slice 5, build 52)
+- Extracted 198 lines of Connect state + 4 effects + bridgeQuestion + openConnectThread into `src/hooks/useConnectThreads.ts`. Owns: `connectCards`, `connectQuestion`, `connectAnswersRef` (memoized visited-answer cache), `connectVisitedVersion` (version bump for UI updates), `initConnectState()`, `bridgeQuestion()`, `openConnectThread()`.
+- **Subtle stale-render guards carried verbatim:** (a) `skipStaleCardParseRef` — when switching terms/lenses, the panel's init effect arms a flag so the card parser doesn't key the PREVIOUS thread's JSON onto the newly-selected term (the "Connect shows the wrong drift" bug). (b) `!raw.startsWith('[')` prose guard — only parse as JSON if it looks like `[…]`, not prose (prevents "No connections found" after lens-switch when old prose answer lingers). (c) `chipSessionRef` — a ref tracking the active chip conversation so React batching can't lose messages before we save them to cache.
+- All panel-owned state setters + shared `autoSentRef` passed as deps → hook reads/writes exactly what the inline implementation did. Verified with tsc + Playwright smoke: cards parse & render, tap bridge → streams in, back to suggestions → cards still present (cached), re-tap same bridge → restores instantly (zero new bridge AI calls).
+
+### 162. Extract push/save actions into useDriftPanelActions (REFACTOR slice 4, build 52)
+- Extracted 282 lines of push/save state + 7 handlers + 2 lifecycle helpers into `src/hooks/useDriftPanelActions.ts`. Exports: `pushedToMain`, `savedAsChat`, `savedMessageIds`, `isPushing` (state); `handlePushSingleMessage`, `handleToggleSaveMessage`, `handleSaveAsChat`, `handlePushToMain` (handlers); `resetPushSaveState`, `loadSavedMessageIds` (lifecycle).
+- **Key logic moved intact:** (a) Push guards (content signature check + duplicate prevention via `pushedContentSig`). (b) Snippet save/unsave via `snippetStorage`. (c) Reset-push-button effect fires when new messages arrive post-push (shows "Push to main" button again, not "Undo push"). (d) `loadSavedMessageIds()` hydrates from DB on mount.
+- DriftPanel now calls the hook at the top level, destructuring handlers + state; passed all required deps (driftOnlyMessages, selectedText, sourceMessageId, parentChatId, driftChatId, onPushToMain callback, onSaveAsChat callback, undo callbacks). Verified with tsc + live Gemini Playwright smoke: full drift flow works (create drift → send message → get reply → push/undo → save-as-chat/undo, all state transitions correct, no console errors).
 
 ### 161. Connect bridge question — localized to chat language (FIX, build 50)
 - The Connect bridge question was still hardcoded English (`How does "X" connect to Y?`) → mixed LTR/RTL in Hebrew chats (per TestFlight screenshot). Added `bridge` to `DriftLabels` (EN/HE: `איך "X" קשור ל-Y?`); `bridgeQuestion()` now uses it; the connect-card tooltip uses the localized question too.
@@ -397,9 +418,10 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 50 in Xcode → upload to App Store Connect.
-- [ ] **On-device pass — this session (Jun 4)** — verify the three bug fixes: (1) tap map node → "Open this drift" shows the full conversation (question + answer), not just the question; (2) tap synthesis "Next:" chip and it sends a real LLM question; (3) Hebrew chat shows lens labels like "הסבר בפשטות" not "Simplify this", and pushed drifts don't have duplicate English openers.
-- [ ] **On-device pass — last session (Jun 3 PM)** — verify: sidebar row types (Chat/Drift/Synthesis) + drift nesting; Drift Map opens on a single tap (no flicker-close); map node `↳ parent` labels + breadcrumb; clickable AI terms appear on the map; Connect shows the *selected* term's cards (no cross-term bleed); per-term/lens conversation persists when switching terms; "Pick up where you left off" resume cards in the empty state; the two coachmarks (drift gesture + lens bar) appear once; "Related by meaning" in search + "you explored before" recall.
+- [ ] **🔴 ACTION REQUIRED (security)** — rotate both exposed Gemini API keys in Google AI Studio (https://ai.studio); raise/reset spend cap at https://ai.studio/spend (currently 429 RESOURCE_EXHAUSTED). Details in entry 164.
+- [ ] **TestFlight submission (build 52)** — archive in Xcode → upload to App Store Connect. Build number incremented 51→52, Capacitor synced, web assets ready.
+- [ ] **On-device pass — this session (Jun 6)** — verify: refactored hooks work on-device (drift → send message → reply → push/undo → save-as-chat); Connect mode (tap bridge → stream answer → cache hit on re-tap); no regressions from slices 4–5.
+- [ ] **On-device pass — prior sessions (Jun 4, Jun 3 PM)** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
 - [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
 - [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.
