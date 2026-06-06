@@ -1,18 +1,27 @@
 # Refactor + Security Handoff
 
-**Branch:** `feature/apple-level-overhaul` · **As of:** June 5, 2026
-**Pick it up next session with:** `/continue-refactor` (next target = **`DriftPanel.tsx` slices 4–5**)
+**Branch:** `feature/apple-level-overhaul` · **As of:** June 6, 2026
+**Pick it up next session with:** `/continue-refactor` (Tier B steps 1–4 are DONE — see "What's left" for the remaining optional follow-ups)
 
 > **Where we are:** Tier B steps 1–3 (App.tsx) are DONE (`useChatActions`,
 > `useDriftActions`, `useMessageStream`); App.tsx is **2948 lines** (was 4195).
-> **Tier B step 4 — `DriftPanel.tsx` decomposition — is now IN PROGRESS:**
+> **Tier B step 4 — `DriftPanel.tsx` decomposition — is now COMPLETE:**
 > - **Slice 1+2 DONE** (commit `00965d9`): pure helpers + `TEMPLATE_SYSTEM_PROMPTS`
 >   → `src/lib/driftPanel.ts`.
 > - **Slice 3 DONE** (commit `ae686a0`): send/stream pipeline → `src/hooks/useDriftMessageStream.ts`.
-> - **DriftPanel.tsx is now 1504 lines** (was 1916 at the start of step 4).
-> - **Next = slice 4** (push/save actions → `useDriftPanelActions`), then optional
->   **slice 5** (Connect-mode logic → `useConnectThreads`). Full slice plan is in the
->   `Plan` from this session; lowest-risk-first, one concern per commit.
+> - **Slice 4 DONE** (commit `d489210`): push/save action layer + state cluster
+>   → `src/hooks/useDriftPanelActions.ts`.
+> - **Slice 5 DONE** (commit `c99fb3d`): Connect-mode logic (chips, bridge questions,
+>   visited-answer cache, stale-render guards) → `src/hooks/useConnectThreads.ts`.
+> - **DriftPanel.tsx is now 1199 lines** (was 1916 at the start of step 4).
+> - All five slices verified: `tsc` + `vite build` + a live/mocked Playwright smoke
+>   per slice. Slice 5's Connect smoke ran against a **mocked Gemini SSE** because the
+>   live Gemini key is **spend-capped** (HTTP 429 `RESOURCE_EXHAUSTED`) — see below.
+
+> ⚠️ **Gemini key is spend-capped** (monthly cap hit, every call 429s). This is on top
+> of the rotate-the-key action below. The user must raise/reset the spend cap in
+> Google AI Studio (https://ai.studio/spend) before live AI works again — or wire the
+> OpenRouter fallback (no OpenRouter key is in `.env` today).
 
 ---
 
@@ -62,42 +71,41 @@ Behavior-preserving faithful copies. The App-owned pieces the handlers need are 
 
 ## What's left — next session
 
-### ⭐ NEXT: `DriftPanel.tsx` slices 4–5 (now 1504 lines) — Tier B step 4, continued
-Slices 1–3 are done (see top). Remaining cohesive concerns, lowest-risk first:
+### Tier B core decomposition is DONE
+App.tsx (steps 1–3) and DriftPanel.tsx (step 4, all 5 slices) are both decomposed.
+No required extraction remains. What's left is **optional polish only** — pick up
+any of these as its own clearly-labeled, behavior-preserving commit:
 
-- **Slice 4 — push/save actions → `src/hooks/useDriftPanelActions.ts`** (medium risk,
-  no network). Extract `handlePushSingleMessage`, `handleToggleSaveMessage`,
-  `handleSaveAsChat`, `handlePushToMain` + the push/save state cluster (`pushedToMain`,
-  `savedAsChat`, `savedChatId`, `savedMessageIds`, `pushedMessageCount`,
-  `lastPushSourceId`, `isPushing`, `pushedContentSignature`) and the "reset push button
-  when new messages arrive" effect. Reuses `snippetStorage` + `isDriftOpenerText`.
-  Optional separate cleanup commit: drop the noisy `[BUTTON-CLICK …]` console.logs.
-  **Verify:** tsc + build + Playwright push→undo→save smoke.
-- **Slice 5 — Connect-mode logic → `useConnectThreads.ts`** (highest risk; do last,
-  only if 4 lands clean). `openConnectThread`, `bridgeQuestion`, the connect-card JSON
-  parse effect, the `chipSessionRef` sync/persist effects, `connectAnswersRef`. Carries
-  subtle stale-render guards (`skipStaleCardParseRef`, `messagesThreadRef`, the
-  `!raw.startsWith('[')` prose guard) — copy comments verbatim, don't "simplify".
-  **Verify:** tsc + build + **live Connect smoke** (cards render → tap bridge → answer
-  streams → back → cards still present, not re-fetched).
+- **Drop the noisy `[BUTTON-CLICK …]` / `[DRIFT-PANEL …]` console.logs** now living in
+  `useDriftPanelActions.ts` (`handlePushToMain`). Carried over verbatim during slice 4;
+  safe to delete as a standalone cleanup commit.
+- **`handleStartDrift`** (in `useDriftActions`) is ~200 lines with three branches
+  (nested-drift / found-message / fallback) — could split into smaller private helpers.
+- **`App.tsx` is still ~2948 lines** — if further decomposition is wanted, the render
+  tree (not just logic) is the remaining bulk; that's a Tier C concern, not started.
 
-> Reference pattern for new hooks: `src/hooks/useDriftMessageStream.ts` (this session) and
-> `src/hooks/useDriftActions.ts`. **Live smoke recipe** (Playwright `.mjs` in-repo, set
-> `localStorage` `driftUser`+`drift_onboarded='true'`; trigger a drift by selecting text
-> in an assistant bubble and dispatching `mouseup`, then click
-> `button[title^="Drift on selected text"]`; drift input is
-> `textarea[placeholder="Explore this drift…"]`; drift bubbles carry
-> `[data-drift-message-id]`) — proven working this session.
-
-> Tip: `src/hooks/useMessageStream.ts` and `src/hooks/useDriftActions.ts` are the
-> reference pattern for the deps-interface + JSDoc style to match.
+> Reference pattern for new hooks: `src/hooks/useDriftMessageStream.ts`,
+> `src/hooks/useDriftPanelActions.ts`, `src/hooks/useConnectThreads.ts` (deps-interface
+> + JSDoc style). **Smoke recipe** (Playwright `.mjs` in-repo, set `localStorage`
+> `driftUser`+`drift_onboarded='true'`, viewport ≥1400×950 + `{ force: true }` on the
+> panel header buttons which can scroll out of view; trigger a drift by selecting text
+> in an assistant bubble — `div.ai-message[data-message-id]` — and dispatching `mouseup`,
+> then click `button[title^="Drift on selected text"]` or the **`Connect`** template
+> button; drift input is `textarea[placeholder="Explore this drift…"]`; drift bubbles
+> carry `[data-drift-message-id]`; Connect edge cards are
+> `button[class*="min-h-[54px]"]`). **When the Gemini key is spend-capped, mock the
+> stream:** `page.route('**/*:streamGenerateContent*', …)` and branch on `postData()` —
+> `'raw JSON array of 5-6 strings'` ⇒ return the cards JSON, `'tapped a connection to
+> explore this bridge'` ⇒ return prose, else ⇒ main-chat prose; fulfill with
+> `Content-Type: text/event-stream` and `data: {…candidates…}\n\ndata: [DONE]\n\n`.
 
 ### ✅ Already complete (this + prior sessions)
+- **Tier B step 4 — `DriftPanel.tsx` decomposition (all 5 slices)** — `src/lib/driftPanel.ts`
+  (pure helpers + prompts), `src/hooks/useDriftMessageStream.ts` (send/stream),
+  `src/hooks/useDriftPanelActions.ts` (push/save), `src/hooks/useConnectThreads.ts`
+  (Connect mode). DriftPanel.tsx 1916 → **1199 lines**.
 - **Tier B step 3** — message send/stream pipeline → `src/hooks/useMessageStream.ts` (commit `b551bfa`; later trimmed to single-model, now just `sendMessage` + `stopGeneration`).
 - **Multi-model broadcast + continue-with-model REMOVED** (commit `f0e19d7`) — single-model only (may return later). Removed the broadcast send path, `sendToTarget`, `retroactivelyUpgradeToBroadcast`, `continueWithModel`, the broadcast-group render branch, `MultiModelCarousel` (deleted), per-model canvases, Continue buttons/banner, strand beads, and the related App state. Pickers are single-select. `selectedTargets` is still a length-1 array and the unused `Message` fields (`broadcastGroupId`/`canvasId`/`strandId`) remain in the type + DB schema, so multi-model is trivial to reintroduce. **`continueWithModel` no longer exists — the previously-planned `useModelActions` extraction is moot.**
-
-### Optional follow-up (separate, clearly-labeled commit)
-- `handleStartDrift` (in `useDriftActions`) is ~200 lines with three branches (nested-drift / found-message / fallback) — could split into smaller private helpers. Only as its own commit, not bundled with an extraction.
 
 ---
 
@@ -107,4 +115,4 @@ Slices 1–3 are done (see top). Remaining cohesive concerns, lowest-risk first:
 - Push each verified step. Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
 ## Already extracted into `src/hooks/` (do NOT re-extract)
-`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — App's single-model send/stream), **`useDriftMessageStream`** (COMPLETE — DriftPanel's send/stream: `sendMessage` / `retryLastMessage` / `stopGeneration` / `handleCompareAcrossModels`). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`, **`src/lib/driftPanel.ts`** (DriftPanel pure helpers + `TEMPLATE_SYSTEM_PROMPTS`).
+`useKeyboardVisibility`, `useCoachMark`, `useAuth`, `useConnectionStatus`, `useOnOutsideClick`, `useKeyboardShortcuts`, **`useChatActions`**, **`useDriftActions`** (COMPLETE — all 9 drift handlers), **`useMessageStream`** (COMPLETE — App's single-model send/stream), **`useDriftMessageStream`** (COMPLETE — DriftPanel's send/stream: `sendMessage` / `retryLastMessage` / `stopGeneration` / `handleCompareAcrossModels`), **`useDriftPanelActions`** (COMPLETE — DriftPanel push/save: `handlePushSingleMessage` / `handleToggleSaveMessage` / `handleSaveAsChat` / `handlePushToMain` + the push/save state cluster + `resetPushSaveState` / `loadSavedMessageIds`), **`useConnectThreads`** (COMPLETE — DriftPanel Connect mode: `bridgeQuestion` / `openConnectThread` / `initConnectState` + chips/question/visited-cache state + the 4 Connect effects + stale-render guards). Also `src/lib/format.ts`, `src/lib/onboardingFlag.ts`, **`src/lib/driftPanel.ts`** (DriftPanel pure helpers + `TEMPLATE_SYSTEM_PROMPTS`).
