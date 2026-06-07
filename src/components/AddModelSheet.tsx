@@ -46,7 +46,6 @@ const LAB_PROVIDERS: ProviderMeta[] = [
 const MORE_PROVIDERS: ProviderMeta[] = [
   { id: 'openrouter', backend: 'openrouter', name: 'OpenRouter', tagline: 'Hundreds of models, one key', dot: 'bg-blue-400', needs: 'apiKey', hint: 'openrouter.ai/keys — free tier available', keyPlaceholder: 'sk-or-v1-...' },
   { id: 'ollama', backend: 'ollama', name: 'Ollama', tagline: 'Local models on your machine', dot: 'bg-emerald-500', needs: 'serverUrl', hint: 'Runs fully offline — no key required', keyPlaceholder: 'http://localhost:11434' },
-  { id: 'dummy', backend: 'dummy', name: 'Demo AI', tagline: 'Simulated replies — no key', dot: 'bg-violet-400', needs: 'none' },
 ]
 
 const PROVIDERS: ProviderMeta[] = [...LAB_PROVIDERS, ...MORE_PROVIDERS]
@@ -113,12 +112,6 @@ export default function AddModelSheet({
     setCredential(p.backend === 'ollama' ? 'http://localhost:11434' : '')
     setSelected(new Map())
     setSearch('')
-    if (p.needs === 'none') {
-      // Demo AI — add immediately, nothing to configure.
-      onPresetsAdded([{ id: 'dummy-lite', provider: 'dummy', label: 'Demo AI', enabled: true }])
-      onClose()
-      return
-    }
     setPhase('connect')
   }
 

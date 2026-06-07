@@ -33,6 +33,21 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
     }
   }, [isOpen, filter, searchQuery])
 
+  // Escape closes the gallery — backing out of an open detail/filters/multi-select
+  // first — to match every other overlay (search, drift panel, drift map).
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (selectedSnippet) { setSelectedSnippet(null); return }
+      if (showFilters) { setShowFilters(false); return }
+      if (isMultiSelect) { setIsMultiSelect(false); setSelectedIds(new Set()); return }
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen, selectedSnippet, showFilters, isMultiSelect, onClose])
+
   const loadSnippets = () => {
     const filtered = snippetStorage.getFilteredSnippets({
       ...filter,

@@ -4,7 +4,7 @@ interface ModelPickerSheetProps {
   isOpen: boolean
   onClose: () => void
   selectedTargets: Target[]
-  onToggleTarget: (target: Target) => void
+  onSelectTarget: (target: Target) => void
   availableTargets: Target[]
   onOpenAddModel: () => void
 }
@@ -13,21 +13,19 @@ const MODEL_DOT_COLORS: Record<string, string> = {
   gemini: 'bg-sky-400',
   openrouter: 'bg-blue-400',
   ollama: 'bg-emerald-400',
-  dummy: 'bg-violet-400',
 }
 
 export default function ModelPickerSheet({
   isOpen,
   onClose,
   selectedTargets,
-  onToggleTarget,
+  onSelectTarget,
   availableTargets,
   onOpenAddModel,
 }: ModelPickerSheetProps) {
   if (!isOpen) return null
 
   const selectedKeys = new Set(selectedTargets.map((t) => t.key))
-  const atMax = selectedTargets.length >= 3
 
   return (
     <>
@@ -45,26 +43,20 @@ export default function ModelPickerSheet({
         {/* Drag handle */}
         <div className="w-10 h-1 rounded-full bg-dark-border/80 mx-auto mb-5" />
 
-        <h3 className="text-[15px] font-semibold text-text-primary mb-1">Choose Models</h3>
-        <p className="text-[12px] text-text-muted mb-5">Select up to 3 models to compare responses</p>
+        <h3 className="text-[15px] font-semibold text-text-primary mb-1">Choose Model</h3>
+        <p className="text-[12px] text-text-muted mb-5">Select the model for this chat</p>
 
         <div className="space-y-2">
           {availableTargets.map((model) => {
             const isSelected = selectedKeys.has(model.key)
-            const isDisabled = !isSelected && atMax
 
             return (
               <button
                 key={model.key}
-                onClick={() => {
-                  if (!isDisabled) onToggleTarget(model)
-                }}
-                disabled={isDisabled}
+                onClick={() => onSelectTarget(model)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left ${
                   isSelected
                     ? 'bg-accent-violet/10 border border-accent-violet/40'
-                    : isDisabled
-                    ? 'bg-dark-elevated/40 border border-dark-border/30 opacity-40 cursor-default'
                     : 'bg-dark-elevated border border-dark-border/60 active:opacity-70'
                 }`}
               >
@@ -94,7 +86,7 @@ export default function ModelPickerSheet({
           })}
 
           {/* Connect a model row */}
-          {!atMax && (
+          {(
             <button
               onClick={onOpenAddModel}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-dark-border/50 text-text-muted hover:text-text-secondary hover:border-dark-border active:opacity-70 transition-all"

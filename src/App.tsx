@@ -1,34 +1,47 @@
-import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
-import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense } from 'react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle } from 'lucide-react'
 import { Pressable } from './components/motion'
-import { sendMessageToOpenRouter, checkOpenRouterConnection, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from './services/openrouter'
-import { sendMessageToOllama, checkOllamaConnection, type ChatMessage as OllamaMessage } from './services/ollama'
-import { sendMessageToGemini, checkGeminiConnection, getSuggestedHighlights, synthesizeDrifts } from './services/gemini'
-import { checkDummyConnection, sendMessageToDummy } from './services/dummyAI'
+import { synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
-import DriftKnowledgeGraph from './components/DriftKnowledgeGraph'
+const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
 import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
 import { Login } from './components/Login'
+import { ONBOARDED_FLAG } from './lib/onboardingFlag'
+const Onboarding = lazy(() => import('./components/Onboarding'))
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { getTextDirection, getRTLClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
-import MultiModelCarousel from './components/MultiModelCarousel'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
 import SearchModal from './components/SearchModal'
+import ShortcutsHelp from './components/ShortcutsHelp'
 import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
 import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { runEmbeddingBackfill, getCachedVectors } from '@/lib/embeddingBackfill'
+import { useOnceFlag } from '@/lib/onceFlags'
+import { embedTexts } from '@/services/embeddings'
+import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
+import { sanitizeText, formatDate, timeAgo } from '@/lib/format'
+import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
+import { useCoachMark } from '@/hooks/useCoachMark'
+import { useAuth } from '@/hooks/useAuth'
+import { useConnectionStatus } from '@/hooks/useConnectionStatus'
+import { useOnOutsideClick } from '@/hooks/useOnOutsideClick'
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useChatActions } from '@/hooks/useChatActions'
+import { useDriftActions } from '@/hooks/useDriftActions'
+import { useMessageStream } from '@/hooks/useMessageStream'
 import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { useModelStore, DEFAULT_TARGET } from '@/store/modelStore'
@@ -48,11 +61,12 @@ function App() {
   const uiStore = useUIStore()
 
   // ── Local state (not in stores) ─────────────────────────────────────────────
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [currentUser, setCurrentUser] = useState<string | null>(null)
+  const { isAuthenticated, currentUser, login: handleLogin, logout: handleLogout } = useAuth()
+  // First-run onboarding — shown once per device, only after login.
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
+  )
   const userMenuRef = useRef<HTMLDivElement | null>(null)
-  const [apiConnected, setApiConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
   const [aiSettings, setAiSettings] = useState<AISettings>(() => {
     const settings = settingsStorage.get()
     if (!settings.openRouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
@@ -61,40 +75,26 @@ function App() {
     return settings
   })
 
-  // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
+  // Live provider reachability (polls every 5s; opens Settings if creds missing)
+  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => uiStore.setSettingsOpen(true))
 
-  // Broadcast / canvas transient state
-  const [activeBroadcastGroupId, setActiveBroadcastGroupId] = useState<string | null>(null)
-  const [, setContinuedModelByGroup] = useState<Record<string, string | null>>({})
-  const [activeStrandId, setActiveStrandId] = useState<string | null>(null)
-  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
-  const [continueFromMessageId, setContinueFromMessageId] = useState<string | null>(null)
+  // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
+  const keyboardVisible = useKeyboardVisibility()
+
   // Drift just promoted to the main thread — drives a one-time settle-in arrival
   // animation (cleared shortly after, so reloads/scroll don't re-animate it).
   const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
   const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const prevContinueTargetsRef = useRef<typeof modelStore.selectedTargets | null>(null)
 
-  // Mobile carousel + model picker state
-  const [activeCarouselModel, setActiveCarouselModel] = useState<string | null>(null)
+  // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
   const [synthesizing, setSynthesizing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-
-  // Detect touch/mobile — canvas view is desktop-only (hidden md:block)
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  const [helpOpen, setHelpOpen] = useState(false)
 
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
-
-  // ── Coach mark (first AI message) ───────────────────────────────────────────
-  const [coachMarkSeen, setCoachMarkSeen] = useState(
-    () => localStorage.getItem('driftCoachMarkSeen') === 'true'
-  )
-  const [coachMarkActive, setCoachMarkActive] = useState(false)
-  const coachMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Last opened drift (for one-tap "reopen") ────────────────────────────────
   // Remembers the most recently opened drift in this session so the user can
@@ -117,6 +117,9 @@ function App() {
   // Lets the in-panel "View as" switcher keep a separate thread per lens and
   // return to the original one, without touching the inline-link / map model.
   const lensRegistryRef = useRef<Map<string, Map<string, string>>>(new Map())
+  // Debounces flushing a growing drift conversation into chatHistory/IDB (so it
+  // survives reload — the temp store is in-memory only). Coalesces stream chunks.
+  const driftPersistTimerRef = useRef<number | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const userHasScrolled = useRef(false)
   const activeMessageIdRef = useRef<string | null>(null)
@@ -147,15 +150,15 @@ function App() {
   const searchQuery = chatStore.searchQuery
   const selectedTargets = modelStore.selectedTargets
 
+  // First-AI-message coach mark (one-time drift-gesture hint)
+  const { coachMarkActive, dismissCoachMark } = useCoachMark({ isTyping, messages })
+
   // Targets derived from enabled presets — drives ModelPickerSheet dynamic list
   const availableTargets = useMemo(() => {
     const presetTargets = (aiSettings.modelPresets || [])
       .filter((p) => p.enabled)
       .map((p) => ({ provider: p.provider as import('@/types/chat').Target['provider'], key: p.id, label: p.label }))
-    // Always include Demo AI
-    const demoTarget = { provider: 'dummy' as const, key: 'dummy-lite', label: 'Demo AI' }
-    const hasDummy = presetTargets.some((t) => t.key === 'dummy-lite')
-    return hasDummy ? presetTargets : [...presetTargets, demoTarget]
+    return presetTargets
   }, [aiSettings.modelPresets])
 
   const totalDriftCount = useMemo(() => {
@@ -190,38 +193,48 @@ function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
-  // ── iOS keyboard: instant input lift via keyboardWillShow ───────────────────
-  useEffect(() => {
-    let cleanupFns: Array<() => void> = []
-    const setup = async () => {
-      try {
-        const { Keyboard } = await import('@capacitor/keyboard')
-        const show = await Keyboard.addListener('keyboardWillShow', (info) => {
-          document.documentElement.style.setProperty('--kb-h', `${info.keyboardHeight}px`)
-          setKeyboardVisible(true)
-          // Scroll to bottom so the last message stays visible
-          setTimeout(() => {
-            const c = document.querySelector('.chat-messages-container')
-            if (c) c.scrollTop = c.scrollHeight
-          }, 50)
-        })
-        const hide = await Keyboard.addListener('keyboardWillHide', () => {
-          document.documentElement.style.setProperty('--kb-h', '0px')
-          setKeyboardVisible(false)
-        })
-        cleanupFns = [() => show.remove(), () => hide.remove()]
-      } catch {
-        // Not running in Capacitor (web dev) — no-op
-      }
-    }
-    setup()
-    return () => cleanupFns.forEach(fn => fn())
-  }, [])
-
   const sidebarOpen = uiStore.sidebarOpen
   const settingsOpen = uiStore.settingsOpen
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
+
+  // One-time spotlight on the Map control the first time a drift exists — the button
+  // appears only after the first branch, so a brief pulse + callout turns that new
+  // affordance into a reward instead of a control that silently materializes.
+  const [mapSpotlight, setMapSpotlight] = useState(false)
+  const mapSpotlightDone = useRef(
+    typeof localStorage !== 'undefined' && localStorage.getItem('driftMapSpotlightSeen') === 'true'
+  )
+  const endMapSpotlight = useCallback(() => {
+    setMapSpotlight(false)
+    mapSpotlightDone.current = true
+    try { localStorage.setItem('driftMapSpotlightSeen', 'true') } catch { /* ignore */ }
+  }, [])
+  useEffect(() => {
+    if (mapSpotlightDone.current || knowledgeGraphOpen) return
+    if (totalDriftCount > 0) {
+      setMapSpotlight(true)
+      const t = setTimeout(endMapSpotlight, 6500)
+      return () => clearTimeout(t)
+    }
+  }, [totalDriftCount, knowledgeGraphOpen, endMapSpotlight])
+  useEffect(() => { if (knowledgeGraphOpen && mapSpotlight) endMapSpotlight() }, [knowledgeGraphOpen, mapSpotlight, endMapSpotlight])
+
+  // Drift Map "expand" (desktop): widens the map panel for a larger view. Tracked
+  // here (not inside the map) so the main column's right margin can match the panel
+  // width and never get covered.
+  const [mapExpanded, setMapExpanded] = useState(false)
+  const [isLgUp, setIsLgUp] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
+  )
+  useEffect(() => {
+    const m = window.matchMedia('(min-width: 1024px)')
+    const h = () => setIsLgUp(m.matches)
+    m.addEventListener('change', h)
+    return () => m.removeEventListener('change', h)
+  }, [])
+  // The map panel's width (kept in sync with DriftKnowledgeGraph's desktop panel).
+  const mapPanelWidth = mapExpanded ? 'min(1040px, 90vw)' : 'min(680px, 56vw)'
 
   // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
   // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
@@ -261,18 +274,98 @@ function App() {
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
 
+  // Right margin the main column reserves so the open side panel never covers it
+  // (matches the actual panel width, including the map's expanded width).
+  const mainRightMargin = isLgUp
+    ? (knowledgeGraphOpen ? mapPanelWidth : driftOpen ? 'min(450px, 56vw)' : 0)
+    : 0
+
   // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
   // Index every prior drift by its term (cheap; reads only what's persisted).
   // Rebuilds when chat history changes — memoized so it's free on other renders.
   const termIndex = useMemo(() => buildTermIndex(chatHistory), [chatHistory])
 
+  // Resolved Gemini key (env > enabled preset > settings). Empty when there is
+  // no key (Demo / offline) — every semantic surface below treats "" as "no
+  // semantic layer" and falls back to today's lexical behavior. Never logged.
+  const geminiApiKey = useMemo(() => {
+    const preset = (aiSettings.modelPresets || []).find(p => p.provider === 'gemini' && p.enabled)
+    return (import.meta.env.VITE_GEMINI_API_KEY || preset?.apiKey || aiSettings.geminiApiKey || '').trim()
+  }, [aiSettings.modelPresets, aiSettings.geminiApiKey])
+
+  // ── Semantic backfill (lifecycle) ──────────────────────────────────────────
+  // Whenever chat history settles, diff drifts against the IDB vector cache and
+  // batch-embed any that are missing/stale. Debounced, fire-and-forget, never
+  // blocks UI; silently no-ops without a Gemini key. The in-memory cache inside
+  // embeddingBackfill keeps this cheap on repeat passes.
+  useEffect(() => {
+    if (!geminiApiKey) return
+    const id = setTimeout(() => {
+      runEmbeddingBackfill(chatHistory, geminiApiKey).catch(() => {})
+    }, 1500)
+    return () => clearTimeout(id)
+  }, [chatHistory, geminiApiKey])
+
   // Prior explorations of the term the user just marked — surfaced as the
-  // "you explored this before" moment in the drift panel.
-  const relatedDrifts = useMemo<TermOccurrence[]>(() => {
+  // "you explored this before" moment in the drift panel. The lexical result is
+  // instant; semantic matches (added below) fill in asynchronously.
+  const lexicalRelatedDrifts = useMemo<TermOccurrence[]>(() => {
     const term = driftContext?.selectedText
     if (!driftOpen || !term) return []
     return findRelatedDrifts(termIndex, term, driftContext?.driftChatId)
   }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, termIndex])
+
+  // Semantic recall: embed the marked term, rank cached drift vectors, and merge
+  // with the lexical list (lexical first, semantic-only appended). Held in local
+  // state so the lexical strip renders immediately, then semantic matches appear.
+  const [relatedDrifts, setRelatedDrifts] = useState<TermOccurrence[]>([])
+  useEffect(() => {
+    // Always show the instant lexical result first.
+    setRelatedDrifts(lexicalRelatedDrifts)
+
+    const term = driftContext?.selectedText
+    if (!driftOpen || !term || !geminiApiKey) return // graceful: lexical-only
+
+    let cancelled = false
+    const controller = new AbortController()
+    ;(async () => {
+      try {
+        const [queryVecs, candidates] = await Promise.all([
+          embedTexts([term], geminiApiKey, controller.signal),
+          getCachedVectors(),
+        ])
+        if (cancelled || queryVecs.length === 0 || candidates.length === 0) return
+
+        const matches = rankBySemanticSimilarity(
+          queryVecs[0],
+          candidates,
+          driftContext?.driftChatId,
+        )
+        if (cancelled || matches.length === 0) return
+
+        const resolve = (driftChatId: string): TermOccurrence | undefined => {
+          const c = chatHistory.find(x => x.id === driftChatId)
+          if (!c?.metadata?.isDrift) return undefined
+          const t = c.metadata.selectedText || c.title || ''
+          if (!t) return undefined
+          return {
+            driftChatId,
+            chatTitle: c.title || t,
+            term: t,
+            parentChatId: c.metadata.parentChatId,
+          }
+        }
+
+        const merged = mergeLexicalAndSemantic(lexicalRelatedDrifts, matches, resolve)
+        if (!cancelled) setRelatedDrifts(merged)
+      } catch {
+        // Stay on the lexical result.
+      }
+    })()
+
+    return () => { cancelled = true; controller.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driftOpen, driftContext?.selectedText, driftContext?.driftChatId, lexicalRelatedDrifts, geminiApiKey])
 
   // Navigate to a prior drift surfaced in the connection strip. Reuses the same
   // path the inline drift links use, so persisted/temp conversations restore.
@@ -282,6 +375,71 @@ function App() {
       ?? undefined
     handleStartDrift(occ.term, occ.parentChatId ?? activeChatId, occ.driftChatId, existing, occ.templateType)
   }
+
+  // First-run coachmark: teach the signature drift gesture the moment a reply is
+  // on screen. Auto-dismisses for good once the user opens any drift.
+  const [seenDriftHint, markDriftHint] = useOnceFlag('drift-gesture')
+  useEffect(() => { if (driftOpen) markDriftHint() }, [driftOpen, markDriftHint])
+
+  // Rebuild the in-memory per-term lens registry from persisted driftInfos so
+  // returning to a term (and its lens threads) survives a reload — the registry
+  // is otherwise in-memory only. Fill-only: never clobber a live in-session map.
+  useEffect(() => {
+    if (!chatHistory.length) return
+    const reg = lensRegistryRef.current
+    for (const chat of chatHistory) {
+      for (const m of chat.messages) {
+        if (!m.driftInfos) continue
+        for (const d of m.driftInfos) {
+          if (!d.selectedText || !d.driftChatId) continue
+          const baseKey = `${m.id}::${d.selectedText}`
+          let lenses = reg.get(baseKey)
+          if (!lenses) { lenses = new Map(); reg.set(baseKey, lenses) }
+          const tpl = d.templateType ?? 'drift'
+          if (!lenses.has(tpl)) lenses.set(tpl, d.driftChatId)
+        }
+      }
+    }
+  }, [chatHistory])
+
+  // ── Continuity: "pick up where you left off" ─────────────────────────────────
+  // Unfinished drift trees — conversations with ≥2 explored drifts not yet woven
+  // into a synthesis. Surfaced on the empty state to invite the user back rather
+  // than letting hard-won exploration go cold. sortKey is a timestamp; the date
+  // is formatted in the JSX (formatDate is defined further down).
+  interface ResumableTree { rootId: string; title: string; driftCount: number; terms: string; sortKey: number }
+  const resumableTrees = useMemo<ResumableTree[]>(() => {
+    if (!chatHistory.length) return []
+    const byId = new Map(chatHistory.map(c => [c.id, c]))
+    const rootOf = (id: string): string => {
+      let cur = byId.get(id); const seen = new Set<string>()
+      while (cur?.metadata?.isDrift && cur.metadata.parentChatId && !seen.has(cur.id)) {
+        seen.add(cur.id); cur = byId.get(cur.metadata.parentChatId)
+      }
+      return cur?.id ?? id
+    }
+    const groups = new Map<string, ChatSession[]>()
+    for (const c of chatHistory) {
+      if (!c.metadata?.isDrift) continue
+      const root = rootOf(c.id)
+      if (!groups.has(root)) groups.set(root, [])
+      groups.get(root)!.push(c)
+    }
+    const out: ResumableTree[] = []
+    for (const [rootId, drifts] of groups) {
+      const root = byId.get(rootId)
+      if (!root || root.metadata?.isDrift || rootId === activeChatId) continue
+      const synthesized = root.messages.some(m => m.id.startsWith('synth-')) || /✦\s*Synthesis/i.test(root.lastMessage || '')
+      if (synthesized) continue
+      const real = drifts.filter(d => (d.messages?.length ?? 0) > 0 || !!d.lastMessage)
+      if (real.length < 2) continue
+      const times = real.map(d => new Date(d.createdAt as unknown as string).getTime()).filter(n => !Number.isNaN(n))
+      const sortKey = times.length ? Math.max(...times) : 0
+      const terms = real.map(d => d.metadata?.selectedText || d.title).filter(Boolean).slice(0, 3).join(' · ')
+      out.push({ rootId, title: root.title || 'Untitled', driftCount: real.length, terms, sortKey })
+    }
+    return out.sort((a, b) => b.sortKey - a.sortKey).slice(0, 3)
+  }, [chatHistory, activeChatId])
 
   // ── Lateral term-walking: sibling drifts ──────────────────────────────────────
   // The other terms that branch from the same parent as the open drift. Lets the
@@ -457,11 +615,10 @@ function App() {
     const existingMessages: Message[] =
       templateType === 'connect'
         ? []
-        : ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
-            ? chatHistory.find(c => c.id === driftChatId)!.messages
-            : null)
-          ?? driftStore.getTempConversation(driftChatId)
-          ?? [])
+        : [
+            chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+            driftStore.getTempConversation(driftChatId) ?? [],
+          ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
 
     return {
       existingMessages,
@@ -600,9 +757,6 @@ function App() {
   }
 
   // ── Sanitize stored message text (remove stale [object Object] grounding artifacts) ──
-  const sanitizeText = (text: string) =>
-    text.replace(/,?\[object Object\],?/g, '').replace(/<br\/?>$/gm, '\n')
-
   // ── Index assistant lists ───────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -615,22 +769,6 @@ function App() {
       setContextLinkVersion(v => v + 1)
     })()
   }, [messages])
-
-  // ── Coach mark helpers ──────────────────────────────────────────────────────
-  const dismissCoachMark = () => {
-    setCoachMarkActive(false)
-    setCoachMarkSeen(true)
-    localStorage.setItem('driftCoachMarkSeen', 'true')
-    if (coachMarkTimerRef.current) clearTimeout(coachMarkTimerRef.current)
-  }
-
-  // Show coach mark on first completed AI message
-  useEffect(() => {
-    if (!isTyping && !coachMarkSeen && messages.some(m => !m.isUser)) {
-      setCoachMarkActive(true)
-      coachMarkTimerRef.current = setTimeout(() => dismissCoachMark(), 6000)
-    }
-  }, [isTyping]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Global navigation handlers ──────────────────────────────────────────────
   useEffect(() => {
@@ -814,78 +952,6 @@ function App() {
     }
   }, [streamingResponse])
 
-  // ── Keyboard shortcuts ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'n') {
-        e.preventDefault()
-        createNewChat()
-      }
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'g') {
-        e.preventDefault()
-        toggleKnowledgeGraph()
-      }
-      // ⌘K / Ctrl-K — full-text search across all chats and drifts.
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault()
-        setSearchOpen(v => !v)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [chatHistory, activeChatId, messages, knowledgeGraphOpen])
-
-  // ── API connection check ────────────────────────────────────────────────────
-  useEffect(() => {
-    const checkConnection = async (showConnecting = true) => {
-      if (showConnecting) setIsConnecting(true)
-      try {
-        if (aiSettings.useDummyAI) {
-          const connected = await checkDummyConnection()
-          setApiConnected(connected)
-          setIsConnecting(false)
-          return
-        }
-
-        const hasGeminiPreset = (aiSettings.modelPresets || []).some((p: any) => p.provider === 'gemini' && p.enabled)
-        if (hasGeminiPreset) {
-          const apiKey = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
-          if (!apiKey?.trim()) {
-            uiStore.setSettingsOpen(true)
-            setApiConnected(false)
-            setIsConnecting(false)
-            return
-          }
-          const connected = await checkGeminiConnection(apiKey, aiSettings.geminiModel)
-          setApiConnected(connected)
-        } else if (aiSettings.useOpenRouter) {
-          const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey
-          if (!apiKey || apiKey.trim() === '') {
-            uiStore.setSettingsOpen(true)
-            setApiConnected(false)
-            setIsConnecting(false)
-            return
-          }
-          const connected = await checkOpenRouterConnection(apiKey, aiSettings.openRouterModel)
-          setApiConnected(connected)
-          if (!connected && !import.meta.env.VITE_OPENROUTER_API_KEY) {
-            uiStore.setSettingsOpen(true)
-          }
-        } else {
-          const connected = await checkOllamaConnection(aiSettings.ollamaUrl)
-          setApiConnected(connected)
-        }
-      } catch (error) {
-        console.error('Connection check error:', error)
-        setApiConnected(false)
-      } finally {
-        if (showConnecting) setIsConnecting(false)
-      }
-    }
-    checkConnection(true)
-    const interval = setInterval(() => checkConnection(false), 5000)
-    return () => clearInterval(interval)
-  }, [aiSettings])
 
   // ── Snippet count / saved IDs ───────────────────────────────────────────────
   useEffect(() => {
@@ -950,395 +1016,20 @@ function App() {
     modelStore.setChatModelPrefs(activeChatId, targets)
   }
 
-  // ── retroactivelyUpgradeToBroadcast ─────────────────────────────────────────
-  // When the user was in single-model mode (no broadcastGroupId on the last
-  // exchange), assign a new broadcastGroupId to the last user message and last
-  // assistant message, set activeBroadcastGroupId, and return the new group id
-  // along with context messages for sendToTarget.  Returns null if there is no
-  // qualifying last exchange to upgrade.
-  const retroactivelyUpgradeToBroadcast = (): {
-    groupId: string
-    contextMsgs: { role: string; content: string }[]
-  } | null => {
-    const currentMessages = useChatStore.getState().messages
-    // Walk backwards to find the last assistant message that has no broadcastGroupId
-    const lastAsstIndex = [...currentMessages].reduceRight((found, m, i) => {
-      if (found !== -1) return found
-      if (!m.isUser && !m.broadcastGroupId && !m.canvasId) return i
-      return -1
-    }, -1)
-    if (lastAsstIndex === -1) return null
-
-    // The user message immediately before it
-    const lastUserIndex = lastAsstIndex - 1
-    if (lastUserIndex < 0 || !currentMessages[lastUserIndex].isUser) return null
-
-    const newGroupId = 'bg-' + Date.now()
-
-    // Patch only the assistant message with the new broadcastGroupId
-    // (user messages must NOT get broadcastGroupId — the carousel renderer
-    // triggers on the first message that has it, so including the user msg
-    // would make it the first carousel card)
-    const upgraded = currentMessages.map((m, i) => {
-      if (i === lastAsstIndex) {
-        return { ...m, broadcastGroupId: newGroupId }
-      }
-      return m
-    })
-    chatStore.setMessages(upgraded)
-    setActiveBroadcastGroupId(newGroupId)
-    setContinuedModelByGroup(prev => ({ ...prev, [newGroupId]: null }))
-
-    // Context = everything up to (not including) the user message that started
-    // this exchange, so the new model receives the same context
-    const contextMsgs = currentMessages
-      .slice(0, lastUserIndex + 1)
-      .map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-
-    return { groupId: newGroupId, contextMsgs }
-  }
-
-  // ── sendToTarget: stream a single target into a new message bubble ───────────
-  // Used when a model is added after a broadcast group is already active.
-  const sendToTarget = async (
-    target: (typeof modelStore.selectedTargets)[number],
-    contextMessages: { role: string; content: string }[],
-    broadcastGroupId: string
-  ) => {
-    const aiResponseId = (Date.now() + Math.random()).toString()
-    let acc = ''
-    const aiMessage: Message = {
-      id: aiResponseId,
-      text: '',
-      isUser: false,
-      timestamp: new Date(),
-      modelTag: target.label,
-      broadcastGroupId,
-    }
-    chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
-
-    const abortController = new AbortController()
-    const signal = abortController.signal
-
-    const onChunk = (chunk: string) => {
-      acc += chunk
-      chatStore.setStreaming(acc)
-      const current = useChatStore.getState().messages
-      chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
-    }
-
-    try {
-      if (target.provider === 'gemini') {
-        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
-        if (!apiKey) throw new Error('No Gemini API key found.')
-        const model = (preset?.model || aiSettings.geminiModel) as any
-        await sendMessageToGemini(contextMessages as any, onChunk, apiKey, signal, model)
-      } else if (target.provider === 'openrouter') {
-        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
-        const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
-        if (!apiKey) throw new Error('No OpenRouter API key found.')
-        const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
-        await sendMessageToOpenRouter(contextMessages as any, onChunk, apiKey, signal, model as any)
-      } else if (target.provider === 'ollama') {
-        const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === target.key)
-        const url = preset?.serverUrl || aiSettings.ollamaUrl
-        const model = preset?.model || aiSettings.ollamaModel
-        await sendMessageToOllama(contextMessages as any, onChunk, signal, url, model)
-      } else if (target.provider === 'dummy') {
-        await sendMessageToDummy(contextMessages as any, onChunk, signal)
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Error'
-      const current = useChatStore.getState().messages
-      chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: `[Error: ${errMsg}]` } : m))
-    }
-  }
-
-  // ── sendMessage ─────────────────────────────────────────────────────────────
-  const sendMessage = async () => {
-    if (message.trim()) {
-      if (continueFromMessageId) setContinueFromMessageId(null)
-      const canvasIdSnapshot = activeCanvasId || undefined
-
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        text: message,
-        isUser: true,
-        timestamp: new Date(),
-        strandId: activeStrandId || undefined,
-        canvasId: canvasIdSnapshot
-      }
-
-      // Sending a message has weight — a light, confident thunk.
-      haptics.impact('light')
-
-      const updatedMessages = [...messages, newMessage]
-      chatStore.setMessages(updatedMessages)
-      if (activeCanvasId) setActiveCanvasId(null)
-      chatStore.setInputText('')
-      chatStore.setIsTyping(true)
-      chatStore.setStreaming('')
-
-      // Update chat title if first user message
-      const currentChat = chatHistory.find(c => c.id === activeChatId)
-      if (currentChat && currentChat.title === 'New Chat' && updatedMessages.filter(m => m.isUser).length === 1) {
-        const newTitle = message.slice(0, 50) + (message.length > 50 ? '...' : '')
-        chatStore.updateChat(activeChatId, { title: newTitle, lastMessage: message, messages: updatedMessages })
-      } else {
-        chatStore.updateChat(activeChatId, { lastMessage: message, messages: updatedMessages })
-      }
-
-      userHasScrolled.current = false
-      setTimeout(scrollToBottom, 100)
-
-      const apiMessages: (OpenRouterMessage | OllamaMessage)[] = updatedMessages.map(msg => ({
-        role: msg.isUser ? 'user' : 'assistant',
-        content: msg.text
-      }))
-
-      try {
-        const abortController = new AbortController()
-        abortControllerRef.current = abortController
-
-        const streamIntoNewMessage = async (
-          streamer: (msgs: any[], onChunk: (c: string) => void, signal?: AbortSignal) => Promise<void>,
-          modelTag?: string,
-          broadcastGroupId?: string,
-          strandId?: string,
-          canvasId?: string
-        ) => {
-          const aiResponseId = (Date.now() + Math.random()).toString()
-          let acc = ''
-          const aiMessage: Message = {
-            id: aiResponseId,
-            text: '',
-            isUser: false,
-            timestamp: new Date(),
-            modelTag,
-            broadcastGroupId,
-            strandId,
-            canvasId
-          }
-          // append empty bubble — use getState() to avoid stale closure overwriting user message
-          chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
-          // Mark this bubble as the actively-streaming one (drives the live shimmer).
-          // For broadcast we let the first lane "own" the id — the shimmer is per-message.
-          chatStore.setStreamingMessageId(aiResponseId)
-          let firstToken = true
-          try {
-            await streamer(
-              apiMessages as any,
-              (chunk) => {
-                if (firstToken) {
-                  firstToken = false
-                  // A thought materializing — a light tick as the first token lands.
-                  haptics.selection()
-                }
-                acc += chunk
-                chatStore.setStreaming(acc)
-                // patch the bubble in place
-                const current = useChatStore.getState().messages
-                chatStore.setMessages(current.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
-              },
-              abortControllerRef.current?.signal
-            )
-          } finally {
-            // Stop shimmering this bubble (only if it's still the active one).
-            if (useChatStore.getState().streamingMessageId === aiResponseId) {
-              chatStore.setStreamingMessageId(null)
-            }
-          }
-          // update lastMessage preview
-          chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(acc).slice(0, 100) })
-          return { id: aiResponseId, text: acc }
-        }
-
-        // Read selectedTargets from the store directly at send-time to avoid
-        // stale closure issues when continueWithModel has just updated the store
-        // but React hasn't re-rendered yet (so the closure-captured `selectedTargets`
-        // would still reflect the old multi-model selection).
-        const freshTargets = useModelStore.getState().selectedTargets
-        const targets = freshTargets.length ? freshTargets : [DEFAULT_TARGET]
-        const isBroadcast = targets.length > 1
-
-        if (isBroadcast) {
-          const broadcastGroupId = 'bg-' + Date.now()
-          setActiveBroadcastGroupId(broadcastGroupId)
-          setContinuedModelByGroup(prev => ({ ...prev, [broadcastGroupId]: null }))
-          const tasks: Promise<unknown>[] = []
-          for (const t of targets) {
-            if (t.provider === 'gemini') {
-              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-              const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
-              if (!apiKey) throw new Error('No Gemini API key found.')
-              const model = (preset?.model || aiSettings.geminiModel) as any
-              tasks.push(
-                streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                  sendMessageToGemini(msgs, onChunk, apiKey, signal, model)
-                , t.label, broadcastGroupId)
-              )
-            } else if (t.provider === 'openrouter') {
-              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-              const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
-              if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-              const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
-              tasks.push(
-                streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                  sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, model as any)
-                , t.label, broadcastGroupId)
-              )
-            } else if (t.provider === 'ollama') {
-              const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-              const url = preset?.serverUrl || aiSettings.ollamaUrl
-              const model = preset?.model || aiSettings.ollamaModel
-              tasks.push(
-                streamIntoNewMessage(async (msgs, onChunk, signal) => {
-                  await sendMessageToOllama(msgs, onChunk, signal!, url, model)
-                }, t.label, broadcastGroupId)
-              )
-            } else if (t.provider === 'dummy') {
-              tasks.push(
-                streamIntoNewMessage(async (msgs, onChunk, signal) =>
-                  sendMessageToDummy(msgs, onChunk, signal)
-                , t.label, broadcastGroupId)
-              )
-            }
-          }
-          await Promise.allSettled(tasks)
-        } else {
-          // Single-model send — clear any stale broadcast group so adding a model
-          // later correctly retroactively upgrades THIS exchange, not an old one
-          setActiveBroadcastGroupId(null)
-          const t = targets[0]
-          if (t.provider === 'gemini') {
-            const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (preset as any)?.apiKey || aiSettings.geminiApiKey
-            if (!apiKey) throw new Error('No Gemini API key found.')
-            const model = (preset?.model || aiSettings.geminiModel) as any
-            const result = await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-              sendMessageToGemini(msgs, onChunk, apiKey, signal, model)
-            , t.label, undefined, activeStrandId || undefined, undefined)
-            // Fire-and-forget: enrich message with AI-suggested drift highlights
-            if (result && result.text && apiKey) {
-              const capturedChatId = activeChatId
-              getSuggestedHighlights(result.text, apiKey, model)
-                .then(highlights => {
-                  if (highlights.length > 0) {
-                    chatStore.updateMessage(capturedChatId, result.id, { suggestedHighlights: highlights })
-                  }
-                })
-                .catch(() => {})
-            }
-          } else if (t.provider === 'openrouter') {
-            const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-            const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || (preset as any)?.apiKey || aiSettings.openRouterApiKey
-            if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-            const model = preset?.model || aiSettings.openRouterModel || OPENROUTER_MODELS.QWEN3
-            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-              sendMessageToOpenRouter(msgs, onChunk, apiKey, signal, model as any)
-            , t.label, undefined, activeStrandId || undefined, undefined)
-          } else if (t.provider === 'ollama') {
-            const preset = (aiSettings?.modelPresets || []).find((p: any) => p.id === t.key)
-            const url = preset?.serverUrl || aiSettings.ollamaUrl
-            const model = preset?.model || aiSettings.ollamaModel
-            await streamIntoNewMessage(async (msgs, onChunk, signal) => {
-              await sendMessageToOllama(msgs, onChunk, signal!, url, model)
-            }, t.label, undefined, activeStrandId || undefined, undefined)
-          } else if (t.provider === 'dummy') {
-            await streamIntoNewMessage(async (msgs, onChunk, signal) =>
-              sendMessageToDummy(msgs, onChunk, signal)
-            , t.label, undefined, activeStrandId || undefined, undefined)
-          }
-        }
-
-        chatStore.setStreaming('')
-      } catch (error) {
-        let errorMessage = "Failed to connect to AI model. Please check your connection."
-        if (error instanceof Error) {
-          if (aiSettings.useOpenRouter && error.message.includes('API key')) {
-            errorMessage = "OpenRouter API key not configured. Please add your API key to the .env file."
-          } else if (!aiSettings.useOpenRouter && error.message.includes('Ollama is not running')) {
-            errorMessage = "Ollama is not running. Please install and start Ollama."
-          }
-        }
-        toast.error(errorMessage)
-        const aiResponse: Message = {
-          id: (Date.now() + 1).toString(),
-          text: errorMessage,
-          isUser: false,
-          timestamp: new Date()
-        }
-        chatStore.setMessages([...chatStore.messages, aiResponse])
-        chatStore.updateChat(activeChatId, { lastMessage: 'Connection error' })
-      } finally {
-        chatStore.setIsTyping(false)
-        chatStore.setStreamingMessageId(null)
-        abortControllerRef.current = null
-        if (!userHasScrolled.current) setTimeout(scrollToBottom, 100)
-      }
-    }
-  }
-
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-      chatStore.setIsTyping(false)
-      chatStore.setStreaming('')
-      chatStore.setStreamingMessageId(null)
-    }
-  }
-
-  // ── continueWithModel ───────────────────────────────────────────────────────
-  const continueWithModel = (modelTag?: string, messageId?: string) => {
-    if (!modelTag) return
-    prevContinueTargetsRef.current = selectedTargets
-    let targetId = messageId || ''
-    if (messageId) {
-      const msg = messages.find(m => m.id === messageId)
-      const gid = msg?.broadcastGroupId
-      if (gid) {
-        setContinuedModelByGroup(prev => ({ ...prev, [gid]: modelTag }))
-        setActiveBroadcastGroupId(gid)
-      }
-      if (gid && msg?.modelTag && !isTouchDevice) {
-        // Canvas view is desktop-only; on mobile messages flow into main thread
-        const canvasId = `${gid}:${msg.modelTag}`
-        setActiveCanvasId(canvasId)
-        const lastAssistant = [...messages].reverse().find(m => m.canvasId === canvasId && !m.isUser)
-        if (lastAssistant) targetId = lastAssistant.id
-      }
-      setActiveStrandId(messageId)
-    }
-    if (targetId) setContinueFromMessageId(targetId)
-    // Try preset lookup first — handles any user-added model
-    const matchingPreset = (aiSettings.modelPresets || []).find((p) => p.label === modelTag && p.enabled)
-    if (matchingPreset) {
-      setSelectedTargetsPersist([{ provider: matchingPreset.provider, key: matchingPreset.id, label: matchingPreset.label }])
-    } else if (modelTag === 'Qwen3' || modelTag === 'Dummy A') {
-      setSelectedTargetsPersist([{ provider: 'openrouter', key: 'qwen3', label: 'Qwen3' }])
-    } else if (modelTag === 'OpenAI OSS' || modelTag === 'OpenRouter') {
-      setSelectedTargetsPersist([{ provider: 'openrouter', key: 'oss', label: 'OpenAI OSS' }])
-    } else if (modelTag === 'Ollama') {
-      setSelectedTargetsPersist([{ provider: 'ollama', key: 'ollama', label: 'Ollama' }])
-    } else if (modelTag === 'Demo AI' || modelTag === 'dummy-lite') {
-      setSelectedTargetsPersist([{ provider: 'dummy', key: 'dummy-lite', label: 'Demo AI' }])
-    } else if (modelTag === 'Gemini Flash Lite' || modelTag === 'gemini-flash-lite') {
-      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash-lite', label: 'Gemini Flash Lite' }])
-    } else if (modelTag === 'Gemini Flash' || modelTag === 'gemini-flash') {
-      setSelectedTargetsPersist([{ provider: 'gemini', key: 'gemini-flash', label: 'Gemini Flash' }])
-    }
-    setTimeout(() => {
-      if (!targetId) return
-      const el = document.querySelector(`[data-message-id="${targetId}"]`)
-      if (el) {
-        el.classList.add('highlight-message')
-        setTimeout(() => el.classList.remove('highlight-message'), 1500)
-      }
-      textareaRef.current?.focus()
-    }, 30)
-  }
+  // ── Message send / stream pipeline ──────────────────────────────────────────
+  // Single-model send + streaming. Extracted into useMessageStream; the App-owned
+  // settings, the abort + scroll refs and stripMarkdown are passed in so behavior
+  // is identical to the inline implementation.
+  const {
+    sendMessage,
+    stopGeneration,
+  } = useMessageStream({
+    aiSettings,
+    abortControllerRef,
+    userHasScrolled,
+    scrollToBottom,
+    stripMarkdown,
+  })
 
   // ── Settings ────────────────────────────────────────────────────────────────
   const handleSaveSettings = (newSettings: AISettings) => {
@@ -1361,26 +1052,14 @@ function App() {
       else merged.push(p)
     }
     handleSaveSettings({ ...aiSettings, modelPresets: merged })
-    // Auto-select first newly added preset (not already selected)
+    // Single-model: switch to the first newly added preset (not already selected)
     const firstNew = newPresets.find((p) => !selectedTargets.some((t) => t.key === p.id))
-    if (firstNew && selectedTargets.length < 3) {
-      setSelectedTargetsPersist(
-        [...selectedTargets, { provider: firstNew.provider, key: firstNew.id, label: firstNew.label }].slice(0, 3),
-      )
+    if (firstNew) {
+      setSelectedTargetsPersist([{ provider: firstNew.provider, key: firstNew.id, label: firstNew.label }])
     }
   }
 
   // ── Dates ───────────────────────────────────────────────────────────────────
-  const formatDate = (date: Date) => {
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    if (days === 0) return 'Today'
-    if (days === 1) return 'Yesterday'
-    if (days < 7) return `${days} days ago`
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-
   // ── Chat management ─────────────────────────────────────────────────────────
   const createNewChat = () => {
     if (driftOpen) driftStore.closeDrift()
@@ -1396,6 +1075,14 @@ function App() {
     chatStore.createChat()
   }
 
+  // Global keyboard shortcuts (⌘⌥N new chat · ⌘⌥G map · ⌘K search)
+  useKeyboardShortcuts({
+    onNewChat: createNewChat,
+    onToggleMap: toggleKnowledgeGraph,
+    onToggleSearch: () => setSearchOpen(v => !v),
+    onToggleHelp: () => setHelpOpen(v => !v),
+  })
+
   const switchChat = (chatId: string) => {
     if (chatId === activeChatId) return
     // Update saved message IDs for new chat
@@ -1410,342 +1097,33 @@ function App() {
     chatStore.setActiveChat(chatId)
   }
 
-  // ── Drift handlers ──────────────────────────────────────────────────────────
-  const handleStartDrift = (selectedText: string, messageId: string, existingDriftChatId?: string, reconstructedMessages?: Message[], templateType?: DriftContext['templateType'], initialSuggestions?: string[], restoredConnectCards?: string[], restoredConnectAnswers?: Record<string, Message[]>) => {
-    // Haptic weight communicates significance:
-    //  • branching deeper (panel already open → a new topic emerges) = the
-    //    defining gesture, a heavy "you went somewhere" thunk.
-    //  • opening a fresh space from the main thread = a medium "occasion."
-    haptics.impact(driftStore.driftOpen ? 'heavy' : 'medium')
-
-    const chatContainer = document.querySelector('.chat-messages-container')
-    if (chatContainer) mainScrollPosition.current = chatContainer.scrollTop
-
-    // Reset connect state tracker for the new drift context
-    connectStateRef.current = { question: null, cards: null }
-
-    // ── Nested drift: selection came from within an open drift panel ──────────
-    // If the panel is open, look for the source message in the active drift's
-    // temp conversation first. If found, record driftInfos THERE (not on the
-    // main chat message) so the tree is correctly nested in DriftMapPanel.
-    const activeDriftChatId = driftStore.driftContext?.driftChatId
-    if (driftStore.driftOpen && activeDriftChatId) {
-      const activeDriftMessages = driftStore.getTempConversation(activeDriftChatId)
-      if (activeDriftMessages) {
-        const driftSourceMsg =
-          activeDriftMessages.find(m => m.id === messageId) ??
-          activeDriftMessages.find(m => !m.isUser && m.text?.includes(selectedText))
-        if (driftSourceMsg) {
-          const existingNested = driftSourceMsg.driftInfos?.find(d => d.selectedText === selectedText)
-          const newDriftChatId = existingNested?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-          // Get the messages to persist for the parent drift (with updated driftInfos)
-          const msgsToSave = existingNested
-            ? activeDriftMessages
-            : activeDriftMessages.map(m =>
-                m.id === driftSourceMsg.id
-                  ? { ...m, hasDrift: true, driftInfos: [...(m.driftInfos || []), { selectedText, driftChatId: newDriftChatId }] }
-                  : m
-              )
-          if (!existingNested) {
-            driftStore.saveTempConversation(activeDriftChatId, msgsToSave)
-          }
-          // Persist parent drift to IndexedDB before replacing context — ensures
-          // it survives app restarts and appears correctly in the Drift Map.
-          const parentCtx = driftStore.driftContext
-          // Determine the correct parent for the current (parent) drift:
-          // if it has an ancestor drift, use that; otherwise fall back to main chat.
-          const parentCtxAncestry = parentCtx.ancestry ?? []
-          const parentDriftAncestor = [...parentCtxAncestry].reverse().find(e => e.driftChatId)
-          const parentDriftParentId = parentDriftAncestor?.driftChatId ?? activeChatId
-          chatStore.registerDriftSession({
-            id: activeDriftChatId,
-            title: `"${parentCtx.selectedText}"`,
-            messages: msgsToSave as Message[],
-            lastMessage: msgsToSave[msgsToSave.length - 1]?.text?.slice(0, 100),
-            createdAt: new Date(),
-            metadata: {
-              isDrift: true,
-              parentChatId: parentDriftParentId,
-              sourceMessageId: parentCtx.sourceMessageId,
-              selectedText: parentCtx.selectedText,
-            },
-          })
-          const msgIdx = activeDriftMessages.findIndex(m => m.id === driftSourceMsg.id)
-          const nestedContext = activeDriftMessages.slice(0, msgIdx + 1)
-          const existingNestedMessages = reconstructedMessages || driftStore.getTempConversation(newDriftChatId) || []
-          // Build breadcrumb ancestry: inherit parent ancestry + add the parent drift as a new entry
-          const parentAncestry = parentCtx.ancestry ?? [{
-            isMainChat: true,
-            label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
-            selectedText: '',
-            sourceMessageId: '',
-            contextMessages: [],
-          }]
-          driftStore.openDrift({
-            selectedText,
-            sourceMessageId: driftSourceMsg.id,
-            contextMessages: nestedContext,
-            highlightMessageId: driftSourceMsg.id,
-            driftChatId: newDriftChatId,
-            existingMessages: existingNestedMessages,
-            templateType,
-            initialSuggestions,
-            ancestry: [
-              ...parentAncestry,
-              {
-                label: `"${parentCtx.selectedText}"`,
-                selectedText: parentCtx.selectedText,
-                sourceMessageId: parentCtx.sourceMessageId,
-                contextMessages: parentCtx.contextMessages,
-                driftChatId: activeDriftChatId,
-                templateType: parentCtx.templateType,
-                connectQuestion: connectStateRef.current.question,
-                connectCards: connectStateRef.current.cards ?? undefined,
-              },
-            ],
-          })
-          return
-        }
-      }
-    }
-
-    const currentChat = chatHistory.find(c => c.id === activeChatId)
-    let currentMessages = currentChat?.messages || messages
-    if (currentMessages.length === 0) currentMessages = messages
-
-    let messageIndex = -1
-    let actualMessage: Message | null = null
-    for (let i = 0; i < currentMessages.length; i++) {
-      const msg = currentMessages[i]
-      if (!msg.isUser && msg.text && msg.text.includes(selectedText)) {
-        messageIndex = i
-        actualMessage = msg
-        break
-      }
-    }
-
-    if (messageIndex === -1) {
-      // Preserve existing drift data even if the source message text can't be found
-      const fallbackExisting = (reconstructedMessages?.length ? reconstructedMessages : null)
-        ?? (existingDriftChatId ? driftStore.getTempConversation(existingDriftChatId) : undefined)
-        ?? []
-      const cachedFallbackCards = restoredConnectCards
-        ?? (existingDriftChatId ? connectCardsCache.current.get(existingDriftChatId) : undefined)
-      driftStore.openDrift({
-        selectedText,
-        sourceMessageId: messageId,
-        contextMessages: [],
-        driftChatId: existingDriftChatId,
-        existingMessages: fallbackExisting,
-        templateType,
-        initialSuggestions,
-        connectCards: cachedFallbackCards?.length ? cachedFallbackCards : undefined,
-        connectAnswers: restoredConnectAnswers && Object.keys(restoredConnectAnswers).length > 0 ? restoredConnectAnswers : undefined,
-        ancestry: [{
-          isMainChat: true,
-          label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
-          selectedText: '',
-          sourceMessageId: '',
-          contextMessages: [],
-        }],
-      })
-      return
-    }
-
-    const contextMessages = currentMessages.slice(0, messageIndex + 1)
-
-    if (actualMessage) {
-      const existingDrift = actualMessage.driftInfos?.find(d => d.selectedText === selectedText)
-      const driftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-
-      const updatedMessages = currentMessages.map(msg =>
-        msg.id === actualMessage!.id
-          ? {
-              ...msg,
-              hasDrift: true,
-              driftInfos: existingDrift ? msg.driftInfos : [
-                ...(msg.driftInfos || []),
-                { selectedText, driftChatId, templateType }
-              ]
-            }
-          : msg
-      )
-      chatStore.setMessages(updatedMessages)
-      chatStore.updateChat(activeChatId, { messages: updatedMessages })
-    }
-
-    const finalSourceMessageId = actualMessage?.id || messageId
-    // Check actualMessage first, then search all messages as fallback (handles drifts started via Connect chips or other paths)
-    const existingDrift = actualMessage?.driftInfos?.find(d => d.selectedText === selectedText)
-      ?? currentMessages.flatMap(m => m.driftInfos ?? []).find(d => d.selectedText === selectedText)
-    const finalDriftChatId = existingDrift?.driftChatId || existingDriftChatId || `drift-temp-${Date.now()}`
-
-    // Resolve cached content + the effective lens for an ALREADY-explored drift.
-    // Caller-supplied values (explicit param / restored cards/answers) win; the
-    // resolver fills the gaps (e.g. an inline link that omits templateType for a
-    // term first explored as Connect) so we never re-fetch an explored combo.
-    const restore = resolveDriftRestore(finalDriftChatId, finalSourceMessageId, selectedText, currentMessages)
-    const effectiveTemplateType = templateType ?? existingDrift?.templateType ?? restore.templateType
-
-    const cachedConnectCards = restoredConnectCards
-      ?? connectCardsCache.current.get(finalDriftChatId)
-      ?? restore.connectCards
-    const cachedConnectAnswers = restoredConnectAnswers
-      ?? existingDrift?.connectAnswers
-      ?? restore.connectAnswers
-
-    // For Connect, existingMessages MUST be [] (prose poisons the card parser).
-    const existingMessagesToUse: Message[] = effectiveTemplateType === 'connect'
-      ? []
-      : ((reconstructedMessages?.length ? reconstructedMessages : null)
-        ?? driftStore.getTempConversation(finalDriftChatId)
-        ?? [])
-
-    driftStore.openDrift({
-      selectedText,
-      sourceMessageId: finalSourceMessageId,
-      contextMessages,
-      highlightMessageId: actualMessage?.id,
-      driftChatId: finalDriftChatId,
-      existingMessages: existingMessagesToUse,
-      templateType: effectiveTemplateType,
-      initialSuggestions,
-      connectCards: cachedConnectCards?.length ? cachedConnectCards : undefined,
-      connectAnswers: cachedConnectAnswers && Object.keys(cachedConnectAnswers).length > 0 ? cachedConnectAnswers : undefined,
-      ancestry: [{
-        isMainChat: true,
-        label: chatHistory.find(c => c.id === activeChatId)?.title || 'Chat',
-        selectedText: '',
-        sourceMessageId: '',
-        contextMessages: [],
-      }],
-    })
-  }
-
-  const handleCloseDrift = (driftMessages?: Message[]) => {
-    // Read context before closing (driftContext is stable until next openDrift)
-    const { selectedText, sourceMessageId, driftChatId, ancestry } = driftStore.driftContext
-
-    // Remember this drift so the user can reopen it in one tap from the header —
-    // only worth offering if there's an actual conversation to return to.
-    if (driftChatId && selectedText && driftMessages && driftMessages.length > 0) {
-      const rootEntry = ancestry?.[0]
-      setLastDrift({
-        driftChatId,
-        selectedText,
-        parentChatId: rootEntry?.isMainChat ? activeChatId : (ancestry?.find(e => e.driftChatId)?.driftChatId ?? activeChatId),
-        sourceMessageId: sourceMessageId ?? '',
-      })
-    }
-
-    driftStore.closeDrift(driftMessages)
-
-    // Auto-persist the drift conversation so it survives app restarts.
-    // Creates a ghost ChatSession in chatHistory + IndexedDB if not already there.
-    if (driftMessages && driftMessages.length > 0 && driftChatId) {
-      // Determine the correct parent: for nested drifts, the parent is the
-      // immediately preceding drift in the ancestry chain (the last entry with a
-      // driftChatId). For top-level drifts the parent is the main chat (activeChatId).
-      const parentAncestry = ancestry ?? []
-      const lastDriftAncestor = [...parentAncestry].reverse().find(e => e.driftChatId)
-      const correctParentChatId = lastDriftAncestor?.driftChatId ?? activeChatId
-
-      chatStore.registerDriftSession({
-        id: driftChatId,
-        title: `"${selectedText}"`,
-        messages: driftMessages as Message[],
-        lastMessage: driftMessages[driftMessages.length - 1]?.text?.slice(0, 100),
-        createdAt: new Date(),
-        metadata: {
-          isDrift: true,
-          parentChatId: correctParentChatId,
-          sourceMessageId,
-          selectedText,
-        },
-      })
-    }
-
-    setTimeout(() => {
-      const chatContainer = document.querySelector('.chat-messages-container')
-      if (chatContainer) chatContainer.scrollTop = mainScrollPosition.current
-    }, 150)
-  }
-
-  // ── Reopen last drift ─────────────────────────────────────────────────────────
-  // One tap returns the user to the branch they most recently left, switching to
-  // its parent chat first if needed. Never make them hunt for where they were.
-  const reopenLastDrift = () => {
-    if (!lastDrift) return
-    haptics.impact('medium')
-    const { driftChatId, selectedText, parentChatId, sourceMessageId } = lastDrift
-
-    if (parentChatId && parentChatId !== activeChatId) {
-      switchChat(parentChatId)
-    }
-
-    const parentMessages = chatHistory.find(c => c.id === parentChatId)?.messages ?? messages
-    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
-
-    // Restore cached content (regular messages OR Connect cards/answers + the
-    // correct templateType) so the panel never re-fetches an explored drift.
-    const restore = resolveDriftRestore(driftChatId, sourceMessageId, selectedText, parentMessages)
-
-    connectStateRef.current = { question: null, cards: null }
-    driftStore.openDrift({
-      selectedText,
-      sourceMessageId,
-      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
-      highlightMessageId: sourceMessageId || undefined,
-      driftChatId,
-      existingMessages: restore.existingMessages,
-      templateType: restore.templateType,
-      connectCards: restore.connectCards,
-      connectAnswers: restore.connectAnswers,
-      ancestry: [{
-        isMainChat: true,
-        label: chatHistory.find(c => c.id === parentChatId)?.title || 'Chat',
-        selectedText: '',
-        sourceMessageId: '',
-        contextMessages: [],
-      }],
-    })
-  }
-
-  // ── Breadcrumb navigation ────────────────────────────────────────────────────
-  const handleNavigateToBreadcrumb = (index: number) => {
-    const { ancestry } = driftStore.driftContext
-    if (!ancestry || index >= ancestry.length) return
-
-    if (index === 0) {
-      // Navigate to main chat — close the drift panel (temp messages already
-      // synced to driftStore via onMessagesChange, so no data loss)
-      driftStore.closeDrift()
-      return
-    }
-
-    // Navigate to an ancestor drift
-    const entry = ancestry[index]
-    if (!entry.driftChatId) return
-
-    const existingMsgs =
-      driftStore.getTempConversation(entry.driftChatId) ??
-      (chatHistory.find(c => c.id === entry.driftChatId)?.messages ?? [])
-
-    // Reset connect tracker — the restored drift will fire onConnectStateChange to update it
-    connectStateRef.current = { question: null, cards: null }
-
-    driftStore.openDrift({
-      selectedText: entry.selectedText,
-      sourceMessageId: entry.sourceMessageId,
-      contextMessages: entry.contextMessages,
-      driftChatId: entry.driftChatId,
-      existingMessages: existingMsgs,
-      ancestry: ancestry.slice(0, index),
-      templateType: entry.templateType,
-      connectQuestion: entry.connectQuestion,
-      connectCards: entry.connectCards,
-    })
-  }
+  // ── Drift actions ─────────────────────────────────────────────────────────────
+  // The full drift action layer: navigation + undo (reopen last / breadcrumb /
+  // undo push / undo save-as-chat) plus the signature start / close / push / save
+  // lifecycle. Extracted into useDriftActions; the App-owned refs, setters and
+  // stripMarkdown are passed through so behavior is identical to the inline impl.
+  const {
+    reopenLastDrift,
+    handleNavigateToBreadcrumb,
+    handleUndoPushToMain,
+    handleUndoSaveAsChat,
+    handleStartDrift,
+    handleCloseDrift,
+    handleSaveDriftAsChat,
+    handlePushDriftToMain,
+    handleSavePushedDriftAsChat,
+  } = useDriftActions({
+    lastDrift,
+    switchChat,
+    resolveDriftRestore,
+    connectStateRef,
+    mainScrollPosition,
+    connectCardsCache,
+    setLastDrift,
+    setJustPromotedChatId,
+    justPromotedTimerRef,
+    stripMarkdown,
+  })
 
   // ── Message actions ─────────────────────────────────────────────────────────
   const handleCopyMessage = async (text: string, messageId: string) => {
@@ -1784,69 +1162,6 @@ function App() {
   }
 
   // ── Drift save/push operations ──────────────────────────────────────────────
-  const handleSaveDriftAsChat = (driftMessages: Message[], title: string, metadata: any) => {
-    const newChatId = metadata.id || 'drift-' + Date.now().toString()
-    const newChat: ChatSession = {
-      id: newChatId,
-      title,
-      messages: driftMessages,
-      lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift conversation'),
-      createdAt: new Date(),
-      metadata: {
-        ...metadata,
-        parentChatId: activeChatId,
-        id: newChatId
-      }
-    }
-    // Insert the new chat at the top of history using the store's setState
-    useChatStore.setState(state => ({
-      chatHistory: [newChat, ...state.chatHistory.filter(c => c.id !== newChatId)]
-    }))
-
-    const updatedMessages = messages.map(msg => {
-      if (msg.id === metadata.sourceMessageId ||
-          (msg.driftInfos && msg.driftInfos.some(d =>
-            d.selectedText === metadata.selectedText &&
-            d.driftChatId.startsWith('drift-temp-')))) {
-        return {
-          ...msg,
-          hasDrift: true,
-          driftInfos: [
-            ...(msg.driftInfos?.filter(d => d.selectedText !== metadata.selectedText) || []),
-            { selectedText: metadata.selectedText, driftChatId: newChatId }
-          ]
-        }
-      }
-      return msg
-    })
-
-    chatStore.setMessages(updatedMessages)
-  }
-
-  const handleUndoPushToMain = (sourceMessageId: string) => {
-    const updatedMessages = messages.filter(msg =>
-      !msg.isDriftPush || msg.driftPushMetadata?.sourceMessageId !== sourceMessageId
-    )
-    chatStore.setMessages(updatedMessages)
-  }
-
-  const handleUndoSaveAsChat = (chatId: string) => {
-    chatStore.deleteChat(chatId)
-    const updatedMessages = messages.map(msg => {
-      if (msg.hasDrift && msg.driftInfos?.some(d => d.driftChatId === chatId)) {
-        const remainingDrifts = msg.driftInfos.filter(d => d.driftChatId !== chatId)
-        if (remainingDrifts.length === 0) {
-          const { driftInfos, hasDrift, ...restMsg } = msg
-          return restMsg
-        } else {
-          return { ...msg, driftInfos: remainingDrifts }
-        }
-      }
-      return msg
-    })
-    chatStore.setMessages(updatedMessages)
-  }
-
   const handleUpdatePushedDriftSaveStatus = (sourceMessageId: string) => {
     const updatedMessages = messages.map(msg => {
       if (msg.isDriftPush && msg.driftPushMetadata?.sourceMessageId === sourceMessageId) {
@@ -1860,196 +1175,17 @@ function App() {
     chatStore.setMessages(updatedMessages)
   }
 
-  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => {
-    const pushCallId = Math.random().toString(36).substring(7)
-    console.log(`[PUSH ${pushCallId}] handlePushDriftToMain called`)
-
-    const originalSourceId = sourceMessageId.split('-push-')[0].split('-single-')[0]
-    const driftSignature = driftMessages.map(m => `${m.isUser}:${m.text}`).join('|||')
-
-    const duplicateExists = (() => {
-      const existingPushWithSameId = messages.filter(msg =>
-        msg.isDriftPush &&
-        msg.driftPushMetadata?.sourceMessageId === sourceMessageId &&
-        !msg.text.startsWith('📌 Drift exploration')
-      )
-      if (existingPushWithSameId.length > 0) return true
-
-      const pushGroups = new Map<string, Message[]>()
-      messages.forEach(msg => {
-        if (msg.isDriftPush && msg.driftPushMetadata?.sourceMessageId) {
-          const groupId = msg.driftPushMetadata.sourceMessageId
-          const groupOriginalSource = groupId.split('-push-')[0].split('-single-')[0]
-          if (groupOriginalSource === originalSourceId) {
-            if (!pushGroups.has(groupId)) pushGroups.set(groupId, [])
-            if (!msg.text.startsWith('📌 Drift exploration')) {
-              pushGroups.get(groupId)!.push(msg)
-            }
-          }
-        }
-      })
-      for (const [, groupMessages] of pushGroups) {
-        const groupSignature = groupMessages.map(m => `${m.isUser}:${m.text}`).join('|||')
-        if (groupSignature === driftSignature) return true
-      }
-      return false
-    })()
-
-    if (duplicateExists) {
-      console.log(`[PUSH ${pushCallId}] BLOCKED - Duplicate detected`)
-      return
-    }
-
-    const actualDriftChatId = driftChatId || 'drift-pushed-' + Date.now()
-    const originMsg = messages.find(m => m.id === originalSourceId)
-    const driftModelTag = driftMessages.find(m => !m.isUser && !!m.modelTag)?.modelTag
-    const originModelTag = driftModelTag || originMsg?.modelTag
-    let originSide: 'left' | 'right' | undefined = undefined
-    if (originMsg?.broadcastGroupId) {
-      const groupMsgs = messages.filter(m => m.broadcastGroupId === originMsg.broadcastGroupId && !m.canvasId && !!m.modelTag)
-      const idx = groupMsgs.findIndex(m => m.id === originMsg.id)
-      if (idx >= 0) originSide = idx === 0 ? 'left' : 'right'
-    }
-
-    const separatorMessage: Message = {
-      id: 'drift-push-' + Date.now(),
-      text: `📌 Drift exploration of "${selectedText}"`,
-      isUser: false,
-      timestamp: new Date(),
-      isDriftPush: true,
-      driftPushMetadata: {
-        selectedText,
-        sourceMessageId,
-        parentChatId: activeChatId,
-        wasSavedAsChat,
-        userQuestion,
-        driftChatId: actualDriftChatId,
-        originSide,
-        originModelTag
-      },
-      modelTag: originModelTag
-    }
-
-    const messagesWithDriftMarked = messages.map(msg => {
-      if (msg.driftInfos?.some(d => d.selectedText === selectedText)) {
-        const existingDriftIndex = msg.driftInfos.findIndex(d => d.selectedText === selectedText)
-        const updatedDriftInfos = [...msg.driftInfos]
-        updatedDriftInfos[existingDriftIndex] = { selectedText, driftChatId: actualDriftChatId }
-        return { ...msg, hasDrift: true, driftInfos: updatedDriftInfos }
-      }
-      if (msg.id === originalSourceId && !msg.isDriftPush) {
-        return {
-          ...msg,
-          hasDrift: true,
-          driftInfos: [
-            ...(msg.driftInfos || []),
-            { selectedText, driftChatId: actualDriftChatId }
-          ]
-        }
-      }
-      if (!msg.isDriftPush && !msg.isUser && msg.text && msg.text.includes(selectedText)) {
-        if (!msg.driftInfos?.some(d => d.selectedText === selectedText)) {
-          return {
-            ...msg,
-            hasDrift: true,
-            driftInfos: [
-              ...(msg.driftInfos || []),
-              { selectedText, driftChatId: actualDriftChatId }
-            ]
-          }
-        }
-      }
-      return msg
-    })
-
-    const driftMessagesWithMetadata = driftMessages.map((msg, idx) => ({
-      ...msg,
-      isUser: false,
-      originalIsUser: msg.isUser,
-      isHiddenContext: msg.isUser ? true : (msg as any).isHiddenContext,
-      id: `${sourceMessageId}-msg-${idx}-${Date.now()}`,
-      originalDriftId: msg.id,
-      isDriftPush: true,
-      modelTag: originModelTag,
-      driftPushMetadata: {
-        selectedText,
-        sourceMessageId,
-        parentChatId: activeChatId,
-        wasSavedAsChat,
-        userQuestion,
-        driftChatId: actualDriftChatId,
-        originSide,
-        originModelTag
-      }
-    }))
-
-    const updatedMessages = [...messagesWithDriftMarked, separatorMessage, ...driftMessagesWithMetadata]
-    const forceRefreshMessages = updatedMessages.map(msg => ({ ...msg }))
-    chatStore.setMessages(forceRefreshMessages)
-    const lastDriftMessage = driftMessagesWithMetadata[driftMessagesWithMetadata.length - 1]
-    chatStore.updateChat(activeChatId, {
-      messages: forceRefreshMessages,
-      lastMessage: stripMarkdown(lastDriftMessage?.text || 'Drift pushed')
-    })
-
-    // Promoting an idea: this is a deliberate, satisfying gesture — a discovery
-    // moving into the more permanent main thread. Confirm it physically + visibly.
-    // (Undo stays available via the panel's push button toggle.)
-    haptics.success()
-    const promoteLabel = selectedText.length > 28 ? selectedText.slice(0, 28) + '…' : selectedText
-    toast.success(`Promoted "${promoteLabel}" to the main thread`)
-
-    // Trigger a one-time settle-in arrival for the freshly-promoted messages.
-    setJustPromotedChatId(actualDriftChatId)
-    if (justPromotedTimerRef.current) clearTimeout(justPromotedTimerRef.current)
-    justPromotedTimerRef.current = setTimeout(() => setJustPromotedChatId(null), 1200)
-  }
-
   // ── Context menu handlers ───────────────────────────────────────────────────
-  const handleContextMenu = (e: React.MouseEvent, chatId: string) => {
-    e.preventDefault()
-    uiStore.setContextMenu({ x: e.clientX, y: e.clientY, chatId })
-  }
-
-  const handleRenameChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId)
-    if (chat) {
-      uiStore.setEditingChatId(chatId)
-      uiStore.setEditingTitle(chat.title)
-    }
-  }
-
-  const handleSaveRename = () => {
-    if (editingChatId && editingTitle.trim()) {
-      chatStore.updateChat(editingChatId, { title: editingTitle.trim() })
-    }
-    uiStore.setEditingChatId(null)
-    uiStore.setEditingTitle('')
-  }
-
-  const handleDuplicateChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId)
-    if (chat) {
-      const newChat: ChatSession = {
-        ...chat,
-        id: Date.now().toString(),
-        title: `${chat.title} (Copy)`,
-        createdAt: new Date()
-      }
-      useChatStore.setState(state => ({
-        chatHistory: [newChat, ...state.chatHistory]
-      }))
-    }
-  }
-
-  const handleDeleteChat = (chatId: string) => {
-    if (confirm('Are you sure you want to delete this chat?')) {
-      chatStore.deleteChat(chatId)
-    }
-  }
-
-  const handleTogglePin = (chatId: string) => uiStore.togglePinnedChat(chatId)
-  const handleToggleStar = (chatId: string) => uiStore.toggleStarredChat(chatId)
+  // Sidebar chat CRUD (rename/duplicate/delete/pin/star) + context menu.
+  const {
+    handleContextMenu,
+    handleRenameChat,
+    handleSaveRename,
+    handleDuplicateChat,
+    handleDeleteChat,
+    handleTogglePin,
+    handleToggleStar
+  } = useChatActions()
 
   const handleNavigateToSource = (chatId: string, messageId: string) => {
     switchChat(chatId)
@@ -2075,104 +1211,8 @@ function App() {
     }
   }
 
-  const handleSavePushedDriftAsChat = (msg: Message) => {
-    if (!msg.isDriftPush || !msg.driftPushMetadata) return
-    if (msg.driftPushMetadata.wasSavedAsChat) return
-
-    const driftChatId = msg.driftPushMetadata.driftChatId
-    const sourceMessageId = msg.driftPushMetadata.sourceMessageId
-
-    const driftMessages = messages.filter(m => {
-      if (!m.isDriftPush || m.text.startsWith('📌')) return false
-      if (driftChatId && m.driftPushMetadata?.driftChatId === driftChatId) return true
-      return m.driftPushMetadata?.sourceMessageId === sourceMessageId
-    })
-
-    if (driftMessages.length === 0) return
-
-    const newChatId = 'drift-' + Date.now().toString()
-    const title = `Drift: ${msg.driftPushMetadata.selectedText.slice(0, 30)}${msg.driftPushMetadata.selectedText.length > 30 ? '...' : ''}`
-
-    const newChat: ChatSession = {
-      id: newChatId,
-      title,
-      messages: driftMessages.map(m => ({
-        ...m,
-        isDriftPush: false,
-        driftPushMetadata: undefined
-      })),
-      lastMessage: stripMarkdown(driftMessages[driftMessages.length - 1]?.text || 'Drift conversation'),
-      createdAt: new Date(),
-      metadata: {
-        isDrift: true,
-        parentChatId: msg.driftPushMetadata.parentChatId,
-        sourceMessageId: msg.driftPushMetadata.sourceMessageId,
-        selectedText: msg.driftPushMetadata.selectedText
-      }
-    }
-
-    useChatStore.setState(state => ({
-      chatHistory: [newChat, ...state.chatHistory]
-    }))
-
-    const updatedMessages = messages.map(m => {
-      if (m.id === sourceMessageId) {
-        return {
-          ...m,
-          hasDrift: true,
-          driftInfos: [
-            ...(m.driftInfos || []),
-            { selectedText: msg.driftPushMetadata!.selectedText, driftChatId: newChatId }
-          ]
-        }
-      }
-      if (m.isDriftPush && m.driftPushMetadata) {
-        const shouldUpdate = (driftChatId && m.driftPushMetadata.driftChatId === driftChatId) ||
-          m.driftPushMetadata.sourceMessageId === sourceMessageId
-        if (shouldUpdate) {
-          return {
-            ...m,
-            driftPushMetadata: { ...m.driftPushMetadata, wasSavedAsChat: true, driftChatId: newChatId }
-          }
-        }
-      }
-      return m
-    })
-
-    chatStore.setMessages(updatedMessages)
-  }
-
-  // ── Auth ────────────────────────────────────────────────────────────────────
-  const handleLogin = (username: string) => {
-    setCurrentUser(username)
-    setIsAuthenticated(true)
-    localStorage.setItem('driftUser', username)
-  }
-
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    setCurrentUser(null)
-    localStorage.removeItem('driftUser')
-  }
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem('driftUser')
-    if (savedUser) {
-      setCurrentUser(savedUser)
-      setIsAuthenticated(true)
-    }
-  }, [])
-
   // ── Close user menu on outside click ───────────────────────────────────────
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!userMenuOpen) return
-      const el = userMenuRef.current
-      if (el && !el.contains(e.target as Node)) uiStore.setUserMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [userMenuOpen])
+  useOnOutsideClick(userMenuRef, userMenuOpen, () => uiStore.setUserMenuOpen(false))
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const filteredChats = chatHistory.filter(chat =>
@@ -2445,10 +1485,10 @@ function App() {
       <div
         className={`
           flex-1 min-w-0 flex flex-col relative
-          transition-all duration-150 ease-in-out
+          transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-          ${(driftOpen || knowledgeGraphOpen) ? 'lg:mr-[480px]' : 'mr-0'}
         `}
+        style={{ marginRight: mainRightMargin }}
         onTouchStart={swipeHandlers.onTouchStart}
         onTouchEnd={swipeHandlers.onTouchEnd}
       >
@@ -2493,6 +1533,17 @@ function App() {
                       {snippetCount}
                     </span>
                   )}
+                </button>
+
+                {/* Keyboard & Tips — the single discoverable place that explains the
+                    shortcuts and what the icon-only controls (Snippets, Map) + drift do. */}
+                <button
+                  onClick={() => setHelpOpen(true)}
+                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group shrink-0"
+                  title="Keyboard & tips (?)"
+                  aria-label="Keyboard shortcuts and tips"
+                >
+                  <HelpCircle className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
                 </button>
 
                 {/* Current-chat context — always shows where you are. For a drift
@@ -2616,8 +1667,12 @@ function App() {
               {/* Drift Tree Button — first-class control whenever the thread has
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
+                <div className="relative">
+                {mapSpotlight && (
+                  <span className="absolute inset-0 rounded-full border border-accent-violet/60 animate-ping pointer-events-none" aria-hidden />
+                )}
                 <Pressable
-                  onClick={() => { haptics.selection(); toggleKnowledgeGraph() }}
+                  onClick={() => { haptics.selection(); endMapSpotlight(); toggleKnowledgeGraph() }}
                   haptic={null}
                   title="Drift Map (⌘⌥G)"
                   className={`h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition-all duration-150 relative
@@ -2644,6 +1699,18 @@ function App() {
                     {totalDriftCount}
                   </span>
                 </Pressable>
+                {mapSpotlight && (
+                  <div className="absolute top-full right-0 mt-2 z-30 animate-[fadeIn_0.2s_ease]">
+                    <button
+                      onClick={() => { haptics.selection(); endMapSpotlight(); toggleKnowledgeGraph() }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-surface/95 backdrop-blur-xl border border-accent-violet/40 shadow-[0_4px_20px_rgba(168,85,247,0.3)] text-[12px] font-medium text-accent-violet whitespace-nowrap"
+                    >
+                      See your first drift on the map
+                      <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
+                    </button>
+                  </div>
+                )}
+                </div>
               )}
               {/* New Chat Button */}
               <button
@@ -2789,12 +1856,76 @@ function App() {
                       Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
                     </p>
                   </div>
+                  {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
+                      so the drift gesture has something to act on. Shown only to genuinely
+                      new users (returning users get "pick up where you left off" below). */}
+                  {resumableTrees.length === 0 && (
+                    <div className="w-full max-w-[440px] mt-9">
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3">Try one to start</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {[
+                          'Why did the Roman Empire really fall?',
+                          'Explain quantum entanglement without the jargon',
+                          'Compare Stoicism and Buddhism on suffering',
+                          'How does caffeine actually work in the brain?',
+                        ].map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => { haptics.selection(); sendMessage(p) }}
+                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                          >
+                            <span className="flex items-center gap-2">
+                              <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />
+                              <span className="text-text-secondary group-hover:text-text-primary text-[13.5px] leading-snug transition-colors">{p}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {resumableTrees.length > 0 && (
+                    <div className="w-full max-w-[340px] mt-9 text-left">
+                      <div className="flex items-center gap-2 mb-3 px-1">
+                        <CornerUpLeft className="w-3.5 h-3.5 text-accent-violet/60 shrink-0" />
+                        <span className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold">Pick up where you left off</span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {resumableTrees.map(t => (
+                          <div
+                            key={t.rootId}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => { haptics.selection(); switchChat(t.rootId) }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); haptics.selection(); switchChat(t.rootId) } }}
+                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-text-primary text-[14px] font-medium truncate" dir="auto">{t.title}</span>
+                              <span className="text-text-muted text-[11px] shrink-0 tabular-nums">{formatDate(new Date(t.sortKey || Date.now()))}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <span className="text-text-muted text-[12px] truncate" dir="auto">{t.terms}</span>
+                              <span className="flex items-center gap-1 shrink-0 text-accent-violet/80 text-[11px] font-medium">
+                                <GitBranch className="w-3 h-3" /> {t.driftCount}
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
+                              disabled={synthesizing}
+                              className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
+                            >
+                              <span className="text-[13px] leading-none">✦</span> Bring it home
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Message list */}
               {messages.map((msg, index) => {
-                if (msg.canvasId) return null
                 const isDriftHeader = msg.isDriftPush && msg.text.startsWith('📌')
                 const isDriftMessage = msg.isDriftPush && !msg.text.startsWith('📌')
                 const prevMsg = index > 0 ? messages[index - 1] : null
@@ -2810,147 +1941,37 @@ function App() {
                 )
                 const isPlainAI = !msg.isUser && !isDriftMessage
                 const isSynthesis = isPlainAI && msg.id.startsWith('synth-')
+                // Synthesis ends with a "**Next:**" open question — pull it out so it
+                // can be rendered as a tappable "explore next" chip (and stripped from
+                // the prose body so it isn't duplicated).
+                const synthNext = isSynthesis ? (msg.text.match(/\*\*Next:\*\*\s*([\s\S]+?)\s*$/)?.[1]?.trim() || null) : null
+                const synthBody = synthNext ? msg.text.replace(/\n*\*\*Next:\*\*[\s\S]*$/, '').trim() : msg.text
+                // The artifact renders its own header band, so strip the leading
+                // "## ✦ Synthesis · N drifts" heading from the prose we display.
+                const synthDisplay = isSynthesis
+                  ? synthBody.replace(/^##\s*✦?\s*Synthesis[^\n]*\n+/i, '').trim()
+                  : msg.text
+                // The drift branches this synthesis was woven from — derived live from
+                // the tree (survives reloads; chips open each source drift).
+                const synthSources: { term: string; chatId: string }[] = []
+                if (isSynthesis) {
+                  const seenSrc = new Set<string>()
+                  const walkSrc = (pid: string) => {
+                    for (const c of chatHistory) {
+                      if (seenSrc.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
+                      seenSrc.add(c.id)
+                      synthSources.push({ term: (c.metadata?.selectedText || c.title || 'Drift').trim(), chatId: c.id })
+                      walkSrc(c.id)
+                    }
+                  }
+                  walkSrc(activeChatId)
+                }
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
-                // Broadcast group rendering
-                if (msg.broadcastGroupId) {
-                  if (index > 0 && messages[index - 1]?.broadcastGroupId === msg.broadcastGroupId) return null
-                  const groupId = msg.broadcastGroupId
-                  const groupMessages: Message[] = []
-                  for (let j = index; j < messages.length; j++) {
-                    const m = messages[j]
-                    if (m.broadcastGroupId === groupId) groupMessages.push(m)
-                    else break
-                  }
-                  return (
-                    <div
-                      key={`bg-${groupId}-${index}`}
-                      className="max-w-5xl mx-auto px-6"
-                      data-broadcast-group={groupId}
-                    >
-                      {/* Mobile: horizontal scroll-snap carousel */}
-                      <div className="md:hidden">
-                        <MultiModelCarousel
-                          messages={groupMessages}
-                          broadcastGroupId={groupId}
-                          activeBroadcastGroupId={activeBroadcastGroupId}
-                          onContinueWith={continueWithModel}
-                          onActiveCardChange={(modelTag) => setActiveCarouselModel(modelTag)}
-                        />
-                      </div>
-
-                      {/* Desktop: existing 2-column grid */}
-                      <div className="hidden md:block">
-                      <div className="grid gap-4 items-start md:grid-cols-2">
-                        {groupMessages.map((gm) => (
-                          <div key={`resp-${gm.id}`} className="w-full">
-                            <div className={`flex justify-start animate-fade-up relative group`}>
-                              <div
-                                className={`ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary shadow-lg shadow-black/20 rounded-2xl px-5 ${gm.modelTag ? 'pt-7 pb-3' : 'py-3'} relative transition-all duration-100 hover:scale-[1.02] hover:border-accent-violet/30 select-text`}
-                                data-message-id={gm.id}
-                              >
-                                {gm.modelTag && (() => {
-                                  const canvasId = `${groupId}:${gm.modelTag}`
-                                  return (
-                                    <button
-                                      onClick={() => setActiveCanvasId(canvasId)}
-                                      className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
-                                      title={`Show ${gm.modelTag} thread`}
-                                    >
-                                      {gm.modelTag}
-                                    </button>
-                                  )
-                                })()}
-                                {gm.modelTag && gm.broadcastGroupId === activeBroadcastGroupId && (
-                                  <button
-                                    onClick={() => continueWithModel(gm.modelTag, gm.id)}
-                                    className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
-                                    title={`Continue with ${gm.modelTag}`}
-                                  >
-                                    Continue
-                                  </button>
-                                )}
-                                {gm.text && gm.text.length > 0 ? (
-                                  <div className="prose prose-invert prose-sm max-w-none relative text-[13px] leading-6">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}
-                                      components={{
-                                        p: ({ children }) => <p>{processEntityText(children, gm.id)}</p>,
-                                        li: ({ children }) => <li>{processEntityText(children, gm.id)}</li>,
-                                        th: ({ children }) => <th>{processEntityText(children, gm.id)}</th>,
-                                        td: ({ children }) => <td>{processEntityText(children, gm.id)}</td>,
-                                      }}
-                                    >
-                                      {gm.text.replace(/```([\s\S]*?)```/g, (_m, p1) => `\n\n\`\`\`\n${p1}\n\`\`\`\n\n`)}
-                                    </ReactMarkdown>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-1 py-1">
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Per-model continuation canvases */}
-                        {groupMessages.map((gm) => {
-                          const canvasId = `${groupId}:${gm.modelTag}`
-                          const canvasMsgs = messages.filter(m => m.canvasId === canvasId)
-                          const lastAssistant = [...canvasMsgs].reverse().find(m => !m.isUser && m.modelTag)
-                          return (
-                            <div key={`canvas-${gm.id}`} className="w-full">
-                              {canvasMsgs.length > 0 && (
-                                <div className={`mt-3 pl-3 border-l ${activeCanvasId === canvasId ? 'border-accent-violet/15' : 'border-dark-border/30'} transition-colors`}>
-                                  {canvasMsgs.map((cm) => (
-                                    <div key={cm.id} className="mb-3">
-                                      <div className={`flex ${cm.isUser ? 'justify-end' : 'justify-start'} relative`}>
-                                        <div data-message-id={cm.id} className={`${cm.isUser
-                                          ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white'
-                                          : 'ai-message bg-dark-bubble border border-dark-border/50 text-text-secondary'} rounded-2xl px-5 py-3 shadow-lg max-w-[85%] ${continueFromMessageId === cm.id ? 'ring-1 ring-accent-violet/25' : ''}`}
-                                        >
-                                          <div className={`${getRTLClassName(cm.text)}`} dir={getTextDirection(cm.text)}>
-                                            <ReactMarkdown className="prose prose-sm prose-invert max-w-none text-[13px] leading-6"
-                                              remarkPlugins={[remarkGfm]}
-                                              components={{
-                                                p: ({ children }) => <p>{processEntityText(children, cm.id)}</p>,
-                                                li: ({ children }) => <li>{processEntityText(children, cm.id)}</li>,
-                                                th: ({ children }) => <th>{processEntityText(children, cm.id)}</th>,
-                                                td: ({ children }) => <td>{processEntityText(children, cm.id)}</td>,
-                                              }}
-                                            >
-                                              {cm.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')}
-                                            </ReactMarkdown>
-                                          </div>
-                                        </div>
-                                        {lastAssistant && cm.id === lastAssistant.id && (
-                                          <button
-                                            onClick={() => continueWithModel(lastAssistant.modelTag, lastAssistant.id)}
-                                            className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[10px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors opacity-0 group-hover:opacity-100"
-                                          >
-                                            Continue
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      </div> {/* end hidden md:block */}
-                    </div>
-                  )
-                }
-
                 return msg.text ? (
                   <div
-                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${msg.strandId && msg.strandId === activeStrandId ? 'pl-3 border-l-2 border-accent-violet/30' : ''} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
+                    className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
                     data-drift-promoted={isDriftMessage ? 'true' : undefined}
                     key={msg.id}
                   >
@@ -3068,10 +2089,10 @@ function App() {
                                   }))
 
                                 const finalDriftConversation = driftConversation.length > 0 &&
-                                  !driftConversation[0].text.includes('What would you like to know about') ?
+                                  !(driftConversation[0].text.includes('What would you like to know about') || driftConversation[0].text.includes('מה תרצה לדעת על')) ?
                                   [{
                                     id: 'drift-system-reconstructed',
-                                    text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                    text: /[֐-׿]/.test(msg.driftPushMetadata!.selectedText) ? `מה תרצה לדעת על "${msg.driftPushMetadata!.selectedText}"?` : `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
                                     isUser: false,
                                     timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
                                   }, ...driftConversation] :
@@ -3092,76 +2113,6 @@ function App() {
                             }
                           }}
                         >
-
-
-                          {/* Strand bead */}
-                          {msg.strandId && msg.strandId === activeStrandId && (
-                            <>
-                              {(!messages[index - 1] || messages[index - 1]?.strandId !== msg.strandId) && (
-                                <div className="absolute -left-2 top-2 w-2 h-2 rounded-full bg-accent-violet/60" />
-                              )}
-                            </>
-                          )}
-
-                          {/* Model tag */}
-                          {!msg.isUser && !isPlainAI && msg.modelTag && !isDriftMessage && !isSinglePushMessage && (
-                            msg.broadcastGroupId ? (
-                              <button
-                                onClick={() => setActiveCanvasId(`${msg.broadcastGroupId}:${msg.modelTag}`)}
-                                className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted hover:border-accent-violet/50 hover:text-text-secondary transition-colors whitespace-nowrap"
-                                title={`Show ${msg.modelTag} thread`}
-                              >
-                                {msg.modelTag}
-                              </button>
-                            ) : (
-                              <div className="absolute top-2 left-3 z-10 px-1.5 py-0.5 rounded bg-dark-elevated/90 border border-dark-border/50 text-[10px] text-text-muted whitespace-nowrap">
-                                {msg.modelTag}
-                              </div>
-                            )
-                          )}
-
-                          {/* Continue action when broadcast is active */}
-                          {!msg.isUser && msg.modelTag && msg.broadcastGroupId && msg.broadcastGroupId === activeBroadcastGroupId && (
-                            <button
-                              onClick={() => continueWithModel(msg.modelTag, msg.id)}
-                              className="absolute -top-2 right-4 px-2 py-0.5 rounded-full bg-dark-elevated border border-accent-violet/40 text-[9px] font-medium text-accent-violet hover:bg-accent-violet/10 transition-colors"
-                              title={`Continue with ${msg.modelTag}`}
-                            >
-                              Continue
-                            </button>
-                          )}
-
-                          {/* Inline Continue context banner */}
-                          {!msg.isUser && continueFromMessageId === msg.id && (
-                            <div className="mt-2 text-[11px] px-3 py-2 rounded-lg bg-dark-elevated/60 border border-accent-violet/30 text-text-secondary flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 rounded-full bg-dark-bubble border border-dark-border/50 text-[10px] text-accent-violet">
-                                  Continuing with {msg.modelTag}
-                                </span>
-                                <span className="text-text-muted">Your next message will use this model</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => {
-                                    textareaRef.current?.focus()
-                                    scrollToBottom()
-                                  }}
-                                  className="px-2 py-0.5 rounded bg-accent-violet/20 text-accent-violet border border-accent-violet/40 hover:bg-accent-violet/30 transition-colors"
-                                >
-                                  Write reply
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (prevContinueTargetsRef.current) setSelectedTargetsPersist(prevContinueTargetsRef.current)
-                                    setContinueFromMessageId(null)
-                                  }}
-                                  className="px-2 py-0.5 rounded bg-dark-bubble border border-dark-border/50 text-text-muted hover:text-text-secondary hover:bg-dark-elevated transition-colors"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          )}
 
 
                           {/* Inline drift header — removed, label is now above the bubble */}
@@ -3197,10 +2148,10 @@ function App() {
                                     }))
 
                                   const finalDriftConversation = driftConversation.length > 0 &&
-                                    !driftConversation[0].text.includes('What would you like to know about') ?
+                                    !(driftConversation[0].text.includes('What would you like to know about') || driftConversation[0].text.includes('מה תרצה לדעת על')) ?
                                     [{
                                       id: 'drift-system-reconstructed',
-                                      text: `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
+                                      text: /[֐-׿]/.test(msg.driftPushMetadata!.selectedText) ? `מה תרצה לדעת על "${msg.driftPushMetadata!.selectedText}"?` : `What would you like to know about "${msg.driftPushMetadata!.selectedText}"?`,
                                       isUser: false,
                                       timestamp: new Date(driftConversation[0].timestamp.getTime() - 1000)
                                     }, ...driftConversation] :
@@ -3349,6 +2300,33 @@ function App() {
                               </ReactMarkdown>
                             </div>
                           ) : (
+                            <>
+                            {isSynthesis && (
+                              <div className="synthesis-artifact-head">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="synthesis-eyebrow">✦ Synthesis</span>
+                                  <span className="text-[10.5px] font-medium" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                                    woven from {synthSources.length || ''} {synthSources.length === 1 ? 'drift' : 'drifts'}
+                                    {(() => { const t = timeAgo(msg.timestamp); return t ? ` · ${t}` : '' })()}
+                                  </span>
+                                </div>
+                                {synthSources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mb-3">
+                                    {synthSources.slice(0, 8).map((s) => (
+                                      <button
+                                        key={s.chatId}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); switchChat(s.chatId) }}
+                                        dir={getTextDirection(s.term)}
+                                        className="synthesis-source-chip"
+                                        title={`Open drift: ${s.term}`}
+                                      >
+                                        ↗ {s.term.length > 26 ? s.term.slice(0, 26) + '…' : s.term}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div
                               className={`${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
@@ -3394,8 +2372,34 @@ function App() {
                                   }
                                 })()}
                               >
-                                {sanitizeText(msg.text)}
+                                {sanitizeText(isSynthesis ? synthDisplay : msg.text)}
                               </ReactMarkdown>
+                            </div>
+                            </>
+                          )}
+
+                          {/* Synthesis "Next" — the open question the synthesis ends on,
+                              made tappable so one tap asks it in the main chat. */}
+                          {isSynthesis && synthNext && (
+                            <div className="mt-3.5">
+                              <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
+                                <Sparkles className="w-3 h-3" />
+                                Explore next
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); haptics.selection(); sendMessage(synthNext) }}
+                                dir={getTextDirection(synthNext)}
+                                className="group flex items-start gap-2 w-full text-start px-3.5 py-2.5 rounded-2xl
+                                  text-[13px] font-medium leading-snug text-accent-violet/90
+                                  border border-accent-violet/25 bg-accent-violet/[0.07]
+                                  shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                  hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                  active:scale-[0.99] transition-all duration-150"
+                                title="Ask this next"
+                              >
+                                <span className="flex-1 min-w-0">{synthNext}</span>
+                                <ArrowUpRight className="w-4 h-4 flex-shrink-0 mt-0.5 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                              </button>
                             </div>
                           )}
 
@@ -3531,41 +2535,20 @@ function App() {
         {/* Input area */}
         <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
           <div className="max-w-4xl mx-auto">
+            {/* First-run hint — teaches the drift gesture when a reply is on screen. */}
+            {!seenDriftHint && !driftOpen && !knowledgeGraphOpen && messages.some(m => !m.isUser && !!m.text) && (
+              <div className="flex items-center gap-2.5 mb-2 px-3.5 py-2 rounded-full border border-accent-violet/20 bg-accent-violet/[0.07] backdrop-blur-sm">
+                <MousePointerClick className="w-4 h-4 text-accent-violet/80 shrink-0" />
+                <span className="text-[12.5px] text-text-secondary leading-snug flex-1">Highlight any phrase above to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.</span>
+                <button onClick={markDriftHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
             {/* Mobile-only: model pill row above textarea */}
             <div className="lg:hidden">
               <ModelPillRow
                 selectedTargets={selectedTargets}
-                onToggleTarget={(target) => {
-                  const exists = selectedTargets.some(t => t.key === target.key)
-                  const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
-                  setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-                  if (!exists) {
-                    if (activeBroadcastGroupId) {
-                      // Existing broadcast group — send to newly added model
-                      const currentMessages = useChatStore.getState().messages
-                      const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-                      const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-                      const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-                      if (userMsg && userMsg.isUser) {
-                        const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-                        sendToTarget(target, contextMsgs, activeBroadcastGroupId)
-                      }
-                    } else {
-                      // Single-model mode — retroactively upgrade last exchange to broadcast
-                      const upgraded = retroactivelyUpgradeToBroadcast()
-                      if (upgraded) {
-                        sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
-                      }
-                    }
-                  }
-                }}
                 onOpenPicker={() => setModelPickerOpen(true)}
               />
-              {selectedTargets.length > 1 && activeCarouselModel && (
-                <div className="px-1 pb-1 text-[11px] text-text-muted">
-                  Replying to: <span className="text-accent-violet font-medium">{activeCarouselModel}</span>
-                </div>
-              )}
             </div>
             <div className="relative">
               <textarea
@@ -3638,7 +2621,7 @@ function App() {
                 {/* Send button */}
                 {!isTyping && (
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={!message.trim() && !voiceInput.isListening}
                     className={`
                       w-9 h-9 rounded-xl flex items-center justify-center
@@ -3663,6 +2646,27 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* First-run onboarding — only after login, only when the flag is unset */}
+      {showOnboarding && (
+        <Suspense fallback={null}>
+        <Onboarding
+          settings={aiSettings}
+          onSaveGeminiKey={(key) => {
+            const presets = aiSettings.modelPresets || []
+            const idx = presets.findIndex((p) => p.provider === 'gemini')
+            const nextPresets = idx >= 0
+              ? presets.map((p, i) => (i === idx ? { ...p, apiKey: key, enabled: true } : p))
+              : [{ id: 'gemini-flash-lite', provider: 'gemini' as const, label: 'Gemini Flash Lite', apiKey: key, enabled: true }, ...presets]
+            handleSaveSettings({ ...aiSettings, geminiApiKey: key, modelPresets: nextPresets })
+          }}
+          onDone={() => {
+            localStorage.setItem(ONBOARDED_FLAG, 'true')
+            setShowOnboarding(false)
+          }}
+        />
+        </Suspense>
+      )}
 
       {/* Selection Tooltip */}
       <SelectionTooltip
@@ -3719,17 +2723,37 @@ function App() {
                   selectedText,
                 },
               })
+            } else if (alreadyRegistered) {
+              // Already in chatHistory — keep its messages current so the full
+              // conversation (incl. the streamed answer) survives a reload, not
+              // just the question captured at registration. Debounced to coalesce
+              // streaming chunks into a single IDB write.
+              if (driftPersistTimerRef.current) clearTimeout(driftPersistTimerRef.current)
+              const snapshot = msgs as Message[]
+              driftPersistTimerRef.current = window.setTimeout(() => {
+                chatStore.updateChat(chatId, {
+                  messages: snapshot,
+                  lastMessage: (snapshot[snapshot.length - 1]?.text ?? '').slice(0, 100),
+                })
+              }, 700)
             }
           }
         }}
         selectedTargets={selectedTargets as { provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }[]}
         selectedProvider={(() => {
           const targets = (selectedTargets && selectedTargets.length) ? selectedTargets : [DEFAULT_TARGET]
-          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini' | 'dummy'
-          if (targets.some(t => t.provider === 'gemini')) return 'gemini'
-          if (targets.some(t => t.provider === 'openrouter')) return 'openrouter'
-          if (targets.some(t => t.provider === 'ollama')) return 'ollama'
-          if (targets.some(t => t.provider === 'dummy')) return 'dummy'
+          if (targets.length === 1) return targets[0].provider as 'openrouter' | 'ollama' | 'gemini'
+          // Broadcast/multi-model: the drift panel can only use one provider, so
+          // pick one that can actually answer (has credentials) — otherwise a
+          // keyless Gemini would win by rank and the drift would 404.
+          const orKey = (import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey || '').trim()
+          const has = (p: string) => targets.some(t => t.provider === p)
+          if (has('gemini') && geminiApiKey) return 'gemini'
+          if (has('openrouter') && orKey) return 'openrouter'
+          if (has('ollama')) return 'ollama'
+          // Nothing has clear credentials — fall back to rank order.
+          if (has('gemini')) return 'gemini'
+          if (has('openrouter')) return 'openrouter'
           return 'gemini'
         })()}
         onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
@@ -3816,29 +2840,10 @@ function App() {
         selectedTargets={selectedTargets}
         availableTargets={availableTargets}
         onOpenAddModel={() => setAddModelSheetOpen(true)}
-        onToggleTarget={(target) => {
-          const exists = selectedTargets.some(t => t.key === target.key)
-          const next = exists ? selectedTargets.filter(t => t.key !== target.key) : [...selectedTargets, target]
-          setSelectedTargetsPersist(next.length ? next : [DEFAULT_TARGET])
-          if (!exists) {
-            if (activeBroadcastGroupId) {
-              // Existing broadcast group — send to newly added model
-              const currentMessages = useChatStore.getState().messages
-              const firstBroadcastMsg = currentMessages.find(m => m.broadcastGroupId === activeBroadcastGroupId)
-              const firstBroadcastIndex = firstBroadcastMsg ? currentMessages.findIndex(m => m.id === firstBroadcastMsg.id) : -1
-              const userMsg = firstBroadcastIndex > 0 ? currentMessages[firstBroadcastIndex - 1] : null
-              if (userMsg && userMsg.isUser) {
-                const contextMsgs = currentMessages.slice(0, firstBroadcastIndex).map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
-                sendToTarget(target, contextMsgs, activeBroadcastGroupId)
-              }
-            } else {
-              // Single-model mode — retroactively upgrade last exchange to broadcast
-              const upgraded = retroactivelyUpgradeToBroadcast()
-              if (upgraded) {
-                sendToTarget(target, upgraded.contextMsgs, upgraded.groupId)
-              }
-            }
-          }
+        onSelectTarget={(target) => {
+          // Single-model: selecting a model replaces the current selection.
+          setSelectedTargetsPersist([target])
+          setModelPickerOpen(false)
         }}
       />
 
@@ -3848,7 +2853,7 @@ function App() {
         onClose={() => setAddModelSheetOpen(false)}
         currentPresets={aiSettings.modelPresets || []}
         onPresetsAdded={handlePresetsAdded}
-        maxAdd={Math.max(0, 3 - selectedTargets.length)}
+        maxAdd={3}
       />
 
       {/* Knowledge Graph */}
@@ -3859,10 +2864,13 @@ function App() {
         // the error in place (empty fallback) keeps a single tap stable and makes
         // a real failure visible/diagnosable instead of silently yanking the map.
         <ErrorBoundary fallback={null}>
+        <Suspense fallback={null}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
-          onClose={() => setKnowledgeGraphOpen(false)}
+          expanded={mapExpanded}
+          onToggleExpand={() => setMapExpanded(v => !v)}
+          onClose={() => { setMapExpanded(false); setKnowledgeGraphOpen(false) }}
           onSwitchChat={switchChat}
           onScrollToMessage={(msgId) => {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)
@@ -3910,20 +2918,21 @@ function App() {
             const templateType = di?.templateType
               ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
 
-            // The drift's own conversation (chat history → temp store → node payload).
-            const driftMsgs: Message[] =
-              ((chatHistory.find(c => c.id === driftChatId)?.messages?.length
-                  ? chatHistory.find(c => c.id === driftChatId)!.messages
-                  : null)
-                ?? driftStore.getTempConversation(driftChatId)
-                ?? (driftChat.messages?.length ? driftChat.messages : null)
-                ?? [])
+            // The drift's own conversation. The chatHistory copy is a snapshot from
+            // first-message registration (often just the question — the streamed
+            // answer only lives in the temp store), so pick the FULLEST of the three
+            // sources rather than preferring chatHistory and losing the answer.
+            const driftMsgs: Message[] = [
+              chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+              driftStore.getTempConversation(driftChatId) ?? [],
+              driftChat.messages ?? [],
+            ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
 
             // A Connect *bridge* node is itself a focused Q&A thread ("How does X
             // connect to Y?") — NOT the connections list. Detect its question and
             // open the thread on its answer (connectQuestion set → chip-chat view),
             // instead of dropping back to the cards screen.
-            const bridgeUserMsg = driftMsgs.find(m => m.isUser && /connect(?:s|ed)?\s+to\s+.+/i.test(m.text))
+            const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
             const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
 
             // The connections-LIST drift rebuilds its chips from cached cards, and
@@ -3974,14 +2983,19 @@ function App() {
           onSynthesize={handleSynthesize}
           synthesizing={synthesizing}
         />
+        </Suspense>
         </ErrorBoundary>
       )}
+
+      {/* Keyboard shortcuts & first-run tips */}
+      <ShortcutsHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {/* Full-text search across all chats and drifts */}
       <SearchModal
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
         chatHistory={chatHistory}
+        geminiApiKey={geminiApiKey}
         onNavigate={(chatId, messageId) => {
           setSearchOpen(false)
           switchChat(chatId)

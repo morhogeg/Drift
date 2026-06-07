@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
-import { X, Save, Eye, EyeOff, CheckCircle, AlertCircle, Plus, Trash2, RefreshCw, Copy, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { X, Save, Eye, EyeOff, CheckCircle, AlertCircle, Plus, Trash2, RefreshCw, Copy, ChevronRight, Download, Upload } from 'lucide-react'
+import { exportBackup, importBackupFromFile } from '../services/backup'
 import type { OpenRouterModel } from '../services/openrouter'
 import { checkOpenRouterConnection, OPENROUTER_MODELS } from '../services/openrouter'
 import { checkOllamaConnection } from '../services/ollama'
@@ -17,7 +18,6 @@ interface SettingsProps {
 
 export interface AISettings {
   useOpenRouter: boolean
-  useDummyAI: boolean
   openRouterApiKey: string
   openRouterModel: OpenRouterModel
   geminiApiKey: string
@@ -27,7 +27,7 @@ export interface AISettings {
   modelPresets: ModelPreset[]
 }
 
-export type Provider = 'openrouter' | 'ollama' | 'dummy' | 'gemini'
+export type Provider = 'openrouter' | 'ollama' | 'gemini'
 
 export interface ModelPreset {
   id: string
@@ -79,7 +79,7 @@ function SectionHeader({ label, hint }: { label: string; hint?: string }) {
 // content does the talking.
 function SettingsGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-4 rounded-2xl bg-gradient-to-b from-white/[0.045] to-white/[0.015] border border-white/[0.06] divide-y divide-white/[0.05] overflow-hidden shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]">
+    <div className="mx-4 rounded-2xl bg-gradient-to-b from-black/[0.02] to-transparent dark:from-white/[0.045] dark:to-white/[0.015] border border-dark-border divide-y divide-dark-border overflow-hidden shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]">
       {children}
     </div>
   )
@@ -125,7 +125,6 @@ function brandOf(preset: ModelPreset): Brand {
   const m = preset.model ?? ''
   if (preset.provider === 'gemini') return { key: 'gemini', label: 'Gemini', color: '#38bdf8', glow: 'rgba(56,189,248,0.5)' }
   if (preset.provider === 'ollama') return { key: 'ollama', label: 'Ollama', color: '#22c55e', glow: 'rgba(34,197,94,0.5)' }
-  if (preset.provider === 'dummy') return { key: 'dummy', label: 'Demo', color: '#a78bfa', glow: 'rgba(167,139,250,0.5)' }
   if (preset.provider === 'openrouter') {
     if (m.startsWith('openai/')) return { key: 'openai', label: 'OpenAI', color: '#10b981', glow: 'rgba(16,185,129,0.5)' }
     if (m.startsWith('anthropic/')) return { key: 'anthropic', label: 'Anthropic', color: '#d97757', glow: 'rgba(217,119,87,0.55)' }
@@ -161,7 +160,6 @@ const PROVIDER_LABELS: Record<Provider, string> = {
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   ollama: 'Ollama',
-  dummy: 'Dummy',
 }
 
 // ─── Expanded preset form ─────────────────────────────────────────────────────
@@ -210,7 +208,7 @@ function PresetForm({
         <div>
           <p className="text-xs text-text-muted mb-2">Provider</p>
           <div className="inline-flex rounded-lg border border-dark-border/60 bg-dark-bg/60 p-0.5 gap-0.5">
-            {(['gemini', 'openrouter', 'ollama', 'dummy'] as Provider[]).map(p => (
+            {(['gemini', 'openrouter', 'ollama'] as Provider[]).map(p => (
               <button
                 key={p}
                 type="button"
@@ -255,9 +253,6 @@ function PresetForm({
                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
                   <button type="button" onClick={() => setShowKey(v => !v)} className="p-1.5 rounded-md text-text-muted hover:text-text-primary transition-colors">
                     {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                  <button type="button" onClick={() => navigator.clipboard?.writeText(preset.apiKey || settings.geminiApiKey || '')} className="p-1.5 rounded-md text-text-muted hover:text-text-primary transition-colors">
-                    <Copy className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -340,11 +335,6 @@ function PresetForm({
           </div>
         )}
 
-        {preset.provider === 'dummy' && (
-          <p className="text-xs text-text-muted">
-            No configuration required. Dummy AI simulates responses for testing without using API credits.
-          </p>
-        )}
       </div>
     </div>
   )
@@ -360,6 +350,35 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
   const [availableOpenRouterModels, setAvailableOpenRouterModels] = useState<string[]>([])
   const [expandedPreset, setExpandedPreset] = useState<string | null>(null)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
+  const [dataStatus, setDataStatus] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Local backup (export / import) ──────────────────────────────────────────
+  const handleExport = async () => {
+    try {
+      const { chats, snippets } = await exportBackup()
+      setDataStatus(`Exported ${chats} ${chats === 1 ? 'chat' : 'chats'} and ${snippets} ${snippets === 1 ? 'snippet' : 'snippets'}.`)
+    } catch {
+      setDataStatus('Export failed. Please try again.')
+    }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file) return
+    const ok = window.confirm(
+      'Restore from this backup?\n\nThis replaces the chats, snippets and settings on this device, then reloads the app.'
+    )
+    if (!ok) return
+    try {
+      const res = await importBackupFromFile(file, { mode: 'replace' })
+      setDataStatus(`Restored ${res.chats} chats and ${res.snippets} snippets. Reloading…`)
+      setTimeout(() => window.location.reload(), 700)
+    } catch (err) {
+      setDataStatus(err instanceof Error ? err.message : 'Import failed.')
+    }
+  }
 
   useEffect(() => {
     setSettings(currentSettings)
@@ -373,6 +392,19 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
     }
   }, [isOpen])
 
+  // Escape closes Settings (or the Add-model sheet first, if open) — consistent
+  // with the app's other overlays.
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (addModelSheetOpen) { setAddModelSheetOpen(false); return }
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen, addModelSheetOpen, onClose])
+
   useEffect(() => {
     if (isOpen && hasChanges) {
       const timeoutId = setTimeout(() => {
@@ -383,10 +415,6 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
   }, [settings.openRouterApiKey, settings.openRouterModel, settings.ollamaUrl, settings.ollamaModel, settings.useOpenRouter])
 
   const checkConnection = async () => {
-    if (settings.useDummyAI) {
-      setConnectionStatus('connected')
-      return
-    }
     setConnectionStatus('checking')
     try {
       let connected = false
@@ -395,7 +423,7 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
         connected = await checkGeminiConnection(settings.geminiApiKey, settings.geminiModel)
       } else if (settings.useOpenRouter && settings.openRouterApiKey) {
         connected = await checkOpenRouterConnection(settings.openRouterApiKey, settings.openRouterModel)
-      } else if (!settings.useOpenRouter && !settings.useDummyAI && settings.ollamaUrl) {
+      } else if (!settings.useOpenRouter && settings.ollamaUrl) {
         connected = await checkOllamaConnection(settings.ollamaUrl)
       }
       setConnectionStatus(connected ? 'connected' : 'disconnected')
@@ -615,20 +643,6 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           <SectionHeader label="Advanced" />
           <SettingsGroup>
             <SettingsRow
-              label="Demo AI"
-              description="Simulate responses without API credits"
-              right={
-                <Toggle
-                  checked={settings.useDummyAI}
-                  onChange={(v) => {
-                    handleChange('useDummyAI', v)
-                    if (v) handleChange('useOpenRouter', false)
-                  }}
-                />
-              }
-            />
-            <div className="h-px bg-dark-border/40" />
-            <SettingsRow
               label="Test Connection"
               right={
                 <button
@@ -642,6 +656,49 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
               }
             />
           </SettingsGroup>
+
+          {/* ── DATA section ── */}
+          <SectionHeader label="Data" hint="Local backup" />
+          <SettingsGroup>
+            <SettingsRow
+              label="Export backup"
+              description="Download all chats, drifts, snippets & settings as a file"
+              right={
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dark-border/60 text-text-muted hover:text-text-primary hover:border-accent-violet/40 transition-colors text-xs"
+                >
+                  <Download className="w-3 h-3" />
+                  Export
+                </button>
+              }
+            />
+            <SettingsRow
+              label="Import backup"
+              description="Restore from a backup file (replaces data on this device)"
+              right={
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dark-border/60 text-text-muted hover:text-text-primary hover:border-accent-violet/40 transition-colors text-xs"
+                >
+                  <Upload className="w-3 h-3" />
+                  Import
+                </button>
+              }
+            />
+          </SettingsGroup>
+          {dataStatus && (
+            <p className="px-5 pt-2 text-xs text-text-muted leading-snug">{dataStatus}</p>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
 
           <div className="h-4" />
         </div>

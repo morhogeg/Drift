@@ -16,7 +16,7 @@ export const DEFAULT_TARGET: Target = {
   label: 'Gemini Flash Lite',
 }
 
-const VALID_PROVIDERS = new Set<Target['provider']>(['openrouter', 'ollama', 'gemini', 'dummy'])
+const VALID_PROVIDERS = new Set<Target['provider']>(['openrouter', 'ollama', 'gemini'])
 
 function isValidTarget(t: unknown): t is Target {
   if (typeof t !== 'object' || t === null) return false
@@ -37,14 +37,14 @@ function normaliseTargets(targets: Target[]): Target[] {
     const key = t.key === 'dummy-basic' ? 'qwen3' : t.key === 'openrouter' ? 'oss' : t.key
     map.set(key, { provider: t.provider, key, label: t.label })
   }
+  // Drop any stale dummy/demo targets persisted from older builds.
+  for (const k of Array.from(map.keys())) {
+    const t = map.get(k)!
+    if ((t.provider as string) === 'dummy' || k === 'dummy-lite' || k === 'dummy-basic') {
+      map.delete(k)
+    }
+  }
   return map.size ? Array.from(map.values()) : [DEFAULT_TARGET]
-}
-
-/** Default dummy model preset for demo/testing. */
-export const DUMMY_TARGET: Target = {
-  provider: 'dummy',
-  key: 'dummy-lite',
-  label: 'Demo AI',
 }
 
 function loadPrefsFromStorage(): Record<string, Target[]> {

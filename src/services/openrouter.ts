@@ -133,12 +133,6 @@ async function validateApiKeyViaModels(apiKey: string): Promise<boolean> {
 }
 
 export async function checkOpenRouterConnection(apiKey: string, model: OpenRouterModel = OPENROUTER_MODELS.QWEN3): Promise<boolean> {
-  console.log('Checking OpenRouter connection...')
-  console.log('Model:', model)
-  console.log('API Key present:', !!apiKey)
-  console.log('API Key length:', apiKey?.length)
-  console.log('API Key first chars:', apiKey ? apiKey.substring(0, 10) + '...' : 'none')
-  
   if (!apiKey || apiKey.trim() === '') {
     console.warn('OpenRouter API key not configured or empty')
     return false
@@ -157,11 +151,6 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
     if (trimmedKey) {
       headers['Authorization'] = `Bearer ${trimmedKey}`
     }
-    
-    console.log('Request headers (without full key):', {
-      ...headers,
-      'Authorization': `Bearer ${apiKey.substring(0, 10)}...`
-    })
     
     // Add timeout to prevent hanging
     const controller = new AbortController()
@@ -242,12 +231,6 @@ export async function sendMessageToOpenRouter(
   signal?: AbortSignal,
   model: OpenRouterModel = OPENROUTER_MODELS.OSS
 ): Promise<void> {
-  console.log('Sending message to OpenRouter...')
-  console.log('Using model:', model)
-  console.log('API Key present:', !!apiKey)
-  console.log('API Key first chars:', apiKey ? apiKey.substring(0, 10) + '...' : 'none')
-  console.log('Messages:', messages)
-  
   if (!apiKey || apiKey.trim() === '') {
     throw new Error('OpenRouter API key not configured. Please configure it in Settings.')
   }

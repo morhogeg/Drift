@@ -1,40 +1,26 @@
-import { useState, useRef, useEffect, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Landmark, Fingerprint, Sparkles, Swords, Clock, type LucideIcon } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw } from 'lucide-react'
+import { useOnceFlag } from '../lib/onceFlags'
+import {
+  CONNECT_TYPES,
+  connectKind,
+  driftLabelsFor,
+} from '../lib/driftPanel'
 import type { AncestryEntry } from '../types/chat'
 import type { TermOccurrence } from '../lib/termIndex'
-import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
-import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
-import { sendMessageToDummy } from '../services/dummyAI'
-import { sendMessageToGemini, getDriftSuggestions, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
-import { type ChatMessage as DummyMessage } from '../services/dummyAI'
+import { getDriftSuggestions } from '../services/gemini'
+import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
+import { useDriftPanelActions } from '../hooks/useDriftPanelActions'
+import { useConnectThreads } from '../hooks/useConnectThreads'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AISettings } from './Settings'
-import { snippetStorage } from '../services/snippetStorage'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { Stagger, staggerChild } from './motion'
-import { haptics } from '../lib/haptics'
 import { motion } from 'framer-motion'
 
-// ── Connect taxonomy ──────────────────────────────────────────────────────
-// Each connection edge is classified (by the LLM, language-agnostically) into
-// one of these kinds, so the user can scan *meaning* — ownership vs. influence
-// vs. opposition — at a glance instead of reading every label. Each kind owns a
-// hue + icon; `tension` (opposition) is deliberately warm so it pops against
-// the cool field. Unknown / legacy 2-part cards fall back to `link`.
-interface ConnectKind { label: string; icon: LucideIcon; color: string; glow: string }
-const CONNECT_TYPES: Record<string, ConnectKind> = {
-  origin:    { label: 'Origin',    icon: Landmark,    color: '#34d399', glow: 'rgba(52,211,153,0.55)' },
-  identity:  { label: 'Identity',  icon: Fingerprint, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' },
-  influence: { label: 'Influence', icon: Sparkles,    color: '#a78bfa', glow: 'rgba(167,139,250,0.55)' },
-  tension:   { label: 'Tension',   icon: Swords,      color: '#fb923c', glow: 'rgba(251,146,60,0.55)' },
-  history:   { label: 'History',   icon: Clock,       color: '#fbbf24', glow: 'rgba(251,191,36,0.55)' },
-}
-const CONNECT_FALLBACK: ConnectKind = { label: 'Link', icon: Waypoints, color: '#22d3ee', glow: 'rgba(34,211,238,0.55)' }
-const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? CONNECT_FALLBACK
-
-interface Message {
+export interface Message {
   id: string
   text: string
   isUser: boolean
@@ -43,6 +29,8 @@ interface Message {
   // For compare layout
   compareGroupId?: string
   laneKey?: string
+  // Marks a failed request rendered as a recoverable inline error (with retry).
+  isError?: boolean
 }
 
 interface DriftPanelProps {
@@ -65,7 +53,7 @@ interface DriftPanelProps {
   /** Called whenever the drift conversation messages change — used to keep the temp store in sync. */
   onMessagesChange?: (messages: Message[]) => void
   // If provided, Drift will follow the main chat model chips
-  selectedProvider?: 'openrouter' | 'ollama' | 'gemini' | 'dummy'
+  selectedProvider?: 'openrouter' | 'ollama' | 'gemini'
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
@@ -74,7 +62,7 @@ interface DriftPanelProps {
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
   onNavigateToBreadcrumb?: (index: number) => void
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** Pre-loaded suggestion chips — bypasses AI fetch when provided. */
   initialSuggestions?: string[]
   /** Restore Connect mode to a previously active question (breadcrumb navigation). */
@@ -100,14 +88,14 @@ interface DriftPanelProps {
   /** Walk sideways to a sibling drift without leaving the panel. */
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
-  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | undefined) => void
+  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
 }
 
 export interface SiblingDrift {
   selectedText: string
   driftChatId: string
   sourceMessageId: string
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
 }
 
 export default function DriftPanel({
@@ -155,46 +143,29 @@ export default function DriftPanel({
   // Bumped whenever a space unfolds (panel opens) or a new topic emerges (drift
   // changes while open) — retriggers the bloom animation on the panel shell.
   const [bloomKey, setBloomKey] = useState(0)
-  const [pushedToMain, setPushedToMain] = useState(false)
-  const [savedAsChat, setSavedAsChat] = useState(false)
-  const [savedChatId, setSavedChatId] = useState<string | null>(null)
-  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set())
   const [, setHoveredMessageId] = useState<string | null>(null)
-  const [pushedMessageCount, setPushedMessageCount] = useState(0)
-  const [lastPushSourceId, setLastPushSourceId] = useState<string | null>(null)
-  const [isPushing, setIsPushing] = useState(false)
-  const [pushedContentSignature, setPushedContentSignature] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // When a drift is re-opened from the map ("Open this drift"), land on the user's
+  // question (the anchor) instead of the bottom of the answer — so it opens exactly
+  // where the thought began, with no scroll-hunting. Armed on a restored open,
+  // consumed by the anchor effect (and it suppresses the one-shot scroll-to-bottom).
+  const anchorOnOpenRef = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
-  const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showExpandHint, setShowExpandHint] = useState(false)
-  const [connectCards, setConnectCards] = useState<string[] | null>(null)
-  const [connectQuestion, setConnectQuestion] = useState<string | null>(null)
-  const connectAnswersRef = useRef<Map<string, Message[]>>(new Map())
-  // When the panel re-initializes for a new thread (term switch / lens switch),
-  // `driftChatId` flips immediately but the PREVIOUS thread's `driftOnlyMessages`
-  // linger in state for one render until the init effect's queued reset commits.
-  // The Connect-card parser must not parse that stale render's JSON — doing so
-  // keys the previous drift's cards onto the newly-selected term (the "Connect
-  // shows the wrong drift" bug). The init effect arms this flag so the parser
-  // skips exactly that one stale pass; it clears once consumed.
-  const skipStaleCardParseRef = useRef(false)
+  // First-run hint for the lens switcher — shown once, dismissed on first use.
+  const [seenLensHint, markLensHint] = useOnceFlag('lens-bar')
   // The driftChatId the live `driftOnlyMessages` belong to. Updated synchronously
   // by the init effect when a thread loads. The persistence effect gates on this
   // so that during a term switch — where driftOnlyMessages still holds the OLD
   // thread but driftChatId has already flipped — the old conversation is never
   // written under the new thread's key (which would lose it on return: Bug 5).
   const messagesThreadRef = useRef<string | undefined>(driftChatId)
-  const [connectVisitedVersion, setConnectVisitedVersion] = useState(0)
-  /** Tracks the active chip session {question, messages} via ref so it survives React batching. */
-  const chipSessionRef = useRef<{ question: string; messages: Message[] } | null>(null)
   const [isComparing, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
@@ -202,63 +173,92 @@ export default function DriftPanel({
   /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
   const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
 
-  // --------------------------------------------------------------------------
-  // Template helpers
-  // --------------------------------------------------------------------------
+  // Localize the drift scaffolding to the chat's language (sampled from the term +
+  // recent parent context), so the opener and "Simplify this"/etc. match Hebrew chats.
+  const driftLabels = useMemo(
+    () => driftLabelsFor(`${selectedText} ${(contextMessages ?? []).slice(-3).map(m => m.text).join(' ')}`.slice(0, 400)),
+    [selectedText, contextMessages]
+  )
 
-  const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
-    'simplify': `You make hard ideas suddenly click. The user selected a term while reading and wants it made simple — but they are a smart adult, so never be condescending or babyish.
+  // Connect-mode logic (chips, bridge questions, visited-answer cache).
+  const {
+    connectCards,
+    connectQuestion,
+    setConnectQuestion,
+    connectVisitedVersion,
+    connectAnswersRef,
+    bridgeQuestion,
+    openConnectThread,
+    initConnectState,
+  } = useConnectThreads({
+    isOpen,
+    templateType,
+    selectedText,
+    driftLabels,
+    driftOnlyMessages,
+    isTyping,
+    initialConnectQuestion,
+    initialConnectCards,
+    initialConnectAnswers,
+    onConnectStateChange,
+    onConnectAnswerSaved,
+    setMessages,
+    setDriftOnlyMessages,
+    autoSentRef,
+  })
 
-- Interpret the term in the sense the surrounding conversation implies (disambiguate by context — don't explain the generic dictionary meaning if the conversation means something specific).
-- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences.
-- Strip the jargon, but if a key technical word matters, name it once and translate it.
-- Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
-- Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
-    'research': `You are a sharp domain expert giving an authoritative deep dive on a term the user selected mid-reading. This is NOT a Wikipedia dump and NOT a beginner explainer — assume an intelligent reader who wants depth, nuance, and the things a non-expert would miss.
+  // Drift conversation send / stream pipeline (owns the abort controllers).
+  const { sendMessage, retryLastMessage, stopGeneration, handleCompareAcrossModels } = useDriftMessageStream({
+    message,
+    driftOnlyMessages,
+    isTyping,
+    selectedText,
+    contextMessages,
+    templateType,
+    connectQuestion,
+    relatedDrifts,
+    selectedProvider,
+    selectedTargets,
+    aiSettings,
+    setMessage,
+    setMessages,
+    setDriftOnlyMessages,
+    setIsTyping,
+    setIsComparing,
+    setStreamingMsgId,
+    setMsgHighlights,
+  })
 
-- Interpret the term in the sense the surrounding conversation implies; disambiguate by context.
-- Go past the obvious: give the mechanism, the history that actually shaped it, the live debates or open questions, and why it matters. Prefer specific names, dates, figures, and concrete examples over vague generalities.
-- Be accurate. If something is contested or uncertain, say so plainly rather than asserting it. Do not invent specifics — when unsure, use Google Search grounding if available, otherwise hedge honestly.
-- Structure for skimming: a strong opening line, then tight paragraphs or a few headed sections. No padding.
-- Add genuine NEW value beyond what the conversation already showed.`,
-    'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
-
-Return ONLY a raw JSON array of 5-6 strings. Each string is "<type> :: <relationship> :: <concept>":
-- <type> = exactly ONE of these English keywords (always English, regardless of output language) classifying the KIND of link:
-    • origin    — where it comes from / who owns, founded, governs, or created it
-    • identity  — what it represents, embodies, or symbolizes
-    • influence — what shaped it, or what it shaped (inspired by, precursor to, archetype for, echoes)
-    • tension   — what it opposes, contrasts with, rivals, or conflicts with
-    • history   — a dated event or historical milestone tied to it
-- <relationship> = a short labeled edge, 1-4 words (e.g. "founded", "exiled from", "echoes the ideas of", "stands in tension with", "precursor to", "rivals"). Write it in the SAME LANGUAGE as the surrounding conversation.
-- <concept> = the specific thing it connects to — a person, place, event, work, or idea (2-5 words). Write it in the SAME language AND script as the conversation, transliterating any foreign proper name into that script (for a Hebrew chat: "Johan Cruyff" → "יוהאן קרויף", "Real Madrid" → "ריאל מדריד" — never leave it in Latin letters).
-- Separator is exactly " :: " (space colon colon space). There are exactly TWO separators per string.
-
-Example output for "Julius Caesar":
-["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
-
-Rules:
-- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include at least one "tension" (something it opposes/rivals) wherever one honestly exists.
-- Each <concept> must be a SPECIFIC, real, verifiable thing (a named person, place, event, work, or named idea) — not a vague category ("various philosophers", "modern society") and not a near-synonym of the term itself.
-- Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
-- Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern. Reach for the link a thoughtful reader would NOT immediately predict.
-- Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
-- Do not invent facts. If you are not confident the connection is real, choose a different one.
-- Output raw JSON array of strings only. Any other text breaks the app.`,
-  }
-
-  const TEMPLATE_USER_PREFIXES: Record<string, string> = {
-    'simplify': 'Simplify this',
-    'research': 'Deep dive into this',
-    'connect': 'Show me what this connects to',
-  }
+  // Drift panel push/save action layer (owns the push/save state cluster).
+  const {
+    pushedToMain,
+    savedAsChat,
+    savedMessageIds,
+    isPushing,
+    handlePushSingleMessage,
+    handleToggleSaveMessage,
+    handleSaveAsChat,
+    handlePushToMain,
+    resetPushSaveState,
+    loadSavedMessageIds,
+  } = useDriftPanelActions({
+    driftOnlyMessages,
+    selectedText,
+    sourceMessageId,
+    parentChatId,
+    driftChatId,
+    onPushToMain,
+    onSaveAsChat,
+    onUpdatePushedDriftSaveStatus,
+    onUndoPushToMain,
+    onUndoSaveAsChat,
+    onSnippetCountUpdate,
+    onClose,
+  })
 
   // Initialize Drift with existing messages or system message
   useEffect(() => {
     if (isOpen) {
-      // Arm the stale-parse skip: the about-to-be-reset messages may still hold
-      // the previous thread's Connect JSON for one render. (See parser below.)
-      skipStaleCardParseRef.current = true
       // The messages this effect is about to set belong to THIS thread. Stamping
       // it synchronously means the persistence effect (which fires after the
       // queued setDriftOnlyMessages commits) saves under the correct key, and any
@@ -272,15 +272,17 @@ Rules:
       if (existingMessages && existingMessages.length > 0) {
         // Restore the existing conversation — template already fired for this drift
         autoSentRef.current = true
+        // Re-opening an explored drift: open at the question anchor, not the bottom.
+        anchorOnOpenRef.current = true
         setMessages(existingMessages)
         setDriftOnlyMessages(existingMessages)
       } else {
         // Add system context message for new drift
         const systemMessageText = templateType === 'connect'
-          ? `Finding connections for "${selectedText}"…`
+          ? driftLabels.connectFinding(selectedText)
           : templateType
-          ? `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Exploring'}: "${selectedText}"`
-          : `What would you like to know about "${selectedText}"?`
+          ? `${driftLabels.prefixes[templateType] ?? 'Exploring'}: "${selectedText}"`
+          : driftLabels.opener(selectedText)
         const systemMessage: Message = {
           id: 'drift-system-' + Date.now(),
           text: systemMessageText,
@@ -299,13 +301,8 @@ Rules:
       setDriftSuggestions([])
       setMsgHighlights(new Map())
 
-      // Restore or reset Connect state
-      connectAnswersRef.current = initialConnectAnswers
-        ? new Map(Object.entries(initialConnectAnswers))
-        : new Map()
-      chipSessionRef.current = null
-      setConnectCards(initialConnectCards != null ? initialConnectCards : null)
-      setConnectQuestion(initialConnectQuestion != null ? initialConnectQuestion : null)
+      // Restore or reset Connect state (also arms the stale-card-parse skip).
+      initConnectState()
 
       // Defensive backstop: if ANY cached/restored content exists for this drift
       // (restored messages, Connect chips, or visited-bridge answers), suppress
@@ -334,33 +331,13 @@ Rules:
       }
 
       // Reset states when opening new drift
-      setPushedToMain(false)
-      setSavedAsChat(false)
-      setSavedChatId(null)
-      setPushedMessageCount(0)
-      setLastPushSourceId(null)
-      setPushedContentSignature(null)
+      resetPushSaveState()
 
       // Load saved message IDs for this drift
-      const allSnippets = snippetStorage.getAllSnippets()
-      const savedIds = new Set<string>()
-      allSnippets.forEach(snippet => {
-        if (snippet.source.messageId) {
-          savedIds.add(snippet.source.messageId)
-        }
-      })
-      setSavedMessageIds(savedIds)
+      loadSavedMessageIds()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedText, existingMessages, templateType, driftChatId])
-
-  // Notify parent whenever Connect state changes so it can persist for navigation
-  useEffect(() => {
-    if (isOpen && templateType === 'connect') {
-      onConnectStateChange?.(connectQuestion, connectCards)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectQuestion, connectCards, isOpen])
 
   // Auto-send initial message for template drifts (fires once per open, 400ms after panel opens)
   useEffect(() => {
@@ -371,7 +348,7 @@ Rules:
     // In connect chip-chat mode, send the chosen question directly
     const autoText = (templateType === 'connect' && connectQuestion)
       ? connectQuestion
-      : `${TEMPLATE_USER_PREFIXES[templateType] ?? 'Explore this'}: "${selectedText}"`
+      : `${driftLabels.prefixes[templateType] ?? 'Explore this'}: "${selectedText}"`
 
     const timer = window.setTimeout(() => {
       if (!autoSentRef.current) {
@@ -387,42 +364,6 @@ Rules:
   // connectAnswersRef is cleared in the init effect on each new open;
   // this separate effect was removed because it fired after init and wiped restored Connect state.
 
-  // Parse Connect AI response into cards once streaming finishes (only in chips mode)
-  useEffect(() => {
-    if (templateType !== 'connect') return
-    // Stale-window guard: when switching terms/lenses, this effect can fire on the
-    // render where driftChatId already points at the NEW thread but
-    // driftOnlyMessages still holds the PREVIOUS thread's streamed JSON (the init
-    // effect's reset is queued, not yet committed). Parsing that would key the
-    // previous drift's cards onto the newly-selected term — the "Connect shows the
-    // wrong drift" bug. The init effect arms a skip for exactly that stale pass;
-    // we consume it here (before the isTyping/question early-returns) so it can
-    // never linger and swallow the next thread's legitimate first parse.
-    if (skipStaleCardParseRef.current) {
-      skipStaleCardParseRef.current = false
-      return
-    }
-    if (isTyping || connectQuestion) return
-    const aiMsg = driftOnlyMessages.find(m => !m.isUser && !m.id.startsWith('drift-system-'))
-    if (!aiMsg?.text) return
-    const raw = aiMsg.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-    // Only treat this as connect cards if it actually looks like a JSON array. When
-    // switching lenses (Connect → Deep dive → Connect), this effect can fire on a
-    // render where driftOnlyMessages still holds the PREVIOUS lens's prose answer;
-    // parsing that and wiping to [] is what caused "No connections found" after the
-    // cards had already been restored. Prose → leave the restored cards intact.
-    if (!raw.startsWith('[')) return
-    try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) {
-        setConnectCards(parsed.filter((x: unknown) => typeof x === 'string').slice(0, 5))
-      }
-    } catch {
-      // Malformed JSON — keep whatever cards we have rather than blanking the view.
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateType, isTyping, driftOnlyMessages, selectedText])
-
   // Sync driftOnlyMessages to the temp store so nested-drift detection
   // in handleStartDrift can always see the current conversation.
   useEffect(() => {
@@ -435,50 +376,6 @@ Rules:
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driftOnlyMessages])
-
-  // Keep chipSessionRef in sync with the active chip conversation in real-time.
-  // Using a ref (not state) means React batching can't lose the messages before we save them.
-  useEffect(() => {
-    if (connectQuestion !== null && driftOnlyMessages.length > 0) {
-      chipSessionRef.current = { question: connectQuestion, messages: driftOnlyMessages }
-    }
-  }, [driftOnlyMessages, connectQuestion])
-
-  // A bridge question frames the connection between the term and a concept —
-  // it doubles as the displayed label and the prompt sent to the model.
-  const bridgeQuestion = (concept: string) => `How does "${selectedText}" connect to ${concept}?`
-
-  // Open (or restore) a focused Connect thread for a given question/bridge.
-  const openConnectThread = (question: string) => {
-    haptics.selection()
-    const cached = connectAnswersRef.current.get(question)
-    setConnectQuestion(question)
-    if (cached) {
-      autoSentRef.current = true
-      setMessages(cached)
-      setDriftOnlyMessages(cached)
-    } else {
-      autoSentRef.current = false
-      const systemMsg: Message = { id: 'drift-system-' + Date.now(), text: question, isUser: false, timestamp: new Date() }
-      setMessages([systemMsg])
-      setDriftOnlyMessages([systemMsg])
-    }
-  }
-
-  // When returning to chips view (connectQuestion → null), persist the last chip session.
-  // This fires after React commits the batch, so we read from the ref which was already updated.
-  useEffect(() => {
-    if (connectQuestion === null && chipSessionRef.current) {
-      const { question, messages } = chipSessionRef.current
-      chipSessionRef.current = null
-      if (messages.length > 1) {
-        connectAnswersRef.current.set(question, messages)
-        setConnectVisitedVersion(v => v + 1)
-        onConnectAnswerSaved?.(question, messages)
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectQuestion])
 
   // Autofocus input when the drift panel opens
   useEffect(() => {
@@ -517,8 +414,25 @@ Rules:
   }
 
   useEffect(() => {
+    // A restored open anchors on the question instead (handled below) — don't
+    // yank the view to the bottom on that first render.
+    if (anchorOnOpenRef.current) return
     scrollToBottom()
   }, [messages])
+
+  // Restored-open anchor: scroll the user's question to the top of the thread so
+  // the drift opens exactly where it began (no scroll-hunting through the answer).
+  useEffect(() => {
+    if (!isOpen || !anchorOnOpenRef.current || driftOnlyMessages.length === 0) return
+    const firstQuestion = driftOnlyMessages.find(m => m.isUser && !m.id?.startsWith('drift-system-'))
+    requestAnimationFrame(() => setTimeout(() => {
+      const el = firstQuestion
+        ? document.querySelector(`[data-drift-message-id="${firstQuestion.id}"]`)
+        : null
+      if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' })
+      anchorOnOpenRef.current = false
+    }, 80))
+  }, [isOpen, driftOnlyMessages])
 
   // Notify parent when expanded state changes
   useEffect(() => {
@@ -560,533 +474,6 @@ Rules:
     }
   }, [isOpen, highlightMessageId, driftOnlyMessages])
 
-  // Reset push button if new messages are added after pushing
-  useEffect(() => {
-    if (pushedToMain && pushedMessageCount > 0) {
-      // Filter out the system message
-      const currentMessageCount = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about')
-      ).length
-      
-      // If there are more messages now than when we pushed, reset the button
-      if (currentMessageCount > pushedMessageCount) {
-        console.log('DriftPanel: Resetting push button - new messages added')
-        setPushedToMain(false)
-        setPushedMessageCount(0)
-        setLastPushSourceId(null) // Also clear the last push source
-        setPushedContentSignature(null) // Clear the content signature
-      }
-    }
-  }, [driftOnlyMessages, pushedToMain, pushedMessageCount])
-
-  const handlePushSingleMessage = (message: Message) => {
-    if (onPushToMain) {
-      // Find all drift messages up to and including this one (excluding system message)
-      const messageIndex = driftOnlyMessages.findIndex(m => m.id === message.id)
-      const allMessagesUpToThis = driftOnlyMessages
-        .slice(0, messageIndex + 1)
-        .filter(msg => !msg.text.startsWith('What would you like to know about'))
-      
-      // Mark only the selected message as visible, others as hidden context
-      const messagesToPush = allMessagesUpToThis.map((msg) => ({
-        ...msg,
-        isHiddenContext: msg.id !== message.id  // Mark all except the selected message as hidden
-      }))
-      
-      // Find the user message before this one for metadata
-      const previousUserMessage = driftOnlyMessages.slice(0, messageIndex).reverse().find(m => m.isUser)
-      const userQuestion = previousUserMessage?.text || selectedText
-      
-      // Use a unique but consistent source ID for single messages
-      // Include message content hash to prevent exact duplicates
-      const messageHash = message.text.substring(0, 20).replace(/[^a-zA-Z0-9]/g, '')
-      const singleMessageSourceId = `${sourceMessageId}-single-${message.id}-${messageHash}`
-      
-      // Important: Use the same driftChatId so we can reconstruct the full conversation
-      const chatIdToUse = savedChatId || driftChatId || `drift-temp-single-${Date.now()}`
-      
-      // Push all messages but mark as single push (only one will be visible)
-      onPushToMain(
-        messagesToPush, 
-        selectedText,
-        singleMessageSourceId,
-        savedAsChat,
-        userQuestion,
-        chatIdToUse
-      )
-    }
-  }
-
-  const handleToggleSaveMessage = (message: Message) => {
-    if (savedMessageIds.has(message.id)) {
-      // Unsave: Find and delete the snippet
-      const allSnippets = snippetStorage.getAllSnippets()
-      const snippetToDelete = allSnippets.find(s => 
-        s.source.messageId === message.id
-      )
-      
-      if (snippetToDelete) {
-        snippetStorage.deleteSnippet(snippetToDelete.id)
-        setSavedMessageIds(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(message.id)
-          return newSet
-        })
-        // Update the snippet count in the parent component
-        onSnippetCountUpdate?.()
-      }
-    } else {
-      // Save: Create new snippet
-      const driftTitle = savedChatId 
-        ? `Drift: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
-        : `Drift from: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
-      
-      const source = {
-        chatId: savedChatId || `drift-temp-${sourceMessageId}`,
-        chatTitle: driftTitle,
-        messageId: message.id,
-        isFullMessage: true,
-        timestamp: message.timestamp,
-        isDrift: true,
-        parentChatId,
-        selectedText
-      }
-      
-      snippetStorage.createSnippet(
-        message.text,
-        source,
-        {
-          tags: [],
-          starred: false
-        }
-      )
-      
-      setSavedMessageIds(prev => new Set(prev).add(message.id))
-      // Update the snippet count in the parent component
-      onSnippetCountUpdate?.()
-    }
-  }
-
-  const sendMessage = async (overrideText?: string) => {
-    const textToSend = (overrideText ?? message).trim()
-    if (textToSend) {
-      // Sending a message has weight — a light, confident thunk.
-      haptics.impact('light')
-
-      const newMessage: Message = {
-        id: 'drift-' + Date.now().toString(),
-        text: textToSend,
-        isUser: true,
-        timestamp: new Date()
-      }
-
-      setMessages(prev => [...prev, newMessage])
-      setDriftOnlyMessages(prev => [...prev, newMessage])
-      if (!overrideText) setMessage('')
-      setIsTyping(true)
-
-      // Only use drift-specific messages, not the context messages
-      // Filter out the system message and any context messages
-      const driftConversation = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about') && !msg.text.startsWith('Finding connections for') && !msg.text.startsWith('Simplify this') && !msg.text.startsWith('Deep dive into this') && !msg.text.startsWith('Show me what this connects to') && msg.id !== newMessage.id
-      )
-      
-      // Build context string from parent conversation (last ~8 messages). Cap each
-      // message so one very long answer can't crowd out the rest of the context.
-      const parentContext = contextMessages.slice(-8).map(msg => {
-        const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
-        return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
-      }).join('\n')
-
-      // Use template system prompt if set, otherwise use default context-aware prompt
-      // In connect chat mode, use a conversational prompt (not the JSON-returning connect prompt)
-      // History-aware Connect: feed prior same/related-term drifts into the chip
-      // prompt so the directions are ones the user has NOT already taken.
-      const priorTerms = (relatedDrifts ?? []).map(o => o.term).filter(Boolean)
-      // Disambiguation: "Barcelona" inside a Messi conversation means FC Barcelona
-      // the club — not the city. Force the model to read the term through context.
-      const connectDisambiguation = parentContext
-        ? `\n\nCRITICAL — DISAMBIGUATE BY CONTEXT: The user selected "${selectedText}" while reading the conversation below. Interpret "${selectedText}" ONLY in the sense the conversation implies — use the surrounding text to resolve which specific entity is meant (e.g. a football club vs. a city, a person vs. a namesake, a company vs. a common word). Every connection MUST be about that contextual meaning, NOT the most generic/popular meaning of the word.\n\nConversation context:\n${parentContext}`
-        : ''
-      const connectChipsPrompt = (priorTerms.length
-        ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
-        : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
-
-      const baseSystemContent = (templateType === 'connect' && connectQuestion)
-        ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
-        : (templateType === 'connect')
-        ? connectChipsPrompt
-        : templateType
-        ? TEMPLATE_SYSTEM_PROMPTS[templateType]
-        : (parentContext
-            ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
-            : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
-      // Connect branches already embed their own context above; only the
-      // non-connect templates need it appended here.
-      const systemContent = (templateType && templateType !== 'connect' && parentContext)
-        ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
-        : baseSystemContent
-
-      // Convert messages to API format with special Drift context
-      const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
-        {
-          role: 'system',
-          content: systemContent
-        },
-        ...driftConversation.map(msg => ({
-          role: msg.isUser ? 'user' as const : 'assistant' as const,
-          content: msg.text
-        })),
-        { role: 'user' as const, content: textToSend }
-      ]
-      
-      const envGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
-      const geminiKey = envGeminiKey || aiSettings.geminiApiKey
-      const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
-      const effectiveApiKey = envKey || aiSettings.openRouterApiKey
-      // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' | 'dummy' = selectedProvider
-        ? selectedProvider
-        : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
-
-      try {
-        // Create abort controller for this request
-        const abortController = new AbortController()
-        abortControllerRef.current = abortController
-        
-        const aiResponseId = 'drift-ai-' + Date.now().toString()
-        let accumulatedResponse = ''
-        
-        // Add empty AI message
-        const aiMessage: Message = {
-          id: aiResponseId,
-          text: '',
-          isUser: false,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, aiMessage])
-        setDriftOnlyMessages(prev => [...prev, aiMessage])
-        setStreamingMsgId(aiResponseId)
-
-        let firstToken = true
-        const onChunk = (chunk: string) => {
-          if (firstToken) {
-            firstToken = false
-            // A thought materializing — a light tick as the first token lands.
-            haptics.selection()
-          }
-          accumulatedResponse += chunk
-          setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-          setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
-        }
-
-        // Stream the response using the chosen provider
-        if (provider === 'gemini') {
-          const apiKey = geminiKey
-          if (!apiKey) throw new Error('No Gemini API key found. Please set it in Settings.')
-          const sTargets = selectedTargets || []
-          const preset = sTargets.length === 1 ? sTargets[0] : null
-          const model = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
-          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
-        } else if (provider === 'openrouter') {
-          const apiKey = effectiveApiKey
-          if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
-          const sTargets = selectedTargets || []
-          const useQwen3 = (sTargets.length === 1 && (sTargets[0].key === 'qwen3' || sTargets[0].label === 'Qwen3'))
-          const model = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
-          await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, abortController.signal, model)
-        } else if (provider === 'ollama') {
-          await sendMessageToOllama(
-            apiMessages as OllamaMessage[],
-            onChunk,
-            abortController.signal,
-            aiSettings.ollamaUrl,
-            aiSettings.ollamaModel
-          )
-        } else if (provider === 'dummy') {
-          await sendMessageToDummy(apiMessages as any, onChunk, abortController.signal)
-        }
-      // Fire-and-forget: fetch key-term highlights for this AI response
-      const geminiKeyForHL = import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey
-      if (geminiKeyForHL && accumulatedResponse.length > 80) {
-        const capturedId = aiResponseId
-        const capturedText = accumulatedResponse
-        getSuggestedHighlights(capturedText, geminiKeyForHL).then(hl => {
-          if (hl.length > 0) {
-            setMsgHighlights(prev => {
-              const next = new Map(prev)
-              next.set(capturedId, hl)
-              return next
-            })
-          }
-        })
-      }
-    } catch (error) {
-        console.error('Drift panel error:', error)
-        const errorMessage = error instanceof Error ? error.message : "Failed to get response. Please check your connection."
-        const aiResponse: Message = {
-          id: 'drift-error-' + Date.now().toString(),
-          text: errorMessage,
-          isUser: false,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, aiResponse])
-        setDriftOnlyMessages(prev => [...prev, aiResponse])
-      } finally {
-        setIsTyping(false)
-        setStreamingMsgId(null)
-        abortControllerRef.current = null
-      }
-    }
-  }
-
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-      setIsTyping(false)
-      setIsComparing(false)
-      setStreamingMsgId(null)
-    }
-    if (compareAbortControllersRef.current) {
-      for (const c of Object.values(compareAbortControllersRef.current)) {
-        try { c.abort() } catch {}
-      }
-      compareAbortControllersRef.current = null
-    }
-  }
-
-  // Run the current prompt across multiple selected targets and stream results
-  const handleCompareAcrossModels = async () => {
-    const targets = (selectedTargets || []).filter(Boolean)
-    if (!targets || targets.length < 2) return
-
-    // Determine question: use current input if present; otherwise last user message
-    const trimmed = message.trim()
-    const lastUser = [...driftOnlyMessages].reverse().find(m => m.isUser)
-    const questionText = trimmed || lastUser?.text || ''
-    if (!questionText) return
-
-    // If using new input, append it to the drift conversation for continuity
-    let workingDrift: Message[] = driftOnlyMessages
-    if (trimmed) {
-      const newMsg: Message = { id: 'drift-' + Date.now().toString(), text: questionText, isUser: true, timestamp: new Date() }
-      setMessages(prev => [...prev, newMsg])
-      setDriftOnlyMessages(prev => [...prev, newMsg])
-      workingDrift = [...driftOnlyMessages, newMsg]
-      setMessage('')
-    }
-
-    // Build API messages with system context. Mirror the single-model path:
-    // ground the answer in the parent conversation so each model disambiguates
-    // "${selectedText}" the same way the user means it.
-    const compareContext = contextMessages.slice(-8).map(msg => {
-      const body = msg.text.length > 1200 ? msg.text.slice(0, 1200) + '…' : msg.text
-      return `${msg.isUser ? 'User' : 'Assistant'}: ${body}`
-    }).join('\n')
-    const baseConversation = workingDrift.filter(msg => !msg.text.startsWith('What would you like to know about'))
-    const apiMessages: (OpenRouterMessage | OllamaMessage | DummyMessage)[] = [
-      {
-        role: 'system',
-        content: compareContext
-          ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${compareContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies. Don't repeat the basic definition they can already see; add NEW value — the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate; don't invent facts.`
-          : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`
-      },
-      ...baseConversation.map(msg => ({ role: msg.isUser ? 'user' as const : 'assistant' as const, content: msg.text }))
-    ]
-
-    // If the last message in baseConversation isn't the question (when input was empty), ensure the API sees the question
-    if (!trimmed && (!lastUser || lastUser.text !== questionText)) {
-      apiMessages.push({ role: 'user', content: questionText })
-    } else if (trimmed) {
-      // When we just appended the user input locally, also reflect it in apiMessages
-      apiMessages.push({ role: 'user', content: questionText })
-    }
-
-    // Prepare per-target abort controllers for concurrent streaming
-    const controllers: Record<string, AbortController> = {}
-    compareAbortControllersRef.current = controllers
-    setIsTyping(true)
-    setIsComparing(true)
-
-    try {
-      // Compare group id for this run
-      const groupId = `cmp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
-
-      // Create placeholders and start all streams concurrently
-      const tasks = targets.map(t => {
-        const aiId = `drift-compare-${t.key}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
-        const placeholder: Message = { 
-          id: aiId, text: '', isUser: false, timestamp: new Date(), 
-          modelTag: t.label, compareGroupId: groupId, laneKey: t.key 
-        }
-        setMessages(prev => [...prev, placeholder])
-        setDriftOnlyMessages(prev => [...prev, placeholder])
-
-        const onChunk = (chunk: string) => {
-          setMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
-          setDriftOnlyMessages(prev => prev.map(m => m.id === aiId ? { ...m, text: (m.text || '') + chunk } : m))
-        }
-        const controller = new AbortController()
-        controllers[t.key] = controller
-
-        const run = async () => {
-          try {
-            if (t.provider === 'openrouter') {
-              const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
-              const settingsKey = aiSettings.openRouterApiKey
-              const apiKey = envKey || settingsKey
-              if (!apiKey) {
-                onChunk('[OpenRouter] Missing API key. Configure in Settings.')
-              } else {
-                const model = (t.key === 'qwen3' || t.label === 'Qwen3')
-                  ? OPENROUTER_MODELS.QWEN3
-                  : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
-                await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, controller.signal, model)
-              }
-            } else if (t.provider === 'ollama') {
-              await sendMessageToOllama(apiMessages as OllamaMessage[], onChunk, controller.signal, aiSettings.ollamaUrl, aiSettings.ollamaModel)
-            } else {
-              // no-op
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Failed to get response.'
-            onChunk(`\n\n[${t.label}] ${msg}`)
-          }
-        }
-
-        return run()
-      })
-
-      await Promise.allSettled(tasks)
-    } finally {
-      setIsTyping(false)
-      setIsComparing(false)
-      compareAbortControllersRef.current = null
-    }
-  }
-
-  const handleSaveAsChat = () => {
-    // If already saved, handle undo
-    if (savedAsChat && savedChatId && onUndoSaveAsChat) {
-      onUndoSaveAsChat(savedChatId)
-      setSavedAsChat(false)
-      setSavedChatId(null)
-      
-      // Also update pushed messages if they exist
-      if (pushedToMain && onUpdatePushedDriftSaveStatus) {
-        // Just update the save status, don't re-push
-        onUpdatePushedDriftSaveStatus(sourceMessageId)
-      }
-      return
-    }
-    
-    const title = `Drift: ${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}`
-    const metadata = {
-      isDrift: true,
-      parentChatId,
-      sourceMessageId,
-      selectedText,
-      createdAt: new Date()
-    }
-    // Filter out the system message when saving as a new chat
-    // The banner will provide all the context needed
-    const messagesToSave = driftOnlyMessages.filter(
-      msg => !msg.text.startsWith('🌀 Drift started from:')
-    )
-    
-    const newChatId = 'drift-' + Date.now().toString()
-    setSavedChatId(newChatId)
-    
-    onSaveAsChat(messagesToSave, title, { ...metadata, id: newChatId })
-    setSavedAsChat(true)
-    
-    // If already pushed to main, update those messages to mark as saved
-    if (pushedToMain && onUpdatePushedDriftSaveStatus) {
-      onUpdatePushedDriftSaveStatus(sourceMessageId)
-    }
-    // Don't close - let user decide if they want to continue or close
-    // onClose()
-  }
-  
-  const handlePushToMain = async () => {
-    const clickId = Math.random().toString(36).substring(7)
-    console.log(`[BUTTON-CLICK ${clickId}] Push button clicked`)
-    console.log(`[BUTTON-CLICK ${clickId}] Current state - pushedToMain:`, pushedToMain, 'isPushing:', isPushing)
-    
-    // If already pushed, handle undo
-    if (pushedToMain && lastPushSourceId && onUndoPushToMain) {
-      console.log(`[BUTTON-CLICK ${clickId}] Undoing previous push`)
-      onUndoPushToMain(lastPushSourceId)
-      setPushedToMain(false)
-      setLastPushSourceId(null)
-      setPushedContentSignature(null)
-      return
-    }
-    
-    // Prevent multiple pushes while one is in progress
-    if (pushedToMain || isPushing) {
-      console.log(`[BUTTON-CLICK ${clickId}] BLOCKED - Already pushed or pushing`)
-      return
-    }
-    
-    if (onPushToMain && driftOnlyMessages.length > 0) {
-      // Filter out the system message when pushing to main
-      const messagesToPush = driftOnlyMessages.filter(
-        msg => !msg.text.startsWith('What would you like to know about')
-      )
-      
-      if (messagesToPush.length > 0) {
-        // Create a content signature to track what we're pushing
-        const contentSignature = messagesToPush.map(m => `${m.isUser}:${m.text}`).join('|||')
-        
-        // Check if we've already pushed this exact content
-        if (pushedContentSignature === contentSignature) {
-          console.log('DriftPanel: Preventing duplicate push - same content already pushed')
-          return
-        }
-        
-        // Set pushing state to prevent double-clicks
-        setIsPushing(true)
-        
-        try {
-          // Find the last user question in the drift conversation
-          const lastUserMessage = messagesToPush.filter(m => m.isUser).pop()
-          const userQuestion = lastUserMessage?.text || selectedText
-          
-          // Create a consistent push ID based on message content
-          // This helps prevent duplicate pushes of the same content
-          const messageHash = messagesToPush.map(m => m.text).join('').substring(0, 10)
-          const pushSourceId = `${sourceMessageId}-push-${messageHash}-${Date.now()}`
-          
-          const pushAttemptId = Math.random().toString(36).substring(7)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Initiating push to main`)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] sourceId:`, pushSourceId)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Messages:`, messagesToPush.length)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Content signature:`, contentSignature.substring(0, 50))
-          
-          const chatIdToUse = savedChatId || driftChatId || `drift-temp-full-${Date.now()}`
-          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, chatIdToUse)
-          
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Push call completed`)
-          setPushedToMain(true)
-          setPushedMessageCount(messagesToPush.length)
-          setLastPushSourceId(pushSourceId)
-          setPushedContentSignature(contentSignature)
-          
-          // Store the full conversation so it can be reconstructed when clicked
-          if (onClose && driftOnlyMessages.length > 0) {
-            onClose(driftOnlyMessages)
-          }
-        } finally {
-          setIsPushing(false)
-        }
-        // Don't close - let user decide if they also want to save as chat
-        // onClose()
-      }
-    }
-  }
-
   return (
     <div className={`
       fixed inset-0 z-30
@@ -1113,7 +500,7 @@ Rules:
         flex flex-col overflow-hidden
       `}>
         {/* Header */}
-        <header className="relative z-10 border-b border-white/[0.05] bg-dark-surface/95 backdrop-blur-xl pt-safe">
+        <header className="relative z-10 border-b border-dark-border bg-dark-surface/95 backdrop-blur-xl pt-safe">
           {/* Quiet breathing accent — the space stays alive while idle, settles
               while a thought is materializing. */}
           {!isTyping && (
@@ -1146,7 +533,8 @@ Rules:
                   ? connectQuestion.length > 36 ? connectQuestion.slice(0, 36) + '…' : connectQuestion
                   : 'Connect')
               : templateType === 'simplify' ? 'Simplify'
-              : templateType ? 'Deep dive'
+              : templateType === 'research' ? 'Deep dive'
+              : templateType === 'challenge' ? 'Challenge'
               : null
 
             return (
@@ -1154,7 +542,7 @@ Rules:
                 {/* Back / Close */}
                 <button
                   onClick={handleBack}
-                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-white/50 hover:text-white/80 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
+                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-secondary hover:text-text-primary hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
                   title={templateType === 'connect' && connectQuestion ? 'Back to suggestions' : 'Close'}
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -1171,7 +559,7 @@ Rules:
                       />
                     )}
                     <span
-                      className="text-[15px] font-semibold text-white/90 truncate leading-snug select-none"
+                      className="text-[15px] font-semibold text-text-primary truncate leading-snug select-none"
                       title={selectedText}
                     >
                       {selectedText}
@@ -1189,16 +577,16 @@ Rules:
                         <span key={i} className="flex items-center gap-0 shrink-0">
                           <button
                             onClick={() => onNavigateToBreadcrumb?.(i)}
-                            className="flex items-center gap-0.5 text-[11px] text-white/35 hover:text-white/65 transition-colors max-w-[110px]"
+                            className="flex items-center gap-0.5 text-[11px] text-text-muted hover:text-text-secondary transition-colors max-w-[110px]"
                             title={entry.isMainChat ? entry.label : entry.selectedText}
                           >
                             {entry.isMainChat && <Home className="w-2.5 h-2.5 shrink-0 mr-0.5" />}
                             <span className="truncate leading-none">{entry.label}</span>
                           </button>
-                          <span className="text-[10px] text-white/20 mx-0.5 select-none">›</span>
+                          <span className="text-[10px] text-text-muted mx-0.5 select-none">›</span>
                         </span>
                       ))}
-                      <span className="text-[11px] text-white/55 font-medium leading-none truncate max-w-[110px]">{selectedText}</span>
+                      <span className="text-[11px] text-text-secondary font-medium leading-none truncate max-w-[110px]">{selectedText}</span>
                     </div>
                   ) : modeLabel ? (
                     <span className={`text-[11px] font-medium leading-snug mt-[1px]
@@ -1217,7 +605,7 @@ Rules:
                       onClick={handlePushToMain}
                       disabled={isPushing}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                        ${pushedToMain ? 'text-accent-pink bg-accent-pink/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                        ${pushedToMain ? 'text-accent-pink bg-accent-pink/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                       title={isPushing ? 'Pushing…' : pushedToMain ? 'Undo push to main' : 'Push to main chat'}
                     >
                       {pushedToMain ? <Undo2 className="w-[17px] h-[17px]" /> : <Upload className="w-[17px] h-[17px]" />}
@@ -1228,7 +616,7 @@ Rules:
                         onClick={handleCompareAcrossModels}
                         disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
                         className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                         title="Compare across models"
                       >
                         <Megaphone className="w-[17px] h-[17px]" />
@@ -1238,7 +626,7 @@ Rules:
                     <button
                       onClick={handleSaveAsChat}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 active:scale-90 shrink-0
-                        ${savedAsChat ? 'text-cyan-300 bg-cyan-500/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                        ${savedAsChat ? 'text-cyan-300 bg-cyan-500/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                       title={savedAsChat ? 'Undo save as chat' : 'Save as chat'}
                     >
                       {savedAsChat ? <Undo2 className="w-[17px] h-[17px]" /> : <Bookmark className="w-[17px] h-[17px]" />}
@@ -1249,7 +637,7 @@ Rules:
                 {/* Expand — always anchored right */}
                 <button
                   onClick={() => setIsExpanded(v => !v)}
-                  className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full text-white/35 hover:text-white/65 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
+                  className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full text-text-muted hover:text-text-secondary hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
                   title={isExpanded ? 'Collapse' : 'Expand'}
                 >
                   {isExpanded ? <Minimize2 className="w-[17px] h-[17px]" /> : <Maximize2 className={`w-[17px] h-[17px] ${showExpandHint ? 'text-accent-pink' : ''}`} />}
@@ -1263,28 +651,37 @@ Rules:
             without returning to the chat. Each lens keeps its own thread. Hidden in
             Connect's bridge sub-mode (you're inside an answer there). */}
         {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
-          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
             {([
               { tpl: undefined, label: 'Drift' },
               { tpl: 'simplify', label: 'Simplify' },
               { tpl: 'research', label: 'Deep dive' },
               { tpl: 'connect', label: 'Connect' },
+              { tpl: 'challenge', label: 'Challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
               return (
                 <button
                   key={l.label}
-                  onClick={() => { if (!active) onSwitchLens(l.tpl) }}
+                  onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
                   className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
                     ${active
                       ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
-                      : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20'}`}
+                      : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border'}`}
                 >
                   {l.label}
                 </button>
               )
             })}
+          </div>
+        )}
+        {/* First-run hint: the lens switcher is an invisible affordance — teach it once. */}
+        {onSwitchLens && !(templateType === 'connect' && connectQuestion) && !seenLensHint && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-accent-violet/15 bg-accent-violet/[0.06] shrink-0">
+            <Sparkles className="w-3 h-3 text-accent-violet/70 shrink-0" />
+            <span className="text-[11px] text-text-muted leading-snug flex-1">Same term, a new angle — try <span className="text-accent-violet/90 font-medium">Simplify</span>, <span className="text-accent-violet/90 font-medium">Deep dive</span>, or <span className="text-accent-violet/90 font-medium">Connect</span>.</span>
+            <button onClick={markLensHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3 h-3" /></button>
           </div>
         )}
 
@@ -1295,11 +692,11 @@ Rules:
           const prev = idx > 0 ? siblingDrifts[idx - 1] : null
           const next = idx >= 0 && idx < siblingDrifts.length - 1 ? siblingDrifts[idx + 1] : null
           return (
-            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0">
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0">
               <button
                 onClick={() => prev && onNavigateToSibling(prev)}
                 disabled={!prev}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -1319,7 +716,7 @@ Rules:
                       className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
                         ${isCurrent
                           ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
-                          : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20 hover:bg-white/[0.04]'}`}
+                          : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border hover:bg-white/[0.04]'}`}
                       title={sib.selectedText}
                     >
                       {sib.selectedText}
@@ -1330,7 +727,7 @@ Rules:
               <button
                 onClick={() => next && onNavigateToSibling(next)}
                 disabled={!next}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={next ? `Next: "${next.selectedText}"` : 'No next term'}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -1404,10 +801,12 @@ Rules:
                             onClick={() => openConnectThread(q)}
                             className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
                             style={{
-                              borderColor: visited ? `${k.color}66` : 'rgba(255,255,255,0.07)',
-                              background: visited ? `${k.color}14` : 'rgba(26,26,26,0.4)',
+                              // Neutral, theme-aware surface for unvisited connections
+                              // (was a fixed dark grey that looked wrong on the light canvas).
+                              borderColor: visited ? `${k.color}66` : 'rgb(var(--color-border))',
+                              background: visited ? `${k.color}14` : 'rgb(var(--color-elevated))',
                             }}
-                            title={`See how "${selectedText}" connects to ${e.concept}`}
+                            title={bridgeQuestion(e.concept)}
                           >
                             {/* connector + glowing synapse node sitting on the rail */}
                             <span
@@ -1473,7 +872,7 @@ Rules:
                 <input
                   type="text"
                   placeholder="Connect to anything…"
-                  className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-white/[0.08] focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
+                  className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-dark-border focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       const val = (e.target as HTMLInputElement).value.trim()
@@ -1536,7 +935,7 @@ Rules:
                         onMouseLeave={() => setHoveredMessageId(null)}
                       >
                         <div className="relative" data-drift-message-id={col.id}>
-                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-dark-elevated border border-white/[0.08] text-text-secondary min-h-[40px]">
+                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-dark-elevated border border-dark-border text-text-secondary min-h-[40px]">
                             {/* Overlay header chips: model tag (left) + actions (right) */}
                             {!col.isUser && (
                               <>
@@ -1592,6 +991,23 @@ Rules:
                     >
                       <div className="px-4 py-2.5 bg-accent-violet/15 border border-accent-violet/25 rounded-2xl rounded-br-md">
                         <p className={`text-sm text-text-primary leading-relaxed ${getRTLClassName(msg.text)}`} dir={getTextDirection(msg.text)}>{msg.text}</p>
+                      </div>
+                    </div>
+                  ) : msg.isError ? (
+                    /* Recoverable inline error — clearly an error, with retry */
+                    <div className="w-full" data-drift-message-id={msg.id}>
+                      <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-rose-500/[0.08] border border-rose-500/25">
+                        <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-text-secondary leading-relaxed">{msg.text}</p>
+                          <button
+                            onClick={retryLastMessage}
+                            disabled={isTyping}
+                            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Try again
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -1709,7 +1125,8 @@ Rules:
                 <button
                   key={i}
                   onClick={() => { setDriftSuggestions([]); sendMessage(s) }}
-                  className="text-left px-3 py-2 rounded-xl text-[12px] text-text-secondary
+                  dir="auto"
+                  className="text-start px-3 py-2 rounded-xl text-[12px] text-text-secondary
                     border border-accent-violet/20 bg-accent-violet/[0.04]
                     hover:border-accent-violet/40 hover:text-text-primary hover:bg-accent-violet/[0.10]
                     transition-all duration-150"
@@ -1744,7 +1161,7 @@ Rules:
                   className={`
                     w-full bg-dark-elevated text-text-primary text-[13px]
                     rounded-2xl px-4 py-3 pr-24
-                    border border-white/[0.08]
+                    border border-dark-border
                     focus:outline-none focus:border-accent-violet/30
                     focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]
                     placeholder:text-text-muted/50
@@ -1771,7 +1188,7 @@ Rules:
                   {isTyping && (
                     <button
                       onClick={stopGeneration}
-                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-dark-border text-text-muted hover:text-text-primary transition-all active:scale-90"
                       title="Stop generating"
                     >
                       <Square className="w-3.5 h-3.5" fill="currentColor" />

@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Bookmark, GitBranch, BookOpen, Telescope, Link2 } from 'lucide-react'
+import { Bookmark, GitBranch, BookOpen, Telescope, Link2, Swords } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
-type TemplateType = 'simplify' | 'research' | 'connect'
+type TemplateType = 'simplify' | 'research' | 'connect' | 'challenge'
 
 interface SelectionTooltipProps {
   onStartDrift: (text: string, messageId: string, templateType?: TemplateType) => void
@@ -17,10 +17,27 @@ interface TooltipState {
   visible: boolean
   x: number
   y: number
+  /** 'above' anchors the tooltip's bottom edge to y (renders upward); 'below' anchors its top edge. */
+  placement: 'above' | 'below'
   text: string
   messageId: string
   isUserMessage: boolean
   anchorRect: DOMRect
+}
+
+/** Read an env(safe-area-inset-*) value (px) via a one-off probe element. */
+function safeInset(side: 'top' | 'bottom' | 'left' | 'right'): number {
+  if (typeof document === 'undefined') return 0
+  try {
+    const probe = document.createElement('div')
+    probe.style.cssText = `position:fixed;left:-9999px;top:-9999px;${side === 'top' || side === 'bottom' ? 'height' : 'width'}:env(safe-area-inset-${side});`
+    document.body.appendChild(probe)
+    const px = (side === 'top' || side === 'bottom') ? probe.offsetHeight : probe.offsetWidth
+    document.body.removeChild(probe)
+    return Number.isFinite(px) ? px : 0
+  } catch {
+    return 0
+  }
 }
 
 /** Minimum selection length to show the tooltip (avoids showing on accidental clicks). */
@@ -84,21 +101,54 @@ export default function SelectionTooltip({
     lastAnchorRectRef.current = null
   }, [])
 
-  /** Clamp tooltip position so it never escapes the viewport. */
-  const clampToViewport = useCallback(
-    (rawX: number, rawY: number): { x: number; y: number } => {
-      // We'll estimate tooltip width ~160px, height ~40px
-      const tooltipW = 160
-      const tooltipH = 44
+  /**
+   * Position the desktop floating tooltip so it (and every button) stays fully
+   * within the viewport. Flips below the selection when there isn't room above,
+   * and clamps X so the horizontal edges never overflow. Accounts for safe-area
+   * insets so notches/home-indicators don't clip it on mobile web.
+   */
+  const positionTooltip = useCallback(
+    (anchor: DOMRect): { x: number; y: number; placement: 'above' | 'below' } => {
+      // Worst-case dimensions for the full tooltip (incl. template row). Using a
+      // generous estimate guarantees clamping keeps the whole control on-screen.
+      const tooltipW = 300
+      const tooltipH = 96
+      const gap = 10
       const margin = 8
+      const insetT = safeInset('top')
+      const insetB = safeInset('bottom')
+      const insetL = safeInset('left')
+      const insetR = safeInset('right')
 
-      const x = Math.min(
-        Math.max(rawX, tooltipW / 2 + margin),
-        window.innerWidth - tooltipW / 2 - margin,
-      )
-      const y = Math.max(rawY, tooltipH + margin)
+      const vw = window.innerWidth
+      const vh = window.innerHeight
 
-      return { x, y }
+      // Decide placement: prefer above, flip below if it would overflow the top.
+      const spaceAbove = anchor.top - insetT - margin
+      const placement: 'above' | 'below' = spaceAbove >= tooltipH + gap ? 'above' : 'below'
+
+      // Anchor Y: for 'above' we anchor the tooltip's BOTTOM edge just above the
+      // selection; for 'below' we anchor its TOP edge just below it. The render
+      // uses translateY accordingly.
+      let y: number
+      if (placement === 'above') {
+        y = anchor.top - gap
+        // Ensure the top of the (upward-growing) tooltip clears the safe inset.
+        y = Math.max(y, insetT + margin + tooltipH)
+      } else {
+        y = anchor.bottom + gap
+        // Ensure the bottom edge clears the safe inset.
+        y = Math.min(y, vh - insetB - margin - tooltipH)
+        y = Math.max(y, insetT + margin)
+      }
+
+      // Center horizontally on the selection, then clamp both edges on-screen.
+      const rawX = anchor.left + anchor.width / 2
+      const minX = insetL + margin + tooltipW / 2
+      const maxX = vw - insetR - margin - tooltipW / 2
+      const x = maxX >= minX ? Math.min(Math.max(rawX, minX), maxX) : vw / 2
+
+      return { x, y, placement }
     },
     [],
   )
@@ -161,21 +211,20 @@ export default function SelectionTooltip({
           visible: true,
           x: 0,
           y: 0,
+          placement: 'above',
           text,
           messageId: msgId,
           isUserMessage,
           anchorRect: rect,
         })
       } else {
-        // Position above the selection, centred horizontally
-        const rawX = rect.left + rect.width / 2
-        const rawY = Math.max(rect.top - 10, 8)
-        const { x, y } = clampToViewport(rawX, rawY)
+        const { x, y, placement } = positionTooltip(rect)
 
         setTooltip({
           visible: true,
           x,
           y,
+          placement,
           text,
           messageId: msgId,
           isUserMessage,
@@ -184,7 +233,7 @@ export default function SelectionTooltip({
       }
       showTimerRef.current = null
     }, SHOW_DELAY_MS)
-  }, [clearShowTimer, clampToViewport, isTouchDevice])
+  }, [clearShowTimer, positionTooltip, isTouchDevice])
 
   // --------------------------------------------------------------------------
   // Touch / iOS events
@@ -251,8 +300,10 @@ export default function SelectionTooltip({
     if (isTouchDevice) return
 
     const handleMouseUp = (e: MouseEvent) => {
-      // Don't process clicks that land on the tooltip itself
-      if ((e.target as HTMLElement).closest('.drift-tooltip')) return
+      // Don't process clicks that land on the tooltip itself. Guard non-element
+      // targets (e.g. synthetic events dispatched on document) which lack closest().
+      const tgt = e.target
+      if (tgt instanceof Element && tgt.closest('.drift-tooltip')) return
 
       // Cancel any pending show timer from a previous mouseup
       clearShowTimer()
@@ -307,14 +358,13 @@ export default function SelectionTooltip({
 
         // Apply show delay so tooltip doesn't flash on quick clicks
         showTimerRef.current = window.setTimeout(() => {
-          const rawX = rect.left + rect.width / 2
-          const rawY = Math.max(rect.top - 10, 8)
-          const { x, y } = clampToViewport(rawX, rawY)
+          const { x, y, placement } = positionTooltip(rect)
 
           setTooltip({
             visible: true,
             x,
             y,
+            placement,
             text,
             messageId: msgId,
             isUserMessage,
@@ -363,8 +413,11 @@ export default function SelectionTooltip({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!tooltip) return
       // Don't intercept if user is typing in an input/textarea
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
+      const tgt = e.target
+      if (tgt instanceof HTMLElement) {
+        const tag = tgt.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tgt.isContentEditable) return
+      }
 
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
@@ -395,7 +448,7 @@ export default function SelectionTooltip({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tooltip, clearHideTimer, clearShowTimer, clampToViewport, dismissTooltip, isTouchDevice])
+  }, [tooltip, clearHideTimer, clearShowTimer, positionTooltip, dismissTooltip, isTouchDevice])
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -428,6 +481,7 @@ export default function SelectionTooltip({
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: BookOpen },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Link2 },
+    { type: 'challenge', label: 'Challenge', desc: 'Argue the other side',  Icon: Swords },
   ]
 
   const handleSave = () => {
@@ -469,7 +523,7 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-stretch rounded-2xl bg-[#1c1c1e]/95 backdrop-blur-2xl border border-white/10 shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+        <div className="flex items-stretch rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
           {!tooltip.isUserMessage ? (
             <>
               {/* Primary Drift action — most prominent, pink→violet gradient */}
@@ -490,8 +544,8 @@ export default function SelectionTooltip({
                   key={t.type}
                   type="button"
                   className="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
-                             text-text-secondary border-l border-white/[0.06]
-                             transition-colors duration-150 active:bg-white/[0.07] active:text-white whitespace-nowrap"
+                             text-text-secondary border-l border-dark-border
+                             transition-colors duration-150 active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap"
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
@@ -501,8 +555,8 @@ export default function SelectionTooltip({
               ))}
               <button
                 type="button"
-                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-white/[0.06]
-                           active:text-white active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
+                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-dark-border
+                           active:text-text-primary active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
                 onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
                 onClick={handleSave}
                 aria-label="Save to snippets"
@@ -513,7 +567,7 @@ export default function SelectionTooltip({
           ) : (
             <button
               type="button"
-              className="flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium text-text-secondary active:bg-white/[0.07] transition-colors duration-150"
+              className="flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium text-text-secondary active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150"
               onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
               onClick={handleSave}
             >
@@ -534,7 +588,7 @@ export default function SelectionTooltip({
       style={{
         left: `${tooltip.x}px`,
         top: `${tooltip.y}px`,
-        transform: 'translate(-50%, -100%)',
+        transform: tooltip.placement === 'below' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
         pointerEvents: 'auto',
       }}
       onMouseDown={(e) => {
@@ -607,8 +661,12 @@ export default function SelectionTooltip({
         )}
       </div>
 
-      {/* Downward arrow */}
-      <div className="absolute left-1/2 -translate-x-1/2 top-full w-2.5 h-2.5 bg-dark-surface/95 rotate-45 border-r border-b border-dark-border/70" />
+      {/* Arrow — points down when tooltip sits above the selection, up when below */}
+      {tooltip.placement === 'below' ? (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-2.5 h-2.5 bg-dark-surface/95 rotate-45 border-l border-t border-dark-border/70" />
+      ) : (
+        <div className="absolute left-1/2 -translate-x-1/2 top-full w-2.5 h-2.5 bg-dark-surface/95 rotate-45 border-r border-b border-dark-border/70" />
+      )}
     </div>
   )
 }

@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 3, 2026
+**Date:** June 7, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 44 (iOS Xcode) / web
-**Status:** Five waves. (A) Screenshot polish. (B) Reliability. (C) Connect redesign — relationship typing, alive hub/edges, RTL. (D) Content-quality + map-quality — transliteration, map bridge-node opens conversation, meaningful map labels, filter redesign, full generation-prompt rewrite. (E) Providers + Settings wave — Add-Models reorganised around the 4 frontier labs (OpenAI/Anthropic/Gemini/Grok; OpenAI/Anthropic/Grok routed through OpenRouter, Gemini stays native & untouched), Settings screen redesigned (branded luminous glyphs, softer cards), swipe-to-open-sidebar removed (collided with text selection), Ollama/Qwen3 default presets removed. (Bundle: index ~787 kB / gzip ~235 kB.)
+**Build:** 53 (iOS Xcode) / web
+**Status:** This session (Jun 7, entries 166–167): **Map + panel UX polish pass** — filter live-search (fade-away animation), chip-tap pulse highlight, RTL arrow fixes (Hebrew), Connect card light-mode colors (token-based), detail card coverage fix (reduced height), zoom button subtlety (transparent bg at rest), chips tone-down (removed glows, muted inactive). Added keyboard shortcuts overlay + honest Login screen. tsc + vite build + Capacitor sync clean (build bumped 52→53). **Ready for TestFlight.** Prior session (Jun 7 morning, entry 165): Drift Map redesigned to "luminous cards" (native-HTML glass cards, Hebrew/RTL fix, collision-free layout, docked inspector). Prior (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,130 @@
 ---
 
 ## What Was Done This Session
+
+### 167. Keyboard shortcuts + honest Login (FEATURE, Jun 7)
+- **ShortcutsHelp.tsx** (new) — overlay modal on `?` key or header button. Shows keyboard shortcuts (⌘K search, ⌘⌥N new, ⌘⌥G map, ?) and feature tips (Drift, Lenses, Snippets, Map, Synthesize). Escape/click-outside closes, scrollable content, 460px width.
+- **useKeyboardShortcuts.ts** — extended with `onToggleHelp` handler; `?` key ignored when typing in input/textarea/contentEditable.
+- **Login.tsx** — removed fake password, dead social buttons, "Forgot password". Single optional name field, honest "Enter Drift →" button. Reassurance: "No account needed — your conversations stay on this device."
+- Files: `ShortcutsHelp.tsx`, `useKeyboardShortcuts.ts`, `Login.tsx`, `App.tsx` (render ShortcutsHelp, add helpOpen state/handler).
+
+### 166. Map + panel UX polish pass (POLISH, Jun 7)
+- **Filter live-search** — fade-away animation (opacity 0 on hidden cards, pointerEvents none), 0.3s ease transition; matches auto-focus on single result.
+- **Chip-tap pulse** — cards matching active chip get 1.1s dkgCardPulse ring on tap; added zoomBy helper (0.4x–2.4x clamps, zoom around canvas center).
+- **RTL arrow direction** — dirArrow() helper detects Hebrew/Arabic script, returns '←' for RTL / '→' for LTR; applied to Connect bridges + breadcrumb separators.
+- **Connect card light-mode** — changed surface from hardcoded rgba(26,26,26,0.4) to rgb(var(--color-elevated)); border from rgba(255,255,255,0.07) to rgb(var(--color-border)). Light-mode :root:not(.dark) overrides apply.
+- **Detail card coverage** — reduced max-height 46% → 40%, preview clamp 5 → 3 lines; added smart re-fit when inspector opens/closes (toggled = selection changed).
+- **Zoom button subtlety** — changed from rgba(255,255,255,0.035) bg to transparent at rest; faint bg (0.07) only on hover. Border 0.06 opacity, icon 0.4. Reduced 34px → 28px with tighter gap. Light mode: fit buttons transparent, search pill retains faint bg.
+- **Chips tone-down** — removed glows/shadows; inactive chips: neutral text + hairline border + 6% hue whisper; active chip full hue. Reduced hover brightness filter.
+- All changes verified with tsc + vite build. Bundle: main 757.81 kB / gzip 231.81 kB.
+
+### 165. Drift Map redesign — "luminous cards" (Jun 7)
+
+**Goal:** the Drift Map is the "record of a mind in motion." It was tiny orbs in a void with labels crammed around them, and Hebrew was garbled. Rebuilt it Apple/Notion-grade.
+
+**Files:** `src/components/DriftKnowledgeGraph.tsx` (the bulk), `src/App.tsx` (panel width / margin / open-drift wiring), `src/index.css` (synthesis artifact), `src/lib/format.ts` (added shared `timeAgo`).
+
+**Core architectural change — text is now native HTML, not SVG.**
+- The root cause of garbled/reversed Hebrew was rendering labels as SVG `<text>` (no bidi support, no wrapping). Now every node is an **HTML card** in a layer that *shares the SVG pan/zoom transform* (`translate(view.x,view.y) scale(view.scale)`), so cards scale 1:1 with the map. This gives correct `dir="auto"` bidi + real wrapping AND keeps the non-overlap guarantee (everything scales uniformly). SVG is now used **only** for the connector "rivers" + gradients.
+
+**Node = card (`.dkg-card`).** Anatomy, top→bottom:
+- **Initiating-term pill** (`.dkg-card-term`) = `metadata.selectedText` — the highlighted text that spawned the drift (e.g. "ירושלים"). This is what makes each card self-identifying; hidden when redundant with the title.
+- **Title** = `nodeTopic(chat, null)` (full question / "term → term" bridge), 3-line clamp.
+- **Gist** = `nodeAnswerGist`/`cleanGist` — a clean *complete* first sentence (filler-stripped, declarative, capitalized for Latin), 2-line clamp.
+- **Meta** = luminous depth-orb + "Origin/↗ Drift · N msgs · time".
+- Depth encoded by `HUES` (violet→indigo→sky→cyan) via card glow/border/orb.
+
+**Layout (`layoutTree`/`measureNode`):** left→right columns (depth = x), each card reserves a vertical band = its **bounded** height (lines estimated with deliberately-low chars-per-line so estimate ≥ actual wrap → bands never overlap). `COL=372`, card widths 252/276 (root). Narrow-deep reads as a long chain; wide as a tall fan. Hierarchy is correct because it follows `parentChatId` (nested-drift logic in `useDriftActions.ts` already sets the right parent).
+
+**Connectors:** `ribbonPath`/`flowPath` rivers attach to card **edges** (parent right → child left), tapered + weighted by child message volume, with a subtle animated flow pulse.
+
+**Atmosphere/motion:** removed drifting motes; calmer deep navy-violet gradient; staggered card-rise on open; hover-lift; selected ring; "alive" pulse on recently-touched cards; level-of-detail (title-only when `view.scale < 0.58`). All gated by `prefersReducedMotion`.
+
+**Inspector (the tap target):** the old floating `DetailCard` overlapped the map. It's now a **docked bottom inspector** — the canvas shrinks to make room, so it never covers cards. Shows term pill + full title + lineage breadcrumb + generous preview + "Open this drift / Go to chat". Map starts with **no selection** (map is the hero on open).
+
+**Panel expand + layout fixes (`App.tsx`):**
+- Expand toggle (⤢/⤡ in the desktop header, `expanded`/`onToggleExpand` props) widens the panel `min(680px,56vw)` → `min(1040px,90vw)` (~+53%), smooth transition, map re-fits.
+- The main column's right margin is now **dynamic** (`mainRightMargin`, gated to ≥1024px via `isLgUp`) and matches the actual open panel width — so the map (or expanded map) **never covers the chat** (old bug: fixed `mr-[480px]` vs 680px panel).
+- **"Open this drift" fix:** navigating from the map now **closes the map** on desktop too (it used to open the drift *behind* the still-open map → looked like nothing happened).
+- Canvas "recenter/fit" control icon changed to `Maximize` (frame) so it's distinct from the expand arrows (`Maximize2`/`Minimize2`).
+
+**Synthesis artifact** (earlier in session): `.synthesis-card` in `index.css` + render in `App.tsx` — accent rule, ✦ eyebrow, "woven from N drifts" source chips, Explore-next CTA.
+
+**Verified:** `npx tsc --noEmit -p tsconfig.app.json` clean; `npm run build` clean; ran `npm run dev` (served 200) and iterated live against a real Hebrew session.
+
+**Open / next ideas for the map (where to continue):**
+- The term pill relies on `metadata.selectedText`; very old drifts without it fall back to just the question. (New drifts always have it.)
+- Consider: flip hierarchy so the **term is the headline** and question is secondary (user asked to consider).
+- Possible: richer empty state in card language (currently still ghost orbs); show more of the lineage chain on the card; LOD tuning; mobile pass of the docked inspector.
+- **Not committed yet** — review the diff, then commit on `feature/apple-level-overhaul` (use the `xcode` skill to build/sync/commit + bump build for TestFlight if desired).
+
+### 164. Refactor completion + security audit (REFACTOR SUMMARY, build 52)
+- **Tier B refactor complete:** All five `DriftPanel.tsx` decomposition slices extracted and verified (commits `00965d9` through `c99fb3d`). DriftPanel 1916→**1199 lines**. Behavior-preserving: every state movement + effect + handler shipped as-is; all five slices verified with tsc + vite build + Playwright smoke (mix of live Gemini and mocked SSE per slice). See `REFACTOR_HANDOFF.md` for detailed handoff + next optional polish.
+- **Security audit findings — ACTION REQUIRED:** Two Gemini API keys exposed:
+  1. **Key in git history** (`AIzaSyAAQ4C79…`): committed in pushed main (commit `0ff024e` + 3 later). Permanent — anyone who clones the repo can recover via `git log -S`. If repo is public, assume already harvested.
+  2. **Key in `.env` inlined into bundle**: Vite's `VITE_`-prefixed vars inline into the built JS plaintext. Every TestFlight/web build ships the key.
+- **User actions (not code — only the user can do this):**
+  1. Rotate **both keys** in Google AI Studio (https://ai.studio).
+  2. Raise/reset the Gemini **spend cap** (currently 429 RESOURCE_EXHAUSTED, blocking live AI). Raise cap at https://ai.studio/spend.
+  3. Long-term: move Gemini key behind a server-side proxy so no LLM key ships in the client bundle.
+- **Code-level hardening already completed:** (a) key sent via `x-goog-api-key` header, not URL `?key=` (avoids proxy/CDN logging); (b) API-key copy button removed from Settings; (c) API keys stripped from backup exports; (d) no dangerouslySetInnerHTML/XSS sinks, no telemetry exfiltrating chats.
+
+### 163. Extract Connect-mode logic into useConnectThreads (REFACTOR slice 5, build 52)
+- Extracted 198 lines of Connect state + 4 effects + bridgeQuestion + openConnectThread into `src/hooks/useConnectThreads.ts`. Owns: `connectCards`, `connectQuestion`, `connectAnswersRef` (memoized visited-answer cache), `connectVisitedVersion` (version bump for UI updates), `initConnectState()`, `bridgeQuestion()`, `openConnectThread()`.
+- **Subtle stale-render guards carried verbatim:** (a) `skipStaleCardParseRef` — when switching terms/lenses, the panel's init effect arms a flag so the card parser doesn't key the PREVIOUS thread's JSON onto the newly-selected term (the "Connect shows the wrong drift" bug). (b) `!raw.startsWith('[')` prose guard — only parse as JSON if it looks like `[…]`, not prose (prevents "No connections found" after lens-switch when old prose answer lingers). (c) `chipSessionRef` — a ref tracking the active chip conversation so React batching can't lose messages before we save them to cache.
+- All panel-owned state setters + shared `autoSentRef` passed as deps → hook reads/writes exactly what the inline implementation did. Verified with tsc + Playwright smoke: cards parse & render, tap bridge → streams in, back to suggestions → cards still present (cached), re-tap same bridge → restores instantly (zero new bridge AI calls).
+
+### 162. Extract push/save actions into useDriftPanelActions (REFACTOR slice 4, build 52)
+- Extracted 282 lines of push/save state + 7 handlers + 2 lifecycle helpers into `src/hooks/useDriftPanelActions.ts`. Exports: `pushedToMain`, `savedAsChat`, `savedMessageIds`, `isPushing` (state); `handlePushSingleMessage`, `handleToggleSaveMessage`, `handleSaveAsChat`, `handlePushToMain` (handlers); `resetPushSaveState`, `loadSavedMessageIds` (lifecycle).
+- **Key logic moved intact:** (a) Push guards (content signature check + duplicate prevention via `pushedContentSig`). (b) Snippet save/unsave via `snippetStorage`. (c) Reset-push-button effect fires when new messages arrive post-push (shows "Push to main" button again, not "Undo push"). (d) `loadSavedMessageIds()` hydrates from DB on mount.
+- DriftPanel now calls the hook at the top level, destructuring handlers + state; passed all required deps (driftOnlyMessages, selectedText, sourceMessageId, parentChatId, driftChatId, onPushToMain callback, onSaveAsChat callback, undo callbacks). Verified with tsc + live Gemini Playwright smoke: full drift flow works (create drift → send message → get reply → push/undo → save-as-chat/undo, all state transitions correct, no console errors).
+
+### 161. Connect bridge question — localized to chat language (FIX, build 50)
+- The Connect bridge question was still hardcoded English (`How does "X" connect to Y?`) → mixed LTR/RTL in Hebrew chats (per TestFlight screenshot). Added `bridge` to `DriftLabels` (EN/HE: `איך "X" קשור ל-Y?`); `bridgeQuestion()` now uses it; the connect-card tooltip uses the localized question too.
+- **Critical companion fix:** two regexes detect a bridge thread by the English "connect to" text — `App.tsx` `bridgeUserMsg` (sets `connectQuestion` on open) and `DriftKnowledgeGraph.tsx` `nodeTopic` (map "X → Y" label). Both now also match the Hebrew `קשור ל-` form, so a localized bridge still opens as a conversation (not the cards list) and still labels correctly on the map. English alternation kept for back-compat with already-created bridges.
+
+### 160. Map "Open this drift" bug — losing the answer (FIX)
+- **Root cause:** Drift sessions registered into `chatHistory` at first-message (question only); answer only lived in temp store. `onOpenDrift` wrongly preferred the stale chatHistory snapshot over the fuller temp store.
+- **Fixes:** (a) `onOpenDrift` + `resolveDriftRestore` now pick the FULLEST of three sources (ensures answer comes back). (b) Added debounced flush of growing drift conversation into chatHistory/IDB (survives reload; was in-memory only). `App.tsx`: new `driftPersistTimerRef`, 700ms debounce on each incoming message.
+
+### 159. Synthesis "Next:" is now clickable (FEATURE)
+- Extract the `**Next:**` open question from synthesis prose using a regex, strip it from the body (no duplication), render as a dedicated "Explore next" chip with the question text. Tap sends it as a real LLM call (`sendMessage` now accepts optional override text). RTL-aware (Hebrew question renders correctly).
+
+### 158. Lens labels localized to chat language (FEATURE)
+- Drift scaffolding (the opener + "Simplify this" / "Deep dive into this" / etc.) is now localized: Hebrew chat gets Hebrew labels, English chat gets English. Detected by script (Hebrew range `[֐-׿]`) sampled from the term + recent parent messages.
+- **New module-level helpers:** `DRIFT_LABELS_EN` / `DRIFT_LABELS_HE` dicts, `driftLabelsFor()` sampler, `isDriftOpenerText()` / `isDriftScaffoldText()` predicates. All four internal filters that strip scaffolding from the API conversation now use language-agnostic predicates (so localizing doesn't leak the opener or create duplicates in pushed drifts). Hebrew labels: `opener`, `connectFinding`, `prefixes` dict.
+- (Bundle: index ~806 kB / gzip ~241 kB — minimal change.)
+
+### 157. Discoverability — one-time coachmarks (FEATURE)
+- New `src/lib/onceFlags.ts` (`hasSeen`/`markSeen` + `useOnceFlag` hook, localStorage-backed, fails safe to "seen"). Two first-run hints for invisible affordances: (a) `App.tsx` — a drift-gesture pill above the composer once a reply is on screen, auto-dismissed forever the first time any drift opens; (b) `DriftPanel.tsx` — a lens-switcher hint under the "View as" bar, dismissed on first lens use. Map already had a teaching empty state — left as-is.
+
+### 156. Continuity — survive reload + "pick up where you left off" (FEATURE)
+- `App.tsx`: effect rebuilds the in-memory `lensRegistryRef` from persisted `driftInfos` on load, so per-term/lens threads survive a reload. New `resumableTrees` memo surfaces un-synthesized trees (≥2 real drifts) as resume cards in the empty state — tap switches to the chat, "✦ Bring it home" triggers `handleSynthesize`. (Composite `{id}__connect` lens-thread connect-state is still in-memory only — survives session, not reload; minor follow-up.)
+
+### 155. Semantic concept layer — Gemini embeddings (FEATURE / INTELLIGENCE)
+- The knowledge layer was lexical-only (`termIndex.findRelatedDrifts` exact+substring; `SearchModal` `indexOf`). Added meaning-based recall reusing the existing Gemini key (no new service):
+  - `src/services/embeddings.ts` — `embedTexts` (model `gemini-embedding-001`, 768-dim via `outputDimensionality`, batch `:batchEmbedContents`, AbortController+timeout, graceful `[]` on any error) + `cosineSimilarity`.
+  - `db.ts` — DB_VERSION 1→2, **additive** `drift-embeddings` store (guarded `oldVersion < 2`, chats untouched) + `embeddingDB` CRUD.
+  - `src/lib/embeddingBackfill.ts` — debounced fire-and-forget backfill, djb2 content-hash so it re-embeds only on change, in-memory cache.
+  - `src/lib/semanticRecall.ts` — merges lexical-first + semantic neighbors (threshold 0.62), returns `TermOccurrence[]` (no consumer shape change).
+  - Wiring: `App.tsx` "you explored this before" (`relatedDrifts` shows lexical instantly, semantic fills in) + `SearchModal` "Related by meaning" section.
+  - **Degrades to lexical with no key / Demo / offline.** Live test (`scripts/test-embeddings.mjs`): sim(Messi, "Argentine forward")=0.75, sim(Messi, PSG)=0.64, sim(Messi, photosynthesis)=0.49 → PASS.
+  - `// TODO(semantic):` seams left in `DriftPanel.tsx` (Connect-lens seeding) + `DriftKnowledgeGraph.tsx` (semantic map edges) — deliberately out of scope.
+
+### 154. Web QA — keyless Demo + mobile-web fixes (FIX)
+- `DriftPanel.tsx`: added the `dummy` (Demo) provider branch — drifts were throwing "No Gemini key" in keyless Demo mode; `App.tsx` `selectedProvider` resolver now passes `'dummy'` through. `index.css`: `100dvh` (input bar no longer clipped by mobile browser chrome). `SnippetGallery.tsx`: `navigator.clipboard?.` guard (non-HTTPS). Removed `console.log`s that leaked the API key / full settings (`DriftPanel.tsx`, `settingsStorage.ts`).
+
+### 153. Drift panel — Connect keying, lens/pill sync, per-term persistence (FIX)
+- Root cause: the init effect was missing `driftChatId` in its deps, so switching terms left the previous term's Connect cards/messages mounted (Barcelona header showing Inter Miami's cards). Added `driftChatId` to deps (authoritative identity → header+messages+Connect reset together); `skipStaleCardParseRef` stops the parser keying the old drift's cards onto a new term; `messagesThreadRef` ensures per-term saves never land under the wrong key (fixes the "previous question vanished" symptom). Verified per-(term×lens) state persists across term switches (`navigateToSiblingDrift`→`resolveDriftRestore`) and lens switches (`handleSwitchLens`).
+
+### 152. Drift Map — lineage + clickable-term nodes (FIX / FEATURE)
+- `DriftKnowledgeGraph.tsx`: node `<title>` carries the full breadcrumb (Messi → PSG → goals) on hover/long-press; DetailCard shows a breadcrumb trail; plus an **at-a-glance** parent-term context label rendered above each drift node (e.g. `↳ PSG` over the goals question), RTL-safe, parent-hue. `InlineListLink.tsx`: clickable AI terms now dispatch `drift:start-from-term` → routed through `handleStartDrift`, so they record as real map nodes/edges (previously they only scrolled).
+
+### 151. Drift Map — mobile open-then-close fix (FIX)
+- Two compounding causes: the toggle double-fired (framer-motion tap + synthesized click flipped state twice), and the `ErrorBoundary` was conditionally mounted with `onError → close`, so any transient throw yanked the map shut on open. Fixed with a 450ms re-entrancy-guarded `toggleKnowledgeGraph` (reads live state via `getState`) and removed the auto-close-on-error (boundary now contains errors in place).
+
+### 150. Sidebar — differentiate chats / drifts / synthesis (DESIGN)
+- New `src/components/SidebarChatRow.tsx` + a grouping pass in `App.tsx`. Three distinct row types (Chat / Drift / Synthesis) each with its own icon + treatment; drifts nest under their source conversation (resolves up `parentChatId` to root) with a violet rail + `from <parent>` caption; synthesis detected via `/✦ Synthesis/i` on `lastMessage`. Search / rename / context-menu / pin all preserved.
 
 ### 149. Settings — remove Ollama/Qwen3 default seeds + lab-key clarity (FIX)
 - `settingsStorage.ts`: dropped the default `ollama` (llama2) and `qwen3` presets from `defaultSettings.modelPresets`, AND added a migration in `get()` that strips `LEGACY_DEFAULT_PRESET_IDS = {ollama, qwen3}` from already-saved settings (stable ids; user-added Ollama/OpenRouter models get slugged ids so they're untouched). Ollama still available via "More options".
@@ -350,7 +474,11 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **TestFlight submission** — archive build 44 in Xcode → upload to App Store Connect.
+- [ ] **🔴 ACTION REQUIRED (security)** — rotate both exposed Gemini API keys in Google AI Studio (https://ai.studio); raise/reset spend cap at https://ai.studio/spend (currently 429 RESOURCE_EXHAUSTED). Details in entry 164.
+- [ ] **TestFlight submission (build 52)** — archive in Xcode → upload to App Store Connect. Build number incremented 51→52, Capacitor synced, web assets ready.
+- [ ] **On-device pass — this session (Jun 6)** — verify: refactored hooks work on-device (drift → send message → reply → push/undo → save-as-chat); Connect mode (tap bridge → stream answer → cache hit on re-tap); no regressions from slices 4–5.
+- [ ] **On-device pass — prior sessions (Jun 4, Jun 3 PM)** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall.
+- [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
 - [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
 - [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.
 - [ ] **(Optional) Native Anthropic + Gemini** — if a native Anthropic key is wanted, wire `api.anthropic.com` directly (CORS ok with `anthropic-dangerous-direct-browser-access` header); would make OpenAI/Grok-via-OpenRouter a hybrid. Left as-is for now by request.

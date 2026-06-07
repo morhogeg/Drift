@@ -1,6 +1,6 @@
 ---
 name: drift-prompt
-description: Help draft, refine, and test AI system prompts for Drift's template features (Connect, Simplify, Deep dive, and any new ones). Prompts live in DriftPanel.tsx TEMPLATE_SYSTEM_PROMPTS.
+description: Help draft, refine, and test AI system prompts for Drift's template features (Connect, Simplify, Deep dive, and any new ones). Prompts live in src/lib/driftPanel.ts TEMPLATE_SYSTEM_PROMPTS.
 disable-model-invocation: false
 ---
 
@@ -20,4 +20,4 @@ You are helping design system prompts for Drift, an exploratory AI chat app wher
 5. Optionally: show a sample input → expected output pair to validate it
 
 ## Location of prompts
-`src/components/DriftPanel.tsx` → `TEMPLATE_SYSTEM_PROMPTS` object (around line 124)
+`src/lib/driftPanel.ts` → `TEMPLATE_SYSTEM_PROMPTS` object
