@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 6, 2026
+**Date:** June 7, 2026
 **Branch:** `feature/apple-level-overhaul`
 **Build:** 52 (iOS Xcode) / web
-**Status:** This session (Jun 6) — **Tier B refactor COMPLETE**: extracted DriftPanel.tsx slices 4–5 into `useConnectThreads` + `useDriftPanelActions` hooks (entries 162–164); DriftPanel 1916→1199 lines; all 5 slices verified (tsc + vite build + Playwright smoke). Security action required: two Gemini keys exposed (one in git history, one inlined in bundle); user must rotate both in Google AI Studio + raise spend cap (currently 429 RESOURCE_EXHAUSTED). Prior session (Jun 4, entries 158–161): on-device bug fixes (map "Open drift" losing answer + reload persistence, synthesis "Next" clickable, lens labels + Connect bridge localized). (Bundle: index ~752 kB / gzip ~229 kB.)
+**Status:** This session (Jun 7) — **Drift Map redesigned to "luminous cards" (entry 165)**: nodes are now native-HTML glass cards (fixes Hebrew/RTL that SVG `<text>` garbled), each leading with the initiating-term pill + question + answer gist; collision-free left→right card layout that scales with the map; tapered river connectors; refined-cosmic atmosphere; docked bottom inspector (no longer covers cards); synthesis "artifact" card; expandable panel; main column reflows so the panel never covers it. All in `DriftKnowledgeGraph.tsx` (+ `App.tsx`, `index.css`, `lib/format.ts`). tsc + vite build clean; verified live via `npm run dev`. **Not yet committed.** Prior session (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,46 @@
 ---
 
 ## What Was Done This Session
+
+### 165. Drift Map redesign — "luminous cards" (Jun 7)
+
+**Goal:** the Drift Map is the "record of a mind in motion." It was tiny orbs in a void with labels crammed around them, and Hebrew was garbled. Rebuilt it Apple/Notion-grade.
+
+**Files:** `src/components/DriftKnowledgeGraph.tsx` (the bulk), `src/App.tsx` (panel width / margin / open-drift wiring), `src/index.css` (synthesis artifact), `src/lib/format.ts` (added shared `timeAgo`).
+
+**Core architectural change — text is now native HTML, not SVG.**
+- The root cause of garbled/reversed Hebrew was rendering labels as SVG `<text>` (no bidi support, no wrapping). Now every node is an **HTML card** in a layer that *shares the SVG pan/zoom transform* (`translate(view.x,view.y) scale(view.scale)`), so cards scale 1:1 with the map. This gives correct `dir="auto"` bidi + real wrapping AND keeps the non-overlap guarantee (everything scales uniformly). SVG is now used **only** for the connector "rivers" + gradients.
+
+**Node = card (`.dkg-card`).** Anatomy, top→bottom:
+- **Initiating-term pill** (`.dkg-card-term`) = `metadata.selectedText` — the highlighted text that spawned the drift (e.g. "ירושלים"). This is what makes each card self-identifying; hidden when redundant with the title.
+- **Title** = `nodeTopic(chat, null)` (full question / "term → term" bridge), 3-line clamp.
+- **Gist** = `nodeAnswerGist`/`cleanGist` — a clean *complete* first sentence (filler-stripped, declarative, capitalized for Latin), 2-line clamp.
+- **Meta** = luminous depth-orb + "Origin/↗ Drift · N msgs · time".
+- Depth encoded by `HUES` (violet→indigo→sky→cyan) via card glow/border/orb.
+
+**Layout (`layoutTree`/`measureNode`):** left→right columns (depth = x), each card reserves a vertical band = its **bounded** height (lines estimated with deliberately-low chars-per-line so estimate ≥ actual wrap → bands never overlap). `COL=372`, card widths 252/276 (root). Narrow-deep reads as a long chain; wide as a tall fan. Hierarchy is correct because it follows `parentChatId` (nested-drift logic in `useDriftActions.ts` already sets the right parent).
+
+**Connectors:** `ribbonPath`/`flowPath` rivers attach to card **edges** (parent right → child left), tapered + weighted by child message volume, with a subtle animated flow pulse.
+
+**Atmosphere/motion:** removed drifting motes; calmer deep navy-violet gradient; staggered card-rise on open; hover-lift; selected ring; "alive" pulse on recently-touched cards; level-of-detail (title-only when `view.scale < 0.58`). All gated by `prefersReducedMotion`.
+
+**Inspector (the tap target):** the old floating `DetailCard` overlapped the map. It's now a **docked bottom inspector** — the canvas shrinks to make room, so it never covers cards. Shows term pill + full title + lineage breadcrumb + generous preview + "Open this drift / Go to chat". Map starts with **no selection** (map is the hero on open).
+
+**Panel expand + layout fixes (`App.tsx`):**
+- Expand toggle (⤢/⤡ in the desktop header, `expanded`/`onToggleExpand` props) widens the panel `min(680px,56vw)` → `min(1040px,90vw)` (~+53%), smooth transition, map re-fits.
+- The main column's right margin is now **dynamic** (`mainRightMargin`, gated to ≥1024px via `isLgUp`) and matches the actual open panel width — so the map (or expanded map) **never covers the chat** (old bug: fixed `mr-[480px]` vs 680px panel).
+- **"Open this drift" fix:** navigating from the map now **closes the map** on desktop too (it used to open the drift *behind* the still-open map → looked like nothing happened).
+- Canvas "recenter/fit" control icon changed to `Maximize` (frame) so it's distinct from the expand arrows (`Maximize2`/`Minimize2`).
+
+**Synthesis artifact** (earlier in session): `.synthesis-card` in `index.css` + render in `App.tsx` — accent rule, ✦ eyebrow, "woven from N drifts" source chips, Explore-next CTA.
+
+**Verified:** `npx tsc --noEmit -p tsconfig.app.json` clean; `npm run build` clean; ran `npm run dev` (served 200) and iterated live against a real Hebrew session.
+
+**Open / next ideas for the map (where to continue):**
+- The term pill relies on `metadata.selectedText`; very old drifts without it fall back to just the question. (New drifts always have it.)
+- Consider: flip hierarchy so the **term is the headline** and question is secondary (user asked to consider).
+- Possible: richer empty state in card language (currently still ghost orbs); show more of the lineage chain on the card; LOD tuning; mobile pass of the docked inspector.
+- **Not committed yet** — review the diff, then commit on `feature/apple-level-overhaul` (use the `xcode` skill to build/sync/commit + bump build for TestFlight if desired).
 
 ### 164. Refactor completion + security audit (REFACTOR SUMMARY, build 52)
 - **Tier B refactor complete:** All five `DriftPanel.tsx` decomposition slices extracted and verified (commits `00965d9` through `c99fb3d`). DriftPanel 1916→**1199 lines**. Behavior-preserving: every state movement + effect + handler shipped as-is; all five slices verified with tsc + vite build + Playwright smoke (mix of live Gemini and mocked SSE per slice). See `REFACTOR_HANDOFF.md` for detailed handoff + next optional polish.

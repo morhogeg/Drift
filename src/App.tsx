@@ -31,7 +31,7 @@ import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
 import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
-import { sanitizeText, formatDate } from '@/lib/format'
+import { sanitizeText, formatDate, timeAgo } from '@/lib/format'
 import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useCoachMark } from '@/hooks/useCoachMark'
 import { useAuth } from '@/hooks/useAuth'
@@ -196,6 +196,22 @@ function App() {
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
 
+  // Drift Map "expand" (desktop): widens the map panel for a larger view. Tracked
+  // here (not inside the map) so the main column's right margin can match the panel
+  // width and never get covered.
+  const [mapExpanded, setMapExpanded] = useState(false)
+  const [isLgUp, setIsLgUp] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
+  )
+  useEffect(() => {
+    const m = window.matchMedia('(min-width: 1024px)')
+    const h = () => setIsLgUp(m.matches)
+    m.addEventListener('change', h)
+    return () => m.removeEventListener('change', h)
+  }, [])
+  // The map panel's width (kept in sync with DriftKnowledgeGraph's desktop panel).
+  const mapPanelWidth = mapExpanded ? 'min(1040px, 90vw)' : 'min(680px, 56vw)'
+
   // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
   // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
   // same gesture (open → immediately close). Guard the toggle so it can't flip
@@ -233,6 +249,12 @@ function App() {
 
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
+
+  // Right margin the main column reserves so the open side panel never covers it
+  // (matches the actual panel width, including the map's expanded width).
+  const mainRightMargin = isLgUp
+    ? (knowledgeGraphOpen ? mapPanelWidth : driftOpen ? 'min(450px, 56vw)' : 0)
+    : 0
 
   // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
   // Index every prior drift by its term (cheap; reads only what's persisted).
@@ -1438,10 +1460,10 @@ function App() {
       <div
         className={`
           flex-1 min-w-0 flex flex-col relative
-          transition-all duration-150 ease-in-out
+          transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-          ${(driftOpen || knowledgeGraphOpen) ? 'lg:mr-[480px]' : 'mr-0'}
         `}
+        style={{ marginRight: mainRightMargin }}
         onTouchStart={swipeHandlers.onTouchStart}
         onTouchEnd={swipeHandlers.onTouchEnd}
       >
@@ -1845,6 +1867,26 @@ function App() {
                 // the prose body so it isn't duplicated).
                 const synthNext = isSynthesis ? (msg.text.match(/\*\*Next:\*\*\s*([\s\S]+?)\s*$/)?.[1]?.trim() || null) : null
                 const synthBody = synthNext ? msg.text.replace(/\n*\*\*Next:\*\*[\s\S]*$/, '').trim() : msg.text
+                // The artifact renders its own header band, so strip the leading
+                // "## ✦ Synthesis · N drifts" heading from the prose we display.
+                const synthDisplay = isSynthesis
+                  ? synthBody.replace(/^##\s*✦?\s*Synthesis[^\n]*\n+/i, '').trim()
+                  : msg.text
+                // The drift branches this synthesis was woven from — derived live from
+                // the tree (survives reloads; chips open each source drift).
+                const synthSources: { term: string; chatId: string }[] = []
+                if (isSynthesis) {
+                  const seenSrc = new Set<string>()
+                  const walkSrc = (pid: string) => {
+                    for (const c of chatHistory) {
+                      if (seenSrc.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
+                      seenSrc.add(c.id)
+                      synthSources.push({ term: (c.metadata?.selectedText || c.title || 'Drift').trim(), chatId: c.id })
+                      walkSrc(c.id)
+                    }
+                  }
+                  walkSrc(activeChatId)
+                }
 
                 if (isDriftHeader || msg.isHiddenContext) return null
 
@@ -2179,6 +2221,33 @@ function App() {
                               </ReactMarkdown>
                             </div>
                           ) : (
+                            <>
+                            {isSynthesis && (
+                              <div className="synthesis-artifact-head">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="synthesis-eyebrow">✦ Synthesis</span>
+                                  <span className="text-[10.5px] font-medium" style={{ color: 'rgba(255,255,255,0.42)' }}>
+                                    woven from {synthSources.length || ''} {synthSources.length === 1 ? 'drift' : 'drifts'}
+                                    {(() => { const t = timeAgo(msg.timestamp); return t ? ` · ${t}` : '' })()}
+                                  </span>
+                                </div>
+                                {synthSources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mb-3">
+                                    {synthSources.slice(0, 8).map((s) => (
+                                      <button
+                                        key={s.chatId}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); switchChat(s.chatId) }}
+                                        dir={getTextDirection(s.term)}
+                                        className="synthesis-source-chip"
+                                        title={`Open drift: ${s.term}`}
+                                      >
+                                        ↗ {s.term.length > 26 ? s.term.slice(0, 26) + '…' : s.term}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div
                               className={`${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
                               dir={getTextDirection(msg.text)}
@@ -2224,9 +2293,10 @@ function App() {
                                   }
                                 })()}
                               >
-                                {sanitizeText(isSynthesis && synthNext ? synthBody : msg.text)}
+                                {sanitizeText(isSynthesis ? synthDisplay : msg.text)}
                               </ReactMarkdown>
                             </div>
+                            </>
                           )}
 
                           {/* Synthesis "Next" — the open question the synthesis ends on,
@@ -2719,7 +2789,9 @@ function App() {
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
-          onClose={() => setKnowledgeGraphOpen(false)}
+          expanded={mapExpanded}
+          onToggleExpand={() => setMapExpanded(v => !v)}
+          onClose={() => { setMapExpanded(false); setKnowledgeGraphOpen(false) }}
           onSwitchChat={switchChat}
           onScrollToMessage={(msgId) => {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)
