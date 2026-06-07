@@ -2,8 +2,8 @@
 
 **Date:** June 7, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 52 (iOS Xcode) / web
-**Status:** This session (Jun 7) — **Drift Map redesigned to "luminous cards" (entry 165)**: nodes are now native-HTML glass cards (fixes Hebrew/RTL that SVG `<text>` garbled), each leading with the initiating-term pill + question + answer gist; collision-free left→right card layout that scales with the map; tapered river connectors; refined-cosmic atmosphere; docked bottom inspector (no longer covers cards); synthesis "artifact" card; expandable panel; main column reflows so the panel never covers it. All in `DriftKnowledgeGraph.tsx` (+ `App.tsx`, `index.css`, `lib/format.ts`). tsc + vite build clean; verified live via `npm run dev`. **Not yet committed.** Prior session (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
+**Build:** 53 (iOS Xcode) / web
+**Status:** This session (Jun 7, entries 166–167): **Map + panel UX polish pass** — filter live-search (fade-away animation), chip-tap pulse highlight, RTL arrow fixes (Hebrew), Connect card light-mode colors (token-based), detail card coverage fix (reduced height), zoom button subtlety (transparent bg at rest), chips tone-down (removed glows, muted inactive). Added keyboard shortcuts overlay + honest Login screen. tsc + vite build + Capacitor sync clean (build bumped 52→53). **Ready for TestFlight.** Prior session (Jun 7 morning, entry 165): Drift Map redesigned to "luminous cards" (native-HTML glass cards, Hebrew/RTL fix, collision-free layout, docked inspector). Prior (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,22 @@
 ---
 
 ## What Was Done This Session
+
+### 167. Keyboard shortcuts + honest Login (FEATURE, Jun 7)
+- **ShortcutsHelp.tsx** (new) — overlay modal on `?` key or header button. Shows keyboard shortcuts (⌘K search, ⌘⌥N new, ⌘⌥G map, ?) and feature tips (Drift, Lenses, Snippets, Map, Synthesize). Escape/click-outside closes, scrollable content, 460px width.
+- **useKeyboardShortcuts.ts** — extended with `onToggleHelp` handler; `?` key ignored when typing in input/textarea/contentEditable.
+- **Login.tsx** — removed fake password, dead social buttons, "Forgot password". Single optional name field, honest "Enter Drift →" button. Reassurance: "No account needed — your conversations stay on this device."
+- Files: `ShortcutsHelp.tsx`, `useKeyboardShortcuts.ts`, `Login.tsx`, `App.tsx` (render ShortcutsHelp, add helpOpen state/handler).
+
+### 166. Map + panel UX polish pass (POLISH, Jun 7)
+- **Filter live-search** — fade-away animation (opacity 0 on hidden cards, pointerEvents none), 0.3s ease transition; matches auto-focus on single result.
+- **Chip-tap pulse** — cards matching active chip get 1.1s dkgCardPulse ring on tap; added zoomBy helper (0.4x–2.4x clamps, zoom around canvas center).
+- **RTL arrow direction** — dirArrow() helper detects Hebrew/Arabic script, returns '←' for RTL / '→' for LTR; applied to Connect bridges + breadcrumb separators.
+- **Connect card light-mode** — changed surface from hardcoded rgba(26,26,26,0.4) to rgb(var(--color-elevated)); border from rgba(255,255,255,0.07) to rgb(var(--color-border)). Light-mode :root:not(.dark) overrides apply.
+- **Detail card coverage** — reduced max-height 46% → 40%, preview clamp 5 → 3 lines; added smart re-fit when inspector opens/closes (toggled = selection changed).
+- **Zoom button subtlety** — changed from rgba(255,255,255,0.035) bg to transparent at rest; faint bg (0.07) only on hover. Border 0.06 opacity, icon 0.4. Reduced 34px → 28px with tighter gap. Light mode: fit buttons transparent, search pill retains faint bg.
+- **Chips tone-down** — removed glows/shadows; inactive chips: neutral text + hairline border + 6% hue whisper; active chip full hue. Reduced hover brightness filter.
+- All changes verified with tsc + vite build. Bundle: main 757.81 kB / gzip 231.81 kB.
 
 ### 165. Drift Map redesign — "luminous cards" (Jun 7)
 

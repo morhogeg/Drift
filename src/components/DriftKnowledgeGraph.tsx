@@ -14,7 +14,7 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, GitBranch, Maximize, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
+import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +41,65 @@ interface TreeNode {
   chat: ChatSession
   phrase: string | undefined
   children: TreeNode[]
+  /** Which lens opened this drift — drives the card's lens tag. `undefined` = a
+   *  plain free-form drift (no template). Lives on the *parent* message's
+   *  driftInfos, so it's resolved during tree construction. */
+  lens?: 'simplify' | 'research' | 'connect' | 'challenge'
+}
+
+// The user-facing name for each lens. Plain drifts (no templateType) read "Drift".
+const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
+  simplify: 'Simplify',
+  research: 'Deep dive',
+  connect: 'Connect',
+  challenge: 'Challenge',
+}
+function lensLabel(node: TreeNode): string {
+  return node.lens ? LENS_LABELS[node.lens] : 'Drift'
+}
+
+/** The lens a drift was opened with, read from its parent message's driftInfos.
+ *  Returns undefined for plain drifts (and when the link can't be found). */
+function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens'] {
+  for (const c of chats) {
+    for (const m of c.messages ?? []) {
+      const info = m.driftInfos?.find(d => d.driftChatId === driftChatId)
+      if (!info) continue
+      if (info.templateType) return info.templateType
+      // A Connect drift may pre-date persisted templateType — infer it from the
+      // cached cards/answers (same fallback App.tsx uses when opening the drift).
+      if ((info.connectCards?.length ?? 0) > 0 ||
+          (info.connectAnswers && Object.keys(info.connectAnswers).length > 0)) return 'connect'
+      return undefined
+    }
+  }
+  return undefined
+}
+
+// The lens scaffolding each template injects into the drift's own conversation —
+// the system opener and the auto-sent trigger, in every supported language. These
+// are the reliable signal for Connect *bridges* (which never get a parent
+// driftInfos.templateType) and any drift whose parent link was rebuilt from temp
+// chats. Kept in sync with driftPanel.ts DRIFT_LABELS_* / TEMPLATE_TRIGGER_PREFIXES.
+const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עבור|Show me what this connects to|הראה למה זה מתחבר)/
+const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
+const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
+const CHALLENGE_SCAFFOLD_RE = /^(Challenge this|ערער על זה)/
+const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
+
+/** Infer the lens from a drift's own messages — used when the parent driftInfos
+ *  don't carry a templateType (notably Connect bridges, "term → concept"). */
+function detectLensFromChat(chat: ChatSession): TreeNode['lens'] {
+  for (const m of chat.messages ?? []) {
+    const t = (m.text ?? '').trim()
+    if (!t) continue
+    if (CONNECT_SCAFFOLD_RE.test(t)) return 'connect'
+    if (m.isUser && BRIDGE_USER_RE.test(t)) return 'connect'   // "How does X connect to Y?"
+    if (SIMPLIFY_SCAFFOLD_RE.test(t)) return 'simplify'
+    if (RESEARCH_SCAFFOLD_RE.test(t)) return 'research'
+    if (CHALLENGE_SCAFFOLD_RE.test(t)) return 'challenge'
+  }
+  return undefined
 }
 
 // ── Data helpers (preserved) ────────────────────────────────────────────────────
@@ -152,7 +211,8 @@ function buildTree(chats: ChatSession[], rootId: string): TreeNode | null {
   function build(id: string, phrase: string | undefined): TreeNode | null {
     const chat = chatMap.get(id)
     if (!chat) return null
-    return { chat, phrase, children: (childrenMap.get(id) ?? []).map(c => build(c.id, c.metadata?.selectedText)).filter(Boolean) as TreeNode[] }
+    const lens = chat.metadata?.isDrift ? (findLensType(id, chats) ?? detectLensFromChat(chat)) : undefined
+    return { chat, phrase, lens, children: (childrenMap.get(id) ?? []).map(c => build(c.id, c.metadata?.selectedText)).filter(Boolean) as TreeNode[] }
   }
   return build(rootId, undefined)
 }
@@ -293,6 +353,13 @@ function nodeAnswerGist(chat: ChatSession): string {
   return ''
 }
 
+/** Reading-direction arrow between a "source → target" pair. Points LEFT for RTL
+ *  scripts (Hebrew/Arabic) so the flow still reads source→target once the run is
+ *  laid out right-to-left; otherwise the usual right arrow. */
+function dirArrow(sample: string): string {
+  return /[֐-׿؀-ۿ܀-߿]/.test(sample) ? '←' : '→'
+}
+
 /** A meaningful label for a drift node. Priority: the Connect bridge it explored
  *  ("Barcelona → Cruyff"), then a genuine user question, then the gist of the first
  *  real answer (so Simplify/Deep-dive lenses on one term stay distinct & informative),
@@ -307,7 +374,7 @@ function nodeTopic(chat: ChatSession, clip: number | null = 32): string {
     if (!m.isUser) continue
     const bridge = m.text.trim().match(/connect(?:s|ed)?\s+to\s+(.+?)[?.]?$/i)
       || m.text.trim().match(/קשור\s+ל-?\s*(.+?)[?.]?$/)
-    if (bridge?.[1]) return `${term} → ${bridge[1].trim()}`
+    if (bridge?.[1]) return `${term} ${dirArrow(term + bridge[1])} ${bridge[1].trim()}`
   }
   // 2) A genuine user follow-up question (not a template opener).
   for (const m of msgs) {
@@ -353,7 +420,8 @@ function lineageChain(laid: Laid): string[] {
 /** RTL-safe breadcrumb string. `dir="auto"` on the host element keeps Hebrew/
  *  Arabic chains correctly ordered; the arrow renders fine in both directions. */
 function lineageLabel(laid: Laid): string {
-  return lineageChain(laid).join('  →  ')
+  const chain = lineageChain(laid)
+  return chain.join(`  ${dirArrow(chain.join(' '))}  `)
 }
 
 /** Number duplicate phrases so chips are distinguishable: "guitarist", "guitarist 2" */
@@ -430,10 +498,13 @@ interface Laid {
 //    proven at the fit zoom holds at every zoom). Nodes are CARDS, not orbs. ──
 const CARD_W = 252        // drift card width
 const CARD_W_ROOT = 276   // origin card a touch larger
-const COL = 372           // distance between depth columns (> card width + connector gap)
-const PAD_X = 150
-const PAD_Y = 96
-const ROW_GAP = 42        // vertical breathing room between cards
+const COL = 322           // distance between depth columns (> card width + connector gap)
+const PAD_X = 140         // ≥ CARD_W_ROOT/2 so the (wider) root never clips at the left edge
+const PAD_Y = 70
+const ROW_GAP = 30        // vertical breathing room between cards
+// The smallest the fit-to-view will zoom: below this, card text stops being
+// readable, so we keep cards at least this big and let the user pan a large map.
+const MIN_FIT_SCALE = 0.7
 
 // Card height is BOUNDED (CSS line-clamps the text), so reserving the bound keeps
 // bands disjoint by construction. Heights here mirror the CSS in StyleBlock().
@@ -589,11 +660,19 @@ function GraphCanvas({
     if (!el) return
     const cw = el.clientWidth, ch = el.clientHeight
     if (!cw || !ch) return
-    const s = Math.min(cw / width, ch / height, 1.15)
+    // Prefer LEGIBLE cards over cramming the whole map into a narrow panel: never
+    // shrink below a floor — a map larger than the viewport is fine to pan. Cap
+    // zoom-in so a tiny map doesn't balloon.
+    const raw = Math.min(cw / width, ch / height)
+    const s = Math.min(1.3, Math.max(raw, MIN_FIT_SCALE))
+    const sw = width * s, sh = height * s
     setView({
       scale: s,
-      x: (cw - width * s) / 2,
-      y: (ch - height * s) / 2,
+      // Overflow horizontally → anchor the origin near the left edge (so the root
+      // is always the visible starting point); otherwise centre.
+      x: sw <= cw ? (cw - sw) / 2 : 24 - (PAD_X - CARD_W_ROOT / 2) * s,
+      // Overflow vertically → keep the tree's vertical centre centred; else centre.
+      y: (ch - sh) / 2,
     })
   }, [width, height])
 
@@ -652,6 +731,19 @@ function GraphCanvas({
     })
   }
 
+  // Button zoom — steps the scale around the canvas centre (same clamps as wheel),
+  // for when the map outgrows the viewport and pinch/wheel aren't handy.
+  const zoomBy = useCallback((factor: number) => {
+    const el = wrapRef.current
+    if (!el) return
+    const px = el.clientWidth / 2, py = el.clientHeight / 2
+    setView(v => {
+      const ns = Math.max(0.4, Math.min(2.4, v.scale * factor))
+      const k = ns / v.scale
+      return { scale: ns, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+    })
+  }, [])
+
   // Touch pinch (two-finger) — simple distance-based zoom around midpoint.
   const onTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -690,7 +782,8 @@ function GraphCanvas({
     if (id === ALL_ROOT_ID) return  // synthetic global root — not navigable
     haptics.selection()
     onSelect(id)
-    centerOn(laid)
+    // Panning is handled by the selection effect below — it runs AFTER the detail
+    // panel has docked (shrinking the canvas), so it nudges only if truly needed.
   }
 
   // Fully open: a drift opens in the focused panel; a conversation switches the chat.
@@ -703,30 +796,84 @@ function GraphCanvas({
   }
 
   // ── Search / filter ──────────────────────────────────────────────────────────
+  // Live text filter over the map: a query dims every card whose text doesn't match
+  // (and the connectors leading to it), leaving only the matches lit. Matches stay
+  // fully interactive; non-matches are dimmed and click-through-disabled so you only
+  // act on hits. Enter jumps to the first match; narrowing to a single hit focuses it.
   const [filter, setFilter] = useState('')
   const q = filter.trim().toLowerCase()
-  const nodeLabel = (laid: Laid) => (laid.node.phrase ?? laid.node.chat.title ?? '').toLowerCase()
+  // Search the card's full meaningful text — the question/bridge label, the answer
+  // gist, the drifted term, and the title — not just one field.
+  const haystack = (laid: Laid) => [
+    laid.trigger, laid.gist,
+    laid.node.chat.metadata?.selectedText, laid.node.chat.title, laid.node.phrase,
+  ].filter(Boolean).join('  ').toLowerCase()
   const isMatch = useCallback(
-    (laid: Laid) => !q || nodeLabel(laid).includes(q),
+    (laid: Laid) => !q || haystack(laid).includes(q),
     [q],
   )
+  const matches = useMemo(
+    () => q ? nodes.filter(n => n.node.chat.id !== ALL_ROOT_ID && isMatch(n)) : [],
+    [q, nodes, isMatch],
+  )
 
-  // Pan the view so a node sits at the centre of the canvas (keeps zoom).
-  const centerOn = useCallback((laid: Laid) => {
+  // Pan the view ONLY when the card isn't comfortably inside the canvas — tapping a
+  // card that's already visible must not jolt the map. Also rescues a card that the
+  // docked detail panel (which shrinks this canvas) would otherwise hide. Nudges the
+  // minimum distance to bring the card within a margin; keeps zoom untouched.
+  const ensureVisible = useCallback((laid: Laid) => {
     const el = wrapRef.current
     if (!el) return
     const cw = el.clientWidth, ch = el.clientHeight
-    setView(v => ({ ...v, x: cw / 2 - laid.x * v.scale, y: ch / 2 - laid.y * v.scale }))
+    setView(v => {
+      const s = v.scale
+      const left = v.x + (laid.x - laid.cardW / 2) * s
+      const right = v.x + (laid.x + laid.cardW / 2) * s
+      const top = v.y + (laid.y - laid.cardH / 2) * s
+      const bottom = v.y + (laid.y + laid.cardH / 2) * s
+      const M = 28   // comfortable margin from each viewport edge
+      let nx = v.x, ny = v.y
+      if (right - left < cw) {
+        if (left < M) nx += M - left
+        else if (right > cw - M) nx -= right - (cw - M)
+      } else nx += cw / 2 - (left + right) / 2   // card wider than view → centre it
+      if (bottom - top < ch) {
+        if (top < M) ny += M - top
+        else if (bottom > ch - M) ny -= bottom - (ch - M)
+      } else ny += ch / 2 - (top + bottom) / 2
+      if (Math.abs(nx - v.x) < 0.5 && Math.abs(ny - v.y) < 0.5) return v   // already in view
+      return { ...v, x: nx, y: ny }
+    })
   }, [])
 
   // Centre on whatever node becomes selected from *outside* the canvas — tapping an
   // Explored chip, keyboard nav, or an external select. Node taps already centre via
   // handleSelect; this unifies every path so a chip and a tap behave identically.
   // The initial mount is skipped so this never fights the contain-to-fit on open.
+  // A brief pulse draws the eye to the card a selection landed on — so tapping an
+  // Explored chip visibly highlights the matching square(s).
+  const [pulseId, setPulseId] = useState<string | null>(null)
   const didCenterMount = useRef(false)
+  const prevHadSelection = useRef(false)
   useEffect(() => {
-    if (!didCenterMount.current) { didCenterMount.current = true; return }
-    if (selectedId && byId.has(selectedId)) centerOn(byId.get(selectedId)!)
+    if (!didCenterMount.current) { didCenterMount.current = true; prevHadSelection.current = !!selectedId; return }
+    const hasSel = !!selectedId && byId.has(selectedId)
+    const toggled = (!!selectedId) !== prevHadSelection.current
+    prevHadSelection.current = !!selectedId
+    const timers: ReturnType<typeof setTimeout>[] = []
+    if (toggled) {
+      // The docked inspector just opened/closed → the canvas resized. Re-fit so the
+      // whole map stays in the (now smaller/larger) space and no card is hidden
+      // behind the inspector. Wait a frame for the flex layout to settle.
+      timers.push(setTimeout(() => fit(), 80))
+    } else if (hasSel) {
+      ensureVisible(byId.get(selectedId)!)
+    }
+    if (hasSel) {
+      setPulseId(selectedId)
+      timers.push(setTimeout(() => setPulseId(null), 1150))
+    }
+    return () => timers.forEach(clearTimeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
@@ -736,7 +883,7 @@ function GraphCanvas({
       const cur = selectedId ? byId.get(selectedId) : null
       if (!cur) {
         const first = nodes.find(n => n.node.chat.id !== ALL_ROOT_ID)
-        if (first) { haptics.selection(); onSelect(first.node.chat.id); centerOn(first) }
+        if (first) { haptics.selection(); onSelect(first.node.chat.id) }
         return
       }
       let best: Laid | null = null
@@ -753,7 +900,7 @@ function GraphCanvas({
         const score = along + perp * 2.5   // prefer aligned, nearby nodes
         if (score < bestScore) { bestScore = score; best = n }
       }
-      if (best) { haptics.selection(); onSelect(best.node.chat.id); centerOn(best) }
+      if (best) { haptics.selection(); onSelect(best.node.chat.id) }
     }
 
     const onKey = (e: KeyboardEvent) => {
@@ -775,14 +922,20 @@ function GraphCanvas({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, nodes, byId, centerOn])
+  }, [selectedId, nodes, byId, ensureVisible])
 
-  // Enter in the filter box selects + centres the first match.
+  // Enter in the filter box selects the first match (the effect then brings it into view).
   const jumpToFirstMatch = () => {
-    if (!q) return
-    const hit = nodes.find(n => n.node.chat.id !== ALL_ROOT_ID && nodeLabel(n).includes(q))
-    if (hit) { haptics.selection(); onSelect(hit.node.chat.id); centerOn(hit) }
+    const hit = matches[0]
+    if (hit) { haptics.selection(); onSelect(hit.node.chat.id) }
   }
+
+  // As the query narrows to exactly one card, gently bring it into view (no-op if it
+  // already is) — so finishing a search lands you on the result without an extra tap.
+  useEffect(() => {
+    if (q && matches.length === 1) ensureVisible(matches[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, matches.length])
 
   return (
     <div className="w-full h-full flex flex-col min-h-0">
@@ -802,27 +955,35 @@ function GraphCanvas({
       {/* Ambient depth gradient — calm, restrained (no drifting specks) */}
       <div className="dkg-ambient" aria-hidden />
 
-      {/* Filter box — type to find a node; Enter jumps to the first match.
-          Fixed-height pill, aligned with the recenter button; stable width (no
-          focus jump); dir="auto" so Hebrew/Arabic queries align correctly. */}
+      {/* Filter box — type to spotlight matching cards (others dim); Enter jumps to
+          the first match; a live count shows how many cards match. Fixed-height pill
+          aligned with the recenter button; dir="auto" for Hebrew/Arabic queries. */}
       <div
         className="dkg-search absolute z-20 flex items-center gap-2"
         style={{ top: 10, left: 10, height: 34 }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <Search className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
+        <Search className="w-4 h-4 flex-shrink-0" style={{ color: 'rgb(var(--color-text-muted))' }} />
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); jumpToFirstMatch() } }}
-          placeholder="Filter…"
+          placeholder="Filter cards…"
           dir="auto"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className="bg-transparent text-[13px] focus:outline-none w-[124px]"
-          style={{ color: '#fff' }}
+          className="bg-transparent text-[13px] focus:outline-none w-[112px]"
+          style={{ color: 'rgb(var(--color-text-primary))' }}
         />
+        {q && (
+          <span
+            className="flex-shrink-0 text-[11px] font-semibold tabular-nums"
+            style={{ color: matches.length ? 'rgb(var(--color-text-secondary))' : '#f0a5a5' }}
+          >
+            {matches.length || 'no'} {matches.length === 1 ? 'hit' : 'hits'}
+          </span>
+        )}
         {filter && (
           <button
             onClick={() => setFilter('')}
@@ -834,16 +995,40 @@ function GraphCanvas({
         )}
       </div>
 
-      {/* Recenter / fit-to-view control (distinct from the panel expand arrows) */}
-      <button
-        onClick={(e) => { e.stopPropagation(); fit() }}
-        className="dkg-fit absolute z-20 flex items-center justify-center rounded-full active:scale-90"
-        style={{ top: 10, right: 10, width: 34, height: 34 }}
-        title="Recenter"
-        aria-label="Recenter map"
+      {/* Zoom + recenter controls — subtle by default, brighten on hover. */}
+      <div
+        className="absolute z-20 flex flex-col gap-1"
+        style={{ top: 10, right: 10 }}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <Maximize className="w-3.5 h-3.5" />
-      </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); zoomBy(1.25) }}
+          className="dkg-fit flex items-center justify-center rounded-full active:scale-90"
+          style={{ width: 28, height: 28 }}
+          title="Zoom in"
+          aria-label="Zoom in"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); zoomBy(1 / 1.25) }}
+          className="dkg-fit flex items-center justify-center rounded-full active:scale-90"
+          style={{ width: 28, height: 28 }}
+          title="Zoom out"
+          aria-label="Zoom out"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); fit() }}
+          className="dkg-fit flex items-center justify-center rounded-full active:scale-90 mt-0.5"
+          style={{ width: 28, height: 28 }}
+          title="Fit to view"
+          aria-label="Fit map to view"
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       <svg
         className="absolute top-0 left-0"
@@ -890,8 +1075,10 @@ function GraphCanvas({
             const wStart = (onActivePath ? 5.5 : 3.6) + vol * 0.7
             const wEnd = onActivePath ? 2 : 1.3
             const ribbon = ribbonPath(px, py, cx, cy, wStart, wEnd)
+            // A filtered-out child fades its connector to match the dimmed card.
+            const dim = !!q && !isMatch(laid)
             return (
-              <g key={`edge-${laid.node.chat.id}`}>
+              <g key={`edge-${laid.node.chat.id}`} opacity={dim ? 0 : 1} style={{ transition: 'opacity 0.3s ease' }}>
                 {/* tapered base river */}
                 <path
                   d={ribbon}
@@ -960,27 +1147,32 @@ function GraphCanvas({
                 ['--hue-core' as string]: h.core,
                 ['--hue-halo' as string]: h.halo,
                 ['--hue-rim' as string]: h.rim,
-                opacity: filteredOut ? 0.16 : 1,
-                pointerEvents: 'auto',
+                opacity: filteredOut ? 0 : 1,
+                // Dimmed (non-matching) cards are click-through-disabled so a filter
+                // lets you act only on the cards you're actually looking for.
+                pointerEvents: filteredOut ? 'none' : 'auto',
                 animation: reduce ? undefined : `dkgCardRise 0.5s cubic-bezier(0.16,1,0.3,1) ${0.04 + laid.index * 0.045}s both`,
               }}
               title={lineageLabel(laid)}
               onPointerUp={(e) => { e.stopPropagation(); handleSelect(laid); drag.current = null }}
             >
+              {id === pulseId && <span className="dkg-card-pulse" aria-hidden />}
               {selTerm && (
                 <div className="dkg-card-term" dir="auto" title={selTerm}>{selTerm}</div>
               )}
               <div className="dkg-card-title" dir="auto">{laid.trigger}</div>
               {!lod && laid.gist && <div className="dkg-card-gist" dir="auto">{laid.gist}</div>}
-              {!lod && (
-                <div className="dkg-card-meta">
-                  <span className="dkg-card-orb" aria-hidden />
-                  <span className="dkg-card-eyebrow">{isRoot ? 'Origin' : '↗ Drift'}</span>
+              {/* The lens tag is ALWAYS shown (even zoomed-out) so every card is
+                  identifiable at a glance; the msg-count/time only when zoomed in. */}
+              <div className="dkg-card-meta">
+                <span className="dkg-card-orb" aria-hidden />
+                <span className="dkg-card-eyebrow">{isRoot ? 'Origin' : `↗ ${lensLabel(laid.node)}`}</span>
+                {!lod && (
                   <span className="tabular-nums" style={{ opacity: 0.75 }}>
                     · {msgs} {msgs === 1 ? 'msg' : 'msgs'}{ts ? ` · ${ts}` : ''}
                   </span>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )
         })}
@@ -1013,6 +1205,7 @@ function DetailCard({
   // Bug 7: ancestry leading to this node, minus the node itself (shown as title).
   const lineage = lineageChain(laid)
   const trail = lineage.slice(0, -1)
+  const trailArrow = dirArrow(trail.join(' '))
   const preview = lastAiPreview(laid.node.chat)
   const ts = laid.node.chat.createdAt ? timeAgo(laid.node.chat.createdAt) : null
   const msgs = laid.node.chat.messages.length
@@ -1025,7 +1218,7 @@ function DetailCard({
       style={{
         borderTop: '1px solid rgb(var(--color-border))',
         padding: isMobile ? '10px 12px calc(env(safe-area-inset-bottom) + 12px)' : '12px 16px',
-        maxHeight: '46%',
+        maxHeight: '40%',
         overflowY: 'auto',
       }}
       onPointerDown={e => e.stopPropagation()}
@@ -1041,12 +1234,12 @@ function DetailCard({
               className="text-[10px] font-bold uppercase tracking-widest"
               style={{ color: h.core }}
             >
-              {isDrift ? '↗ Drift' : 'Origin'}
+              {isDrift ? `↗ ${lensLabel(laid.node)}` : 'Origin'}
             </span>
             <button
               onClick={onDismiss}
               className="flex items-center justify-center rounded-full active:scale-90"
-              style={{ width: 22, height: 22, color: 'rgb(var(--color-text-muted))', background: 'rgba(255,255,255,0.06)' }}
+              style={{ width: 22, height: 22, color: 'rgb(var(--color-text-muted))', background: 'rgb(var(--color-elevated))' }}
               aria-label="Deselect"
             >
               <X className="w-3 h-3" />
@@ -1057,14 +1250,16 @@ function DetailCard({
               dir="auto"
               className="leading-snug mb-1"
               style={{
-                fontSize: 10.5, color: 'rgba(255,255,255,0.5)', fontWeight: 600,
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                fontSize: 10.5, color: 'rgb(var(--color-text-muted))', fontWeight: 600,
+                // No clamp: the source trail wraps freely across as many rows as it
+                // needs, so the full lineage stays readable (no "…" mid-question).
+                overflowWrap: 'anywhere',
               } as React.CSSProperties}
             >
               {trail.map((step, i) => (
                 <span key={i}>
-                  <span style={{ color: i === trail.length - 1 ? h.core : 'rgba(255,255,255,0.55)' }}>{step}</span>
-                  <span style={{ opacity: 0.5, padding: '0 4px' }}>→</span>
+                  <span style={{ color: i === trail.length - 1 ? h.core : 'rgb(var(--color-text-muted))' }}>{step}</span>
+                  <span style={{ opacity: 0.5, padding: '0 4px' }}>{trailArrow}</span>
                 </span>
               ))}
             </div>
@@ -1076,7 +1271,7 @@ function DetailCard({
             dir="auto"
             className="font-semibold leading-snug mb-1.5"
             style={{
-              fontSize: 15, color: '#fff',
+              fontSize: 15, color: 'rgb(var(--color-text-primary))',
               display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
             } as React.CSSProperties}
           >
@@ -1087,8 +1282,8 @@ function DetailCard({
               dir="auto"
               className="leading-relaxed mb-3"
               style={{
-                fontSize: 12.5, color: 'rgba(255,255,255,0.66)',
-                display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                fontSize: 12.5, color: 'rgb(var(--color-text-secondary))',
+                display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
               } as React.CSSProperties}
             >
               {preview}
@@ -1101,7 +1296,7 @@ function DetailCard({
             >
               {isDrift ? 'Open this drift' : 'Go to chat'}
             </button>
-            <span className="text-[10px] tabular-nums flex-shrink-0" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            <span className="text-[10px] tabular-nums flex-shrink-0" style={{ color: 'rgb(var(--color-text-muted))' }}>
               {msgs} {msgs === 1 ? 'msg' : 'msgs'}{ts ? ` · ${ts}` : ''}
             </span>
           </div>
@@ -1116,6 +1311,35 @@ function DetailCard({
 function TopicsStrip({
   topics, onJump, isMobile, activeId,
 }: { topics: { phrase: string; chatId: string }[]; onJump: (id: string) => void; isMobile: boolean; activeId: string | null }) {
+  // The chips row is horizontally scrollable. Three input paths, since the scrollbar
+  // is hidden: a vertical wheel scrolls it sideways; a click-drag pans it (desktop);
+  // and touch keeps native momentum scroll. A drag past a small threshold suppresses
+  // the chip's click so panning never accidentally jumps the map.
+  const stripRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ x: number; left: number } | null>(null)
+  const movedRef = useRef(false)
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    const el = stripRef.current
+    if (!el || el.scrollWidth <= el.clientWidth) return
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY
+  }, [])
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return   // native momentum scroll handles touch
+    const el = stripRef.current
+    if (!el) return
+    dragRef.current = { x: e.clientX, left: el.scrollLeft }
+    movedRef.current = false
+    el.setPointerCapture?.(e.pointerId)
+  }, [])
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const el = stripRef.current, d = dragRef.current
+    if (!el || !d) return
+    if (e.buttons === 0) { dragRef.current = null; return }
+    const dx = e.clientX - d.x
+    if (Math.abs(dx) > 4) movedRef.current = true
+    el.scrollLeft = d.left - dx
+  }, [])
+  const onPointerUp = useCallback(() => { dragRef.current = null }, [])
   if (!topics.length) return null
   return (
     <div
@@ -1129,12 +1353,17 @@ function TopicsStrip({
         Explored
       </div>
       <div
+        ref={stripRef}
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         className="flex-1 min-w-0 overflow-x-auto py-2 [&::-webkit-scrollbar]:hidden"
         style={{
           display: 'flex', flexWrap: 'nowrap', gap: 6,
           // Generous side padding so the first/last chips are never glued to the
           // edge, plus a fade mask so it's clear the row scrolls (no hard clip).
-          paddingLeft: 8, paddingRight: 16,
+          paddingLeft: 8, paddingRight: 16, cursor: 'grab',
           scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
           WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%)',
           maskImage: 'linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%)',
@@ -1146,18 +1375,20 @@ function TopicsStrip({
           return (
             <button
               key={chatId}
-              onClick={() => onJump(chatId)}
+              onClick={() => { if (movedRef.current) { movedRef.current = false; return } onJump(chatId) }}
               dir="auto"
+              data-active={active || undefined}
               className="dkg-chip flex-shrink-0 font-medium rounded-full active:scale-95"
               style={{
                 fontSize: 11, padding: '3px 11px',
-                background: active ? `${h.halo}3a` : `${h.halo}1f`,
-                border: `1px solid ${active ? h.core : `${h.halo}40`}`,
-                color: active ? '#fff' : h.core,
                 minHeight: isMobile ? 26 : 24,
-                boxShadow: active ? `0 0 14px ${h.halo}55` : `0 0 10px ${h.halo}22`,
                 whiteSpace: 'nowrap',
-              }}
+                // Hues flow to the CSS so the chip can recolor per theme (bright text
+                // on dark, deep-rim text on light) instead of one washed-out value.
+                ['--chip-core' as string]: h.core,
+                ['--chip-halo' as string]: h.halo,
+                ['--chip-rim' as string]: h.rim,
+              } as React.CSSProperties}
             >
               {phrase.length > 40 ? phrase.slice(0, 40) + '…' : phrase}
             </button>
@@ -1310,7 +1541,7 @@ export default function DriftKnowledgeGraph({
                 </div>
                 <h2
                   className="text-[15px] font-bold leading-snug"
-                  style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                  style={{ color: 'rgb(var(--color-text-primary))', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
                 >
                   {scope === 'all' ? 'All explorations' : (rootChat?.title || 'Untitled')}
                 </h2>
@@ -1322,7 +1553,7 @@ export default function DriftKnowledgeGraph({
                     >
                       ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                     </span>
-                    <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
                       {scope === 'all'
                         ? `· ${rootCount} ${rootCount === 1 ? 'chat' : 'chats'}`
                         : `· ${msgTotal} msgs${depth ? ` · ${depth} deep` : ''}${originDate ? ` · ${originDate}` : ''}`}
@@ -1334,7 +1565,7 @@ export default function DriftKnowledgeGraph({
                 <button
                   onClick={onClose}
                   className="flex items-center justify-center rounded-full active:scale-90"
-                  style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)' }}
+                  style={{ width: 30, height: 30, background: 'rgb(var(--color-elevated))', border: '1px solid rgb(var(--color-border))', color: 'rgb(var(--color-text-secondary))' }}
                   aria-label="Close"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -1376,7 +1607,7 @@ export default function DriftKnowledgeGraph({
               </div>
               <h2
                 className="text-[14px] font-semibold leading-snug"
-                style={{ color: '#fff', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                style={{ color: 'rgb(var(--color-text-primary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
                 {scope === 'all' ? 'All explorations' : (rootChat?.title || 'Untitled')}
               </h2>
@@ -1388,7 +1619,7 @@ export default function DriftKnowledgeGraph({
                   >
                     ↗ {driftCount} {driftCount === 1 ? 'drift' : 'drifts'}
                   </span>
-                  <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                  <span className="text-[10px]" style={{ color: 'rgb(var(--color-text-muted))' }}>
                     {scope === 'all'
                       ? `· ${rootCount} ${rootCount === 1 ? 'conversation' : 'conversations'}`
                       : `· ${msgTotal} messages${depth ? ` · ${depth} ${depth === 1 ? 'level' : 'levels'} deep` : ''}${originDate ? ` · started ${originDate}` : ''}`}
@@ -1401,7 +1632,7 @@ export default function DriftKnowledgeGraph({
                 <button
                   onClick={onToggleExpand}
                   className="p-1.5 rounded-lg hover:bg-white/10"
-                  style={{ color: 'rgba(255,255,255,0.6)' }}
+                  style={{ color: 'rgb(var(--color-text-secondary))' }}
                   title={expanded ? 'Shrink map' : 'Expand map'}
                   aria-label={expanded ? 'Shrink map' : 'Expand map'}
                 >
@@ -1411,7 +1642,7 @@ export default function DriftKnowledgeGraph({
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg hover:bg-white/10"
-                style={{ color: 'rgba(255,255,255,0.6)' }}
+                style={{ color: 'rgb(var(--color-text-secondary))' }}
                 aria-label="Close"
               >
                 <X className="w-4 h-4" />
@@ -1490,10 +1721,10 @@ function EmptyState({ isMobile }: { isMobile: boolean }) {
         <span style={{ fontSize: isMobile ? 30 : 24, color: '#fff', position: 'relative', zIndex: 1 }}>↗</span>
       </div>
       <div className="relative" style={{ zIndex: 1 }}>
-        <p className="font-semibold mb-1.5" style={{ fontSize: isMobile ? 16 : 13, color: '#fff' }}>
+        <p className="font-semibold mb-1.5" style={{ fontSize: isMobile ? 16 : 13, color: 'rgb(var(--color-text-primary))' }}>
           No drifts yet
         </p>
-        <p className="leading-relaxed" style={{ fontSize: isMobile ? 14 : 11, color: 'rgba(255,255,255,0.55)' }}>
+        <p className="leading-relaxed" style={{ fontSize: isMobile ? 14 : 11, color: 'rgb(var(--color-text-muted))' }}>
           Select any text in an AI response and tap{' '}
           <span style={{ color: '#c084fc', fontWeight: 600 }}>Drift</span>{' '}
           to open a focused branch. Each branch becomes a glowing node on your map —
@@ -1548,7 +1779,7 @@ function StyleBlock() {
         backdrop-filter: blur(14px) saturate(1.15);
         -webkit-backdrop-filter: blur(14px) saturate(1.15);
         cursor: pointer;
-        transition: transform 0.16s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s ease, border-color 0.2s ease;
+        transition: transform 0.16s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.3s ease;
         will-change: transform;
       }
       .dkg-card:hover {
@@ -1608,14 +1839,58 @@ function StyleBlock() {
         border: 1px solid color-mix(in srgb, var(--hue-core) 55%, transparent);
         animation: dkgCardAlive 2.8s ease-in-out infinite;
       }
+      /* Transient highlight ring — fires when a chip / keyboard select lands here. */
+      .dkg-card-pulse {
+        position: absolute; inset: -2px; border-radius: 18px; pointer-events: none;
+        border: 2px solid color-mix(in srgb, var(--hue-core) 75%, transparent);
+        animation: dkgCardPulse 1.1s cubic-bezier(0.16,1,0.3,1) forwards;
+      }
+      @keyframes dkgCardPulse {
+        0%   { opacity: 0.95; transform: scale(1); }
+        70%  { opacity: 0.5; }
+        100% { opacity: 0; transform: scale(1.07); }
+      }
+
+      /* ── Light theme: the map becomes a bright, airy space — cards turn light with
+            dark text, accents shift to the deeper rim hue for contrast on white. ── */
+      :root:not(.dark) .dkg-card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(248,247,252,0.98));
+        border-color: color-mix(in srgb, var(--hue-rim) 32%, transparent);
+        box-shadow:
+          0 6px 20px rgba(40,30,80,0.10),
+          0 0 18px color-mix(in srgb, var(--hue-halo) 14%, transparent),
+          inset 0 1px 0 rgba(255,255,255,0.7);
+      }
+      :root:not(.dark) .dkg-card:hover {
+        box-shadow: 0 12px 28px rgba(40,30,80,0.16), 0 0 26px color-mix(in srgb, var(--hue-halo) 24%, transparent);
+      }
+      :root:not(.dark) .dkg-card.is-focused {
+        border-color: color-mix(in srgb, var(--hue-rim) 62%, transparent);
+        box-shadow:
+          0 14px 32px rgba(40,30,80,0.18),
+          0 0 0 1px color-mix(in srgb, var(--hue-rim) 55%, transparent),
+          0 0 30px color-mix(in srgb, var(--hue-halo) 28%, transparent);
+      }
+      :root:not(.dark) .dkg-card-root {
+        background: linear-gradient(180deg, rgba(250,248,255,0.98), rgba(242,238,251,0.98));
+        border-color: color-mix(in srgb, var(--hue-rim) 48%, transparent);
+      }
+      :root:not(.dark) .dkg-card-title { color: rgb(var(--color-text-primary)); }
+      :root:not(.dark) .dkg-card-gist  { color: rgb(var(--color-text-secondary)); }
+      :root:not(.dark) .dkg-card-meta  { color: rgb(var(--color-text-muted)); }
+      :root:not(.dark) .dkg-card-eyebrow { color: color-mix(in srgb, var(--hue-rim) 82%, black); opacity: 1; }
+      :root:not(.dark) .dkg-card-term {
+        color: color-mix(in srgb, var(--hue-rim) 80%, black);
+        background: color-mix(in srgb, var(--hue-halo) 14%, white);
+        border-color: color-mix(in srgb, var(--hue-rim) 30%, transparent);
+      }
 
       .dkg-fit {
-        background: rgba(255,255,255,0.07);
-        border: 1px solid rgba(255,255,255,0.12);
-        color: rgba(255,255,255,0.7);
-        backdrop-filter: blur(8px);
+        background: transparent;
+        border: 1px solid rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.4);
       }
-      .dkg-fit:hover { background: rgba(255,255,255,0.12); color: #fff; }
+      .dkg-fit:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.85); }
 
       .dkg-search {
         background: rgba(255,255,255,0.07);
@@ -1626,6 +1901,20 @@ function StyleBlock() {
       }
       .dkg-search:focus-within { border-color: rgba(168,85,247,0.5); background: rgba(255,255,255,0.1); }
       .dkg-search input::placeholder { color: rgba(255,255,255,0.4); }
+
+      /* Light theme: dark-tinted glass pills with dark icons (the canvas is bright). */
+      :root:not(.dark) .dkg-search {
+        background: rgba(28,22,55,0.04);
+        border-color: rgba(28,22,55,0.1);
+      }
+      :root:not(.dark) .dkg-fit {
+        background: transparent;
+        border-color: rgba(28,22,55,0.09);
+        color: rgb(var(--color-text-muted));
+      }
+      :root:not(.dark) .dkg-fit:hover { background: rgba(28,22,55,0.06); color: rgb(var(--color-text-secondary)); }
+      :root:not(.dark) .dkg-search:focus-within { background: rgba(28,22,55,0.04); border-color: rgba(168,85,247,0.5); }
+      :root:not(.dark) .dkg-search input::placeholder { color: rgb(var(--color-text-muted)); }
 
       /* Detail card — glass over the void */
       .dkg-detail-inner {
@@ -1651,7 +1940,33 @@ function StyleBlock() {
       }
       .dkg-open-btn:hover { filter: brightness(1.08); }
 
-      .dkg-chip:hover { filter: brightness(1.15); }
+      /* Explored chips — calm by default: neutral text + a hairline border and only
+         a whisper of the per-lens hue. The hue comes forward only on the active chip
+         (and a touch on hover), so the bar reads quiet, not like a row of neon. */
+      .dkg-chip {
+        color: rgb(var(--color-text-secondary));
+        background: color-mix(in srgb, var(--chip-halo) 6%, transparent);
+        border: 1px solid rgb(var(--color-border));
+      }
+      .dkg-chip[data-active] {
+        color: #fff;
+        background: color-mix(in srgb, var(--chip-halo) 28%, transparent);
+        border-color: color-mix(in srgb, var(--chip-core) 55%, transparent);
+      }
+      :root:not(.dark) .dkg-chip {
+        color: rgb(var(--color-text-secondary));
+        background: color-mix(in srgb, var(--chip-halo) 6%, white);
+        border-color: rgb(var(--color-border));
+      }
+      :root:not(.dark) .dkg-chip[data-active] {
+        color: #fff;
+        background: var(--chip-rim);
+        border-color: var(--chip-rim);
+      }
+      .dkg-chip:hover {
+        color: rgb(var(--color-text-primary));
+        border-color: color-mix(in srgb, var(--chip-core) 45%, transparent);
+      }
 
       .dkg-empty-orb {
         background: radial-gradient(circle at 38% 34%, #ffffff, #c084fc 30%, #7c3aed 80%);

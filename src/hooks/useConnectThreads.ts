@@ -7,7 +7,7 @@ interface ConnectThreadsDeps {
   /** Whether the panel is open (gates the notify-parent effect). */
   isOpen: boolean
   /** One-tap workflow type — Connect logic only runs when this is `'connect'`. */
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** The term the drift is exploring (one side of every bridge). */
   selectedText: string
   /** Localized drift scaffolding — supplies the bridge-question phrasing. */

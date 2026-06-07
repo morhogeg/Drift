@@ -35,13 +35,13 @@ const DRIFT_LABELS_EN: DriftLabels = {
   opener: (t) => `What would you like to know about "${t}"?`,
   connectFinding: (t) => `Finding connections for "${t}"…`,
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Challenge this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'ערער על זה' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -49,7 +49,7 @@ export const driftLabelsFor = (sample: string): DriftLabels =>
 // Every language variant of the opener / template-trigger prefixes, so the filters
 // that strip scaffolding from the API conversation work regardless of chat language.
 const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding connections for', 'מה תרצה לדעת על', 'מחפש קשרים עבור']
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר']
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Challenge this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'ערער על זה']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
@@ -113,4 +113,15 @@ Rules:
 - Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
 - Do not invent facts. If you are not confident the connection is real, choose a different one.
 - Output raw JSON array of strings only. Any other text breaks the app.`,
+  'challenge': `You are a sharp, fair-minded intellectual sparring partner. The user selected a claim or idea while reading and wants it pressure-tested — NOT cheerleading, and NOT lazy contrarianism. Your job is to make the strongest honest case against it.
+
+- Interpret the claim in the sense the surrounding conversation implies; disambiguate by context.
+- Lead with the single most serious objection — the one a thoughtful expert who disagrees would open with.
+- Surface the hidden assumptions the claim rests on, and name which are the shakiest.
+- Give the strongest steelman of the opposing view, fairly stated — never a strawman.
+- Say what would have to be true for the claim to be wrong, and whether that plausibly holds.
+- If the claim mostly survives scrutiny, say so honestly and point to where it's genuinely vulnerable, rather than inventing weaknesses.
+- Concede real strengths. Be concrete, specific, and intellectually honest — the goal is sharper thinking, not winning.
+
+Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
 }

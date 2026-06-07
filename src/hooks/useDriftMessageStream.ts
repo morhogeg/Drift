@@ -20,7 +20,7 @@ interface DriftMessageStreamDeps {
   /** Parent conversation, used to ground/disambiguate the prompt. */
   contextMessages: Message[]
   /** One-tap workflow type, if this is a template drift. */
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** Active Connect bridge question (null in chips view / non-connect drifts). */
   connectQuestion: string | null
   /** Prior explorations of related terms — fed into the Connect prompt to avoid repeats. */

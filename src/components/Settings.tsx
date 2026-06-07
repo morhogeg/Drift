@@ -79,7 +79,7 @@ function SectionHeader({ label, hint }: { label: string; hint?: string }) {
 // content does the talking.
 function SettingsGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-4 rounded-2xl bg-gradient-to-b from-white/[0.045] to-white/[0.015] border border-white/[0.06] divide-y divide-white/[0.05] overflow-hidden shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]">
+    <div className="mx-4 rounded-2xl bg-gradient-to-b from-black/[0.02] to-transparent dark:from-white/[0.045] dark:to-white/[0.015] border border-dark-border divide-y divide-dark-border overflow-hidden shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]">
       {children}
     </div>
   )

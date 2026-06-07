@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drift — Design Preview (Pink-First)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────
+   DESIGN PREVIEW: "Pink-First" scale proposal
+   ─────────────────────────────────────────────
+   NO changes to the app.
+   Open this file in a browser to compare.
+   ───────────────────────────────────────────── */
+
+/* ── SCALE TOKENS ── */
+:root {
+  /* BG scale — from pure void to slightly elevated */
+  --bg-0:  #000000;   /* pure void */
+  --bg-1:  #0a0a0a;   /* app base (current bg, kept) */
+  --bg-2:  #111111;   /* panels / surface */
+  --bg-3:  #181818;   /* cards / elevated */
+  --bg-4:  #222222;   /* inputs / hover */
+  --bg-5:  #2e2e2e;   /* borders / separators */
+
+  /* Grey scale — fg + text */
+  --fg-0:  #ffffff;   /* headlines / primary text */
+  --fg-1:  #e8e8e8;   /* strong body */
+  --fg-2:  #b0b0b0;   /* secondary text */
+  --fg-3:  #888888;   /* muted / meta / timestamps */
+  --fg-4:  #555555;   /* disabled */
+  --fg-5:  #333333;   /* placeholder / hairlines */
+
+  /* Pink accent — primary brand */
+  --pink:        #ff007a;
+  --pink-bright: #ff3d96;   /* hover / active */
+  --pink-soft:   #ff6bb0;   /* gentle states */
+  --pink-dim:    rgba(255, 0, 122, 0.15);  /* bg tints */
+  --pink-glow:   rgba(255, 0, 122, 0.25);  /* glow halos */
+
+  /* Violet — secondary / depth */
+  --violet:      #a855f7;
+  --violet-dim:  rgba(168, 85, 247, 0.12);
+  --violet-glow: rgba(168, 85, 247, 0.2);
+
+  /* Discovery (unchanged) */
+  --cyan:        #22d3ee;
+}
+
+/* ── RESET ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-1);
+  color: var(--fg-0);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* ── LAYOUT ── */
+.shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg-2);
+  border-right: 1px solid var(--bg-5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 16px 12px;
+  border-bottom: 1px solid var(--bg-5);
+}
+.sidebar-logo {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: linear-gradient(90deg, var(--pink), var(--pink-soft));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.icon-btn {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--bg-5);
+  background: transparent;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.icon-btn:hover { background: var(--bg-4); border-color: var(--fg-5); }
+.icon-btn svg { width: 14px; height: 14px; stroke: var(--fg-3); stroke-width: 1.8; fill: none; }
+
+.sidebar-search {
+  padding: 10px 12px;
+}
+.search-input {
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--bg-5);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--fg-2);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search-input::placeholder { color: var(--fg-4); }
+.search-input:focus { border-color: var(--pink); box-shadow: 0 0 0 2px var(--pink-dim); }
+
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  padding: 8px 16px 4px;
+}
+
+.chat-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s;
+  position: relative;
+}
+.chat-row:hover { background: var(--bg-3); }
+.chat-row.active {
+  background: var(--pink-dim);
+  border: 1px solid rgba(255, 0, 122, 0.18);
+}
+.chat-row-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  flex-shrink: 0;
+}
+.chat-row.active .chat-row-dot { background: var(--pink); box-shadow: 0 0 6px var(--pink-glow); }
+.chat-row-info { flex: 1; min-width: 0; }
+.chat-row-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-row.active .chat-row-title { color: var(--fg-0); }
+.chat-row-preview {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.chat-row-time {
+  font-size: 10px;
+  color: var(--fg-4);
+  flex-shrink: 0;
+}
+
+.drift-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: var(--pink-dim);
+  color: var(--pink-soft);
+  border: 1px solid rgba(255, 0, 122, 0.2);
+  letter-spacing: 0.04em;
+}
+
+.sidebar-footer {
+  padding: 12px 12px 16px;
+  border-top: 1px solid var(--bg-5);
+  display: flex; align-items: center; gap: 8px;
+}
+.avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--pink), var(--violet));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: white;
+  flex-shrink: 0;
+}
+.user-name { font-size: 12px; font-weight: 500; color: var(--fg-2); flex: 1; }
+.sidebar-footer .icon-btn { margin-left: auto; }
+
+/* ── MAIN PANEL ── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-1);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 0, 122, 0.04) 0%, transparent 70%);
+}
+
+/* ── HEADER ── */
+.chat-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--bg-5);
+  background: rgba(10,10,10,0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  flex-shrink: 0;
+}
+.chat-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg-0);
+  flex: 1;
+}
+.model-pill {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--bg-5);
+  color: var(--fg-3);
+  background: var(--bg-3);
+  transition: all 0.15s;
+  cursor: pointer;
+}
+.model-pill:hover { border-color: var(--pink); color: var(--pink-soft); background: var(--pink-dim); }
+.model-pill.active { border-color: rgba(255, 0, 122, 0.4); color: var(--pink-soft); background: var(--pink-dim); }
+
+/* ── MESSAGES ── */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 20px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* AI message */
+.msg-ai {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 680px;
+}
+.ai-avatar {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--pink) 0%, var(--violet) 100%);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 11px;
+}
+.ai-bubble {
+  flex: 1;
+  color: var(--fg-1);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.ai-bubble p { margin-bottom: 8px; }
+.ai-bubble p:last-child { margin-bottom: 0; }
+
+/* Inline drift suggestion highlight */
+.drift-highlight {
+  border-bottom: 1.5px dotted rgba(255, 0, 122, 0.5);
+  color: var(--pink-soft);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.drift-highlight:hover {
+  border-bottom-style: solid;
+  border-bottom-color: var(--pink);
+  background: var(--pink-dim);
+  color: var(--pink-bright);
+}
+
+/* User message */
+.msg-user {
+  display: flex;
+  justify-content: flex-end;
+}
+.user-bubble {
+  max-width: 62%;
+  background: var(--bg-3);
+  border: 1px solid var(--bg-5);
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-0);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+}
+
+/* Drift pushed message */
+.msg-drift-pushed {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 680px;
+}
+.drift-pushed-bubble {
+  flex: 1;
+  background: rgba(255, 0, 122, 0.04);
+  border: 1px solid rgba(255, 0, 122, 0.14);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--fg-1);
+  position: relative;
+}
+.drift-tag {
+  position: absolute;
+  top: 8px; right: 10px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pink-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--pink-dim);
+  border: 1px solid rgba(255, 0, 122, 0.18);
+}
+
+/* Timestamp/meta */
+.msg-meta {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  text-align: center;
+  margin: 4px 0;
+}
+
+/* ── INPUT BAR ── */
+.input-bar {
+  padding: 12px 16px 20px;
+  border-top: 1px solid var(--bg-5);
+  flex-shrink: 0;
+}
+.input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--bg-5);
+  border-radius: 16px;
+  padding: 8px 10px 8px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input-wrap:focus-within {
+  border-color: rgba(255, 0, 122, 0.35);
+  box-shadow: 0 0 0 3px var(--pink-dim);
+}
+.input-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--fg-0);
+  resize: none;
+  line-height: 1.55;
+  min-height: 22px;
+  max-height: 160px;
+  padding: 2px 0;
+}
+.input-textarea::placeholder { color: var(--fg-4); }
+
+.input-actions {
+  display: flex; align-items: center; gap: 4px;
+  flex-shrink: 0;
+}
+.send-btn {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  background: var(--pink);
+  border: none;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  box-shadow: 0 0 12px var(--pink-glow);
+}
+.send-btn:hover {
+  background: var(--pink-bright);
+  box-shadow: 0 0 20px rgba(255, 0, 122, 0.4);
+  transform: scale(1.05);
+}
+.send-btn:active { transform: scale(0.96); }
+.send-btn svg { width: 14px; height: 14px; stroke: white; stroke-width: 2.2; fill: none; }
+
+.mic-btn {
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  background: transparent;
+  border: 1px solid var(--bg-5);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.mic-btn:hover { background: var(--bg-4); border-color: var(--fg-5); }
+.mic-btn svg { width: 13px; height: 13px; stroke: var(--fg-3); stroke-width: 1.8; fill: none; }
+
+/* ── DRIFT PANEL (right column) ── */
+.drift-panel {
+  width: 320px;
+  flex-shrink: 0;
+  background: var(--bg-2);
+  border-left: 1px solid var(--bg-5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.drift-panel-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--bg-5);
+}
+.drift-panel-close {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  background: var(--bg-4);
+  border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.drift-panel-close svg { width: 12px; height: 12px; stroke: var(--fg-3); stroke-width: 2; fill: none; }
+.drift-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+  flex: 1;
+}
+.drift-panel-topic {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--pink-dim);
+  border: 1px solid rgba(255, 0, 122, 0.2);
+  color: var(--pink-soft);
+}
+.drift-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drift-msg-user {
+  display: flex; justify-content: flex-end;
+}
+.drift-msg-user-bubble {
+  max-width: 80%;
+  background: var(--pink-dim);
+  border: 1px solid rgba(255, 0, 122, 0.2);
+  border-radius: 12px 12px 4px 12px;
+  padding: 8px 11px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg-0);
+}
+.drift-msg-ai {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--fg-2);
+  max-width: 95%;
+}
+.drift-msg-ai strong { color: var(--fg-0); font-weight: 500; }
+
+.push-btn {
+  margin: 8px 14px 14px;
+  padding: 9px 0;
+  border-radius: 10px;
+  background: var(--pink);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: white;
+  letter-spacing: -0.01em;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  box-shadow: 0 0 16px var(--pink-glow);
+}
+.push-btn:hover {
+  background: var(--pink-bright);
+  box-shadow: 0 0 24px rgba(255, 0, 122, 0.4);
+  transform: translateY(-1px);
+}
+.push-btn:active { transform: translateY(0); }
+
+/* ── PALETTE LEGEND (bottom strip) ── */
+.legend {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(17,17,17,0.92);
+  border: 1px solid var(--bg-5);
+  border-radius: 12px;
+  padding: 12px 14px;
+  backdrop-filter: blur(12px);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  z-index: 100;
+  min-width: 160px;
+}
+.legend-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-bottom: 8px;
+}
+.swatch-row { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+.swatch {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.swatch-label { font-size: 10px; color: var(--fg-3); }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-5); border-radius: 99px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">Drift</span>
+      <button class="icon-btn" title="New chat">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+    <div class="sidebar-search">
+      <input class="search-input" placeholder="Search chats…" type="text">
+    </div>
+
+    <div class="sidebar-section-label">Pinned</div>
+    <div class="chat-list">
+      <div class="chat-row active">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">Consciousness &amp; qualia</div>
+          <div class="chat-row-preview">Hard problem of subjective experience</div>
+        </div>
+        <div class="chat-row-time">now</div>
+      </div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">Systems thinking</div>
+          <div class="chat-row-preview">Feedback loops in complex systems</div>
+        </div>
+        <div class="chat-row-time">2h</div>
+      </div>
+
+      <div class="sidebar-section-label" style="padding-left:0;margin-top:8px">Today</div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title" style="display:flex;align-items:center;gap:5px">
+            Stoicism in practice <span class="drift-badge">Drift</span>
+          </div>
+          <div class="chat-row-preview">From: Epictetus and control</div>
+        </div>
+        <div class="chat-row-time">3h</div>
+      </div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">LLM alignment strategies</div>
+          <div class="chat-row-preview">RLHF vs constitutional AI</div>
+        </div>
+        <div class="chat-row-time">5h</div>
+      </div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">Emergence in biology</div>
+          <div class="chat-row-preview">When parts create something new</div>
+        </div>
+        <div class="chat-row-time">8h</div>
+      </div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">Kant's categorical imperative</div>
+          <div class="chat-row-preview">Universal laws and moral duties</div>
+        </div>
+        <div class="chat-row-time">1d</div>
+      </div>
+
+      <div class="chat-row">
+        <div class="chat-row-dot"></div>
+        <div class="chat-row-info">
+          <div class="chat-row-title">Infinite game theory</div>
+          <div class="chat-row-preview">Simon Sinek, just vs infinite</div>
+        </div>
+        <div class="chat-row-time">2d</div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="avatar">M</div>
+      <div class="user-name">Mor</div>
+      <button class="icon-btn">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN CHAT -->
+  <main class="main">
+    <header class="chat-header">
+      <div class="chat-title">Consciousness &amp; qualia</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div class="model-pill active">Gemini 3 Flash</div>
+        <div class="model-pill">+ GPT-4o</div>
+        <button class="icon-btn">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+        <button class="icon-btn">
+          <svg viewBox="0 0 24 24"><polyline points="4 6 4 2 20 2 20 22 4 22 4 18"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="messages">
+      <div class="msg-meta">Today · 11:42 AM</div>
+
+      <!-- User -->
+      <div class="msg-user">
+        <div class="user-bubble">
+          Can consciousness exist without subjective experience? Or is subjectivity just what consciousness is?
+        </div>
+      </div>
+
+      <!-- AI -->
+      <div class="msg-ai">
+        <div class="ai-avatar">✦</div>
+        <div class="ai-bubble">
+          <p>This is essentially the <span class="drift-highlight">hard problem of consciousness</span> — the explanatory gap between physical processes and <span class="drift-highlight">qualia</span>. Chalmers argues these are irreducible: you can explain every functional behavior of the brain without ever explaining <em>why there is something it's like</em> to see red.</p>
+          <p>Dennett takes the opposite view. He thinks <span class="drift-highlight">phenomenal consciousness</span> is a kind of user illusion — the brain's narrative about itself. There's no "Cartesian theatre" where experience happens; just recursive self-modeling that creates the impression of inner life.</p>
+          <p>Most physicalists try to thread this needle: consciousness is real, but it's identical to (not separate from) certain brain states. The challenge is explaining the identity, not just asserting it.</p>
+        </div>
+      </div>
+
+      <!-- User -->
+      <div class="msg-user">
+        <div class="user-bubble">
+          But if Dennett's right and it's all functional — doesn't that mean a philosophical zombie is logically possible?
+        </div>
+      </div>
+
+      <!-- Drift pushed -->
+      <div class="msg-drift-pushed">
+        <div class="ai-avatar" style="background: linear-gradient(135deg, var(--pink), var(--pink-soft));">✦</div>
+        <div class="drift-pushed-bubble">
+          <div class="drift-tag">Drift</div>
+          <strong style="font-size:11px;color:var(--fg-3);font-weight:600;letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:6px;">Qualia</strong>
+          Qualia are the intrinsic, subjective qualities of experience — the "redness" of red, the painfulness of pain. They're often described as ineffable (impossible to fully communicate), intrinsic (not about relations), private, and directly apprehensible. Block distinguishes <em>phenomenal consciousness</em> (what it's like) from <em>access consciousness</em> (availability to reasoning and report).
+        </div>
+      </div>
+
+      <!-- AI continuation -->
+      <div class="msg-ai">
+        <div class="ai-avatar">✦</div>
+        <div class="ai-bubble">
+          <p>That's exactly the zombie argument — and it's the sharpest challenge to functionalism. If a being can be physically and functionally identical to a human but lack inner experience, then consciousness can't be <em>just</em> functional organization. Chalmers uses this to argue for property dualism: experience is a fundamental feature of the world, not reducible to physics.</p>
+          <p>Dennett's counter: zombies aren't actually conceivable once you work through the details. A functional duplicate would <em>behave</em> as though it had qualia, report having them, be moved by them — at what point is the "experience" genuinely absent vs. just philosophically stipulated away?</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- INPUT -->
+    <div class="input-bar">
+      <div class="input-wrap">
+        <textarea class="input-textarea" rows="1" placeholder="Ask, explore, drift…"></textarea>
+        <div class="input-actions">
+          <button class="mic-btn">
+            <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          </button>
+          <button class="send-btn">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- DRIFT PANEL -->
+  <aside class="drift-panel">
+    <div class="drift-panel-header">
+      <button class="drift-panel-close">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="drift-panel-title">Drift</div>
+      <div class="drift-panel-topic">phenomenal consciousness</div>
+    </div>
+
+    <div class="drift-messages">
+      <div class="drift-msg-user">
+        <div class="drift-msg-user-bubble">What makes phenomenal consciousness different from access consciousness?</div>
+      </div>
+
+      <div class="drift-msg-ai">
+        <p><strong>Phenomenal consciousness</strong> is the "what it's like" dimension — raw subjective feel. <strong>Access consciousness</strong> is about a mental state being globally available for reasoning, verbal report, and action control.</p>
+        <br>
+        <p>The split matters because in theory you could have one without the other. A state could be access-conscious (reportable, usable) but phenomenally absent — which is what Dennett suspects is actually the case for most "inner experience."</p>
+        <br>
+        <p>Ned Block coined the distinction to clarify debates: when people argue about consciousness, they're often talking past each other because they mean different things.</p>
+      </div>
+    </div>
+
+    <button class="push-btn">Push to main thread →</button>
+  </aside>
+
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="legend-title">New scale</div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#ff007a"></div>
+    <div class="swatch-label">Pink — primary CTA / accent</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#a855f7"></div>
+    <div class="swatch-label">Violet — secondary / depth</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#0a0a0a;border:1px solid #333"></div>
+    <div class="swatch-label">#0a0a0a — bg base</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#111111"></div>
+    <div class="swatch-label">#111111 — surface</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#222222"></div>
+    <div class="swatch-label">#222222 — cards / input</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#2e2e2e"></div>
+    <div class="swatch-label">#2e2e2e — borders</div>
+  </div>
+  <div style="margin-top:7px;border-top:1px solid #2e2e2e;padding-top:7px">
+  <div class="swatch-row">
+    <div class="swatch" style="background:#ffffff"></div>
+    <div class="swatch-label">#fff — fg-0 primary text</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#b0b0b0"></div>
+    <div class="swatch-label">#b0b0b0 — fg-2 secondary</div>
+  </div>
+  <div class="swatch-row">
+    <div class="swatch" style="background:#888888"></div>
+    <div class="swatch-label">#888888 — fg-3 muted</div>
+  </div>
+  </div>
+</div>
+
+</body>
+</html>

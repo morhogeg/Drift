@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement, lazy, Suspense } from 'react'
-import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense } from 'react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
@@ -21,6 +21,7 @@ import HeaderControls from './components/HeaderControls'
 import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
 import SearchModal from './components/SearchModal'
+import ShortcutsHelp from './components/ShortcutsHelp'
 import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
@@ -90,6 +91,7 @@ function App() {
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
   const [synthesizing, setSynthesizing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   // Local derived UI
   const [contextLinkVersion, setContextLinkVersion] = useState(0)
@@ -195,6 +197,28 @@ function App() {
   const settingsOpen = uiStore.settingsOpen
   const knowledgeGraphOpen = uiStore.knowledgeGraphOpen
   const setKnowledgeGraphOpen = uiStore.setKnowledgeGraphOpen
+
+  // One-time spotlight on the Map control the first time a drift exists — the button
+  // appears only after the first branch, so a brief pulse + callout turns that new
+  // affordance into a reward instead of a control that silently materializes.
+  const [mapSpotlight, setMapSpotlight] = useState(false)
+  const mapSpotlightDone = useRef(
+    typeof localStorage !== 'undefined' && localStorage.getItem('driftMapSpotlightSeen') === 'true'
+  )
+  const endMapSpotlight = useCallback(() => {
+    setMapSpotlight(false)
+    mapSpotlightDone.current = true
+    try { localStorage.setItem('driftMapSpotlightSeen', 'true') } catch { /* ignore */ }
+  }, [])
+  useEffect(() => {
+    if (mapSpotlightDone.current || knowledgeGraphOpen) return
+    if (totalDriftCount > 0) {
+      setMapSpotlight(true)
+      const t = setTimeout(endMapSpotlight, 6500)
+      return () => clearTimeout(t)
+    }
+  }, [totalDriftCount, knowledgeGraphOpen, endMapSpotlight])
+  useEffect(() => { if (knowledgeGraphOpen && mapSpotlight) endMapSpotlight() }, [knowledgeGraphOpen, mapSpotlight, endMapSpotlight])
 
   // Drift Map "expand" (desktop): widens the map panel for a larger view. Tracked
   // here (not inside the map) so the main column's right margin can match the panel
@@ -1056,6 +1080,7 @@ function App() {
     onNewChat: createNewChat,
     onToggleMap: toggleKnowledgeGraph,
     onToggleSearch: () => setSearchOpen(v => !v),
+    onToggleHelp: () => setHelpOpen(v => !v),
   })
 
   const switchChat = (chatId: string) => {
@@ -1510,6 +1535,17 @@ function App() {
                   )}
                 </button>
 
+                {/* Keyboard & Tips — the single discoverable place that explains the
+                    shortcuts and what the icon-only controls (Snippets, Map) + drift do. */}
+                <button
+                  onClick={() => setHelpOpen(true)}
+                  className="hidden lg:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group shrink-0"
+                  title="Keyboard & tips (?)"
+                  aria-label="Keyboard shortcuts and tips"
+                >
+                  <HelpCircle className="w-5 h-5 text-text-muted group-hover:text-accent-violet transition-colors duration-75" />
+                </button>
+
                 {/* Current-chat context — always shows where you are. For a drift
                     chat it renders the full path (root › term › term) so "where am
                     I / how do I get back up" is visible and one tap from anywhere. */}
@@ -1631,8 +1667,12 @@ function App() {
               {/* Drift Tree Button — first-class control whenever the thread has
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
+                <div className="relative">
+                {mapSpotlight && (
+                  <span className="absolute inset-0 rounded-full border border-accent-violet/60 animate-ping pointer-events-none" aria-hidden />
+                )}
                 <Pressable
-                  onClick={() => { haptics.selection(); toggleKnowledgeGraph() }}
+                  onClick={() => { haptics.selection(); endMapSpotlight(); toggleKnowledgeGraph() }}
                   haptic={null}
                   title="Drift Map (⌘⌥G)"
                   className={`h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition-all duration-150 relative
@@ -1659,6 +1699,18 @@ function App() {
                     {totalDriftCount}
                   </span>
                 </Pressable>
+                {mapSpotlight && (
+                  <div className="absolute top-full right-0 mt-2 z-30 animate-[fadeIn_0.2s_ease]">
+                    <button
+                      onClick={() => { haptics.selection(); endMapSpotlight(); toggleKnowledgeGraph() }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-surface/95 backdrop-blur-xl border border-accent-violet/40 shadow-[0_4px_20px_rgba(168,85,247,0.3)] text-[12px] font-medium text-accent-violet whitespace-nowrap"
+                    >
+                      See your first drift on the map
+                      <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
+                    </button>
+                  </div>
+                )}
+                </div>
               )}
               {/* New Chat Button */}
               <button
@@ -1804,6 +1856,33 @@ function App() {
                       Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
                     </p>
                   </div>
+                  {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
+                      so the drift gesture has something to act on. Shown only to genuinely
+                      new users (returning users get "pick up where you left off" below). */}
+                  {resumableTrees.length === 0 && (
+                    <div className="w-full max-w-[440px] mt-9">
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3">Try one to start</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {[
+                          'Why did the Roman Empire really fall?',
+                          'Explain quantum entanglement without the jargon',
+                          'Compare Stoicism and Buddhism on suffering',
+                          'How does caffeine actually work in the brain?',
+                        ].map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => { haptics.selection(); sendMessage(p) }}
+                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                          >
+                            <span className="flex items-center gap-2">
+                              <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />
+                              <span className="text-text-secondary group-hover:text-text-primary text-[13.5px] leading-snug transition-colors">{p}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {resumableTrees.length > 0 && (
                     <div className="w-full max-w-[340px] mt-9 text-left">
                       <div className="flex items-center gap-2 mb-3 px-1">
@@ -2226,7 +2305,7 @@ function App() {
                               <div className="synthesis-artifact-head">
                                 <div className="flex items-center gap-2 mb-2">
                                   <span className="synthesis-eyebrow">✦ Synthesis</span>
-                                  <span className="text-[10.5px] font-medium" style={{ color: 'rgba(255,255,255,0.42)' }}>
+                                  <span className="text-[10.5px] font-medium" style={{ color: 'rgb(var(--color-text-muted))' }}>
                                     woven from {synthSources.length || ''} {synthSources.length === 1 ? 'drift' : 'drifts'}
                                     {(() => { const t = timeAgo(msg.timestamp); return t ? ` · ${t}` : '' })()}
                                   </span>
@@ -2907,6 +2986,9 @@ function App() {
         </Suspense>
         </ErrorBoundary>
       )}
+
+      {/* Keyboard shortcuts & first-run tips */}
+      <ShortcutsHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {/* Full-text search across all chats and drifts */}
       <SearchModal

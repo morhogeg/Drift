@@ -1,17 +1,20 @@
 # Drift — Quick Status
 
-**Date:** June 6, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 52 (iOS + web) — ready for TestFlight
+**Date:** June 7, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 53 (iOS + web) — ready for TestFlight
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ **CRITICAL ACTION REQUIRED:** Rotate both exposed Gemini API keys + raise spend cap in Google AI Studio. See HANDOFF.md entry 164.
 
-## Last Session (Jun 6) — Tier B refactor complete
+## Last Session (Jun 7) — Map polish + shortcuts + TestFlight prep
 
-- **Slice 4 complete** — extracted push/save logic (282 lines) → `useDriftPanelActions.ts`; verified with live Gemini smoke test
-- **Slice 5 complete** — extracted Connect mode (198 lines) → `useConnectThreads.ts`; verified with mocked SSE (Gemini spend-capped)
-- **DriftPanel.tsx:** 1916 → **1199 lines** (717-line reduction across both slices)
-- **All 5 slices verified:** tsc clean, vite build clean, Playwright smoke tests (live AI + mocked SSE)
-- **Bundle:** index 752 kB / gzip 229 kB (minimal change from slice 3; main refactoring work done)
+- **Filter live-search** — fade-away on non-matching cards (opacity: 0, pointerEvents: none, 0.3s ease)
+- **Chip-tap pulse** — selected chip highlights matching cards with 1.1s ring; zoom ±/fit buttons with 0.4x–2.4x scale clamps
+- **RTL arrows** — dirArrow() detects Hebrew/Arabic, returns correct direction for Connect bridges + breadcrumbs
+- **Light-mode fixes** — Connect card surface/border use color tokens; detail card reduced height (40%), smart re-fit on open/close
+- **Zoom button subtlety** — transparent at rest, faint bg on hover, 28px size, muted colors
+- **Chips tone** — removed glows, muted inactive colors (neutral text + hairline + 6% hue), full hue on active
+- **Keyboard shortcuts** — new ShortcutsHelp overlay (⌘K, ⌘⌥N, ⌘⌥G, ?); honest Login (no fake auth)
+- **Bundle:** main 757.81 kB / gzip 231.81 kB; tsc clean, vite clean, Capacitor sync clean; **Build 52→53**
 
 ## Pending (priority order)
 

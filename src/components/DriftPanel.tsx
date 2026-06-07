@@ -62,7 +62,7 @@ interface DriftPanelProps {
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
   onNavigateToBreadcrumb?: (index: number) => void
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** Pre-loaded suggestion chips — bypasses AI fetch when provided. */
   initialSuggestions?: string[]
   /** Restore Connect mode to a previously active question (breadcrumb navigation). */
@@ -88,14 +88,14 @@ interface DriftPanelProps {
   /** Walk sideways to a sibling drift without leaving the panel. */
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
-  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | undefined) => void
+  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
 }
 
 export interface SiblingDrift {
   selectedText: string
   driftChatId: string
   sourceMessageId: string
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
 }
 
 export default function DriftPanel({
@@ -145,6 +145,11 @@ export default function DriftPanel({
   const [bloomKey, setBloomKey] = useState(0)
   const [, setHoveredMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // When a drift is re-opened from the map ("Open this drift"), land on the user's
+  // question (the anchor) instead of the bottom of the answer — so it opens exactly
+  // where the thought began, with no scroll-hunting. Armed on a restored open,
+  // consumed by the anchor effect (and it suppresses the one-shot scroll-to-bottom).
+  const anchorOnOpenRef = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
@@ -267,6 +272,8 @@ export default function DriftPanel({
       if (existingMessages && existingMessages.length > 0) {
         // Restore the existing conversation — template already fired for this drift
         autoSentRef.current = true
+        // Re-opening an explored drift: open at the question anchor, not the bottom.
+        anchorOnOpenRef.current = true
         setMessages(existingMessages)
         setDriftOnlyMessages(existingMessages)
       } else {
@@ -407,8 +414,25 @@ export default function DriftPanel({
   }
 
   useEffect(() => {
+    // A restored open anchors on the question instead (handled below) — don't
+    // yank the view to the bottom on that first render.
+    if (anchorOnOpenRef.current) return
     scrollToBottom()
   }, [messages])
+
+  // Restored-open anchor: scroll the user's question to the top of the thread so
+  // the drift opens exactly where it began (no scroll-hunting through the answer).
+  useEffect(() => {
+    if (!isOpen || !anchorOnOpenRef.current || driftOnlyMessages.length === 0) return
+    const firstQuestion = driftOnlyMessages.find(m => m.isUser && !m.id?.startsWith('drift-system-'))
+    requestAnimationFrame(() => setTimeout(() => {
+      const el = firstQuestion
+        ? document.querySelector(`[data-drift-message-id="${firstQuestion.id}"]`)
+        : null
+      if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' })
+      anchorOnOpenRef.current = false
+    }, 80))
+  }, [isOpen, driftOnlyMessages])
 
   // Notify parent when expanded state changes
   useEffect(() => {
@@ -476,7 +500,7 @@ export default function DriftPanel({
         flex flex-col overflow-hidden
       `}>
         {/* Header */}
-        <header className="relative z-10 border-b border-white/[0.05] bg-dark-surface/95 backdrop-blur-xl pt-safe">
+        <header className="relative z-10 border-b border-dark-border bg-dark-surface/95 backdrop-blur-xl pt-safe">
           {/* Quiet breathing accent — the space stays alive while idle, settles
               while a thought is materializing. */}
           {!isTyping && (
@@ -509,7 +533,8 @@ export default function DriftPanel({
                   ? connectQuestion.length > 36 ? connectQuestion.slice(0, 36) + '…' : connectQuestion
                   : 'Connect')
               : templateType === 'simplify' ? 'Simplify'
-              : templateType ? 'Deep dive'
+              : templateType === 'research' ? 'Deep dive'
+              : templateType === 'challenge' ? 'Challenge'
               : null
 
             return (
@@ -517,7 +542,7 @@ export default function DriftPanel({
                 {/* Back / Close */}
                 <button
                   onClick={handleBack}
-                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-white/50 hover:text-white/80 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
+                  className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-secondary hover:text-text-primary hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
                   title={templateType === 'connect' && connectQuestion ? 'Back to suggestions' : 'Close'}
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -534,7 +559,7 @@ export default function DriftPanel({
                       />
                     )}
                     <span
-                      className="text-[15px] font-semibold text-white/90 truncate leading-snug select-none"
+                      className="text-[15px] font-semibold text-text-primary truncate leading-snug select-none"
                       title={selectedText}
                     >
                       {selectedText}
@@ -552,16 +577,16 @@ export default function DriftPanel({
                         <span key={i} className="flex items-center gap-0 shrink-0">
                           <button
                             onClick={() => onNavigateToBreadcrumb?.(i)}
-                            className="flex items-center gap-0.5 text-[11px] text-white/35 hover:text-white/65 transition-colors max-w-[110px]"
+                            className="flex items-center gap-0.5 text-[11px] text-text-muted hover:text-text-secondary transition-colors max-w-[110px]"
                             title={entry.isMainChat ? entry.label : entry.selectedText}
                           >
                             {entry.isMainChat && <Home className="w-2.5 h-2.5 shrink-0 mr-0.5" />}
                             <span className="truncate leading-none">{entry.label}</span>
                           </button>
-                          <span className="text-[10px] text-white/20 mx-0.5 select-none">›</span>
+                          <span className="text-[10px] text-text-muted mx-0.5 select-none">›</span>
                         </span>
                       ))}
-                      <span className="text-[11px] text-white/55 font-medium leading-none truncate max-w-[110px]">{selectedText}</span>
+                      <span className="text-[11px] text-text-secondary font-medium leading-none truncate max-w-[110px]">{selectedText}</span>
                     </div>
                   ) : modeLabel ? (
                     <span className={`text-[11px] font-medium leading-snug mt-[1px]
@@ -580,7 +605,7 @@ export default function DriftPanel({
                       onClick={handlePushToMain}
                       disabled={isPushing}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                        ${pushedToMain ? 'text-accent-pink bg-accent-pink/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                        ${pushedToMain ? 'text-accent-pink bg-accent-pink/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                       title={isPushing ? 'Pushing…' : pushedToMain ? 'Undo push to main' : 'Push to main chat'}
                     >
                       {pushedToMain ? <Undo2 className="w-[17px] h-[17px]" /> : <Upload className="w-[17px] h-[17px]" />}
@@ -591,7 +616,7 @@ export default function DriftPanel({
                         onClick={handleCompareAcrossModels}
                         disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
                         className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                         title="Compare across models"
                       >
                         <Megaphone className="w-[17px] h-[17px]" />
@@ -601,7 +626,7 @@ export default function DriftPanel({
                     <button
                       onClick={handleSaveAsChat}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 active:scale-90 shrink-0
-                        ${savedAsChat ? 'text-cyan-300 bg-cyan-500/[0.1]' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.07]'}`}
+                        ${savedAsChat ? 'text-cyan-300 bg-cyan-500/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
                       title={savedAsChat ? 'Undo save as chat' : 'Save as chat'}
                     >
                       {savedAsChat ? <Undo2 className="w-[17px] h-[17px]" /> : <Bookmark className="w-[17px] h-[17px]" />}
@@ -612,7 +637,7 @@ export default function DriftPanel({
                 {/* Expand — always anchored right */}
                 <button
                   onClick={() => setIsExpanded(v => !v)}
-                  className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full text-white/35 hover:text-white/65 hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
+                  className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full text-text-muted hover:text-text-secondary hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors shrink-0"
                   title={isExpanded ? 'Collapse' : 'Expand'}
                 >
                   {isExpanded ? <Minimize2 className="w-[17px] h-[17px]" /> : <Maximize2 className={`w-[17px] h-[17px] ${showExpandHint ? 'text-accent-pink' : ''}`} />}
@@ -626,13 +651,14 @@ export default function DriftPanel({
             without returning to the chat. Each lens keeps its own thread. Hidden in
             Connect's bridge sub-mode (you're inside an answer there). */}
         {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
-          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
             {([
               { tpl: undefined, label: 'Drift' },
               { tpl: 'simplify', label: 'Simplify' },
               { tpl: 'research', label: 'Deep dive' },
               { tpl: 'connect', label: 'Connect' },
+              { tpl: 'challenge', label: 'Challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
               return (
@@ -642,7 +668,7 @@ export default function DriftPanel({
                   className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
                     ${active
                       ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
-                      : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20'}`}
+                      : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border'}`}
                 >
                   {l.label}
                 </button>
@@ -666,11 +692,11 @@ export default function DriftPanel({
           const prev = idx > 0 ? siblingDrifts[idx - 1] : null
           const next = idx >= 0 && idx < siblingDrifts.length - 1 ? siblingDrifts[idx + 1] : null
           return (
-            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] bg-white/[0.015] shrink-0">
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0">
               <button
                 onClick={() => prev && onNavigateToSibling(prev)}
                 disabled={!prev}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -690,7 +716,7 @@ export default function DriftPanel({
                       className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
                         ${isCurrent
                           ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
-                          : 'text-white/45 border border-white/[0.07] hover:text-white/80 hover:border-white/20 hover:bg-white/[0.04]'}`}
+                          : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border hover:bg-white/[0.04]'}`}
                       title={sib.selectedText}
                     >
                       {sib.selectedText}
@@ -701,7 +727,7 @@ export default function DriftPanel({
               <button
                 onClick={() => next && onNavigateToSibling(next)}
                 disabled={!next}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-white/40 hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors shrink-0"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={next ? `Next: "${next.selectedText}"` : 'No next term'}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -775,8 +801,10 @@ export default function DriftPanel({
                             onClick={() => openConnectThread(q)}
                             className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
                             style={{
-                              borderColor: visited ? `${k.color}66` : 'rgba(255,255,255,0.07)',
-                              background: visited ? `${k.color}14` : 'rgba(26,26,26,0.4)',
+                              // Neutral, theme-aware surface for unvisited connections
+                              // (was a fixed dark grey that looked wrong on the light canvas).
+                              borderColor: visited ? `${k.color}66` : 'rgb(var(--color-border))',
+                              background: visited ? `${k.color}14` : 'rgb(var(--color-elevated))',
                             }}
                             title={bridgeQuestion(e.concept)}
                           >
@@ -844,7 +872,7 @@ export default function DriftPanel({
                 <input
                   type="text"
                   placeholder="Connect to anything…"
-                  className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-white/[0.08] focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
+                  className="w-full bg-dark-elevated text-text-primary text-[13px] rounded-2xl px-4 py-3 pr-12 border border-dark-border focus:outline-none focus:border-accent-violet/30 focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)] placeholder:text-text-muted/50 transition-all duration-150 min-h-[46px]"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       const val = (e.target as HTMLInputElement).value.trim()
@@ -907,7 +935,7 @@ export default function DriftPanel({
                         onMouseLeave={() => setHoveredMessageId(null)}
                       >
                         <div className="relative" data-drift-message-id={col.id}>
-                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-dark-elevated border border-white/[0.08] text-text-secondary min-h-[40px]">
+                          <div className="relative rounded-2xl px-3.5 pt-6 pb-3 bg-dark-elevated border border-dark-border text-text-secondary min-h-[40px]">
                             {/* Overlay header chips: model tag (left) + actions (right) */}
                             {!col.isUser && (
                               <>
@@ -1097,7 +1125,8 @@ export default function DriftPanel({
                 <button
                   key={i}
                   onClick={() => { setDriftSuggestions([]); sendMessage(s) }}
-                  className="text-left px-3 py-2 rounded-xl text-[12px] text-text-secondary
+                  dir="auto"
+                  className="text-start px-3 py-2 rounded-xl text-[12px] text-text-secondary
                     border border-accent-violet/20 bg-accent-violet/[0.04]
                     hover:border-accent-violet/40 hover:text-text-primary hover:bg-accent-violet/[0.10]
                     transition-all duration-150"
@@ -1132,7 +1161,7 @@ export default function DriftPanel({
                   className={`
                     w-full bg-dark-elevated text-text-primary text-[13px]
                     rounded-2xl px-4 py-3 pr-24
-                    border border-white/[0.08]
+                    border border-dark-border
                     focus:outline-none focus:border-accent-violet/30
                     focus:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]
                     placeholder:text-text-muted/50
@@ -1159,7 +1188,7 @@ export default function DriftPanel({
                   {isTyping && (
                     <button
                       onClick={stopGeneration}
-                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-dark-border text-text-muted hover:text-text-primary transition-all active:scale-90"
                       title="Stop generating"
                     >
                       <Square className="w-3.5 h-3.5" fill="currentColor" />

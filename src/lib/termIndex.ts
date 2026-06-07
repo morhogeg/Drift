@@ -21,7 +21,7 @@ export interface TermOccurrence {
   chatTitle: string
   /** The original-cased term as the user selected it. */
   term: string
-  templateType?: 'simplify' | 'research' | 'connect'
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** Chat the drift descends from, for orientation ("in: <parent>"). */
   parentChatId?: string
 }

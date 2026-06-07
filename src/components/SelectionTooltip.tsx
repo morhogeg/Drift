@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Bookmark, GitBranch, BookOpen, Telescope, Link2 } from 'lucide-react'
+import { Bookmark, GitBranch, BookOpen, Telescope, Link2, Swords } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
-type TemplateType = 'simplify' | 'research' | 'connect'
+type TemplateType = 'simplify' | 'research' | 'connect' | 'challenge'
 
 interface SelectionTooltipProps {
   onStartDrift: (text: string, messageId: string, templateType?: TemplateType) => void
@@ -481,6 +481,7 @@ export default function SelectionTooltip({
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: BookOpen },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Link2 },
+    { type: 'challenge', label: 'Challenge', desc: 'Argue the other side',  Icon: Swords },
   ]
 
   const handleSave = () => {
@@ -522,7 +523,7 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-stretch rounded-2xl bg-[#1c1c1e]/95 backdrop-blur-2xl border border-white/10 shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+        <div className="flex items-stretch rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
           {!tooltip.isUserMessage ? (
             <>
               {/* Primary Drift action — most prominent, pink→violet gradient */}
@@ -543,8 +544,8 @@ export default function SelectionTooltip({
                   key={t.type}
                   type="button"
                   className="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
-                             text-text-secondary border-l border-white/[0.06]
-                             transition-colors duration-150 active:bg-white/[0.07] active:text-white whitespace-nowrap"
+                             text-text-secondary border-l border-dark-border
+                             transition-colors duration-150 active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap"
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
@@ -554,8 +555,8 @@ export default function SelectionTooltip({
               ))}
               <button
                 type="button"
-                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-white/[0.06]
-                           active:text-white active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
+                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-dark-border
+                           active:text-text-primary active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
                 onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
                 onClick={handleSave}
                 aria-label="Save to snippets"
@@ -566,7 +567,7 @@ export default function SelectionTooltip({
           ) : (
             <button
               type="button"
-              className="flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium text-text-secondary active:bg-white/[0.07] transition-colors duration-150"
+              className="flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium text-text-secondary active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150"
               onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
               onClick={handleSave}
             >

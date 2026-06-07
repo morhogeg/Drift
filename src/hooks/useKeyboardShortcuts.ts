@@ -7,6 +7,8 @@ interface Shortcuts {
   onToggleMap: () => void
   /** ⌘/Ctrl + K */
   onToggleSearch: () => void
+  /** `?` — keyboard & tips overlay */
+  onToggleHelp: () => void
 }
 
 /**
@@ -32,6 +34,14 @@ export function useKeyboardShortcuts(handlers: Shortcuts) {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault()
         ref.current.onToggleSearch()
+      }
+      // `?` — keyboard & tips. Ignored while typing in a field so it doesn't
+      // hijack a literal question mark in the composer or search box.
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+        e.preventDefault()
+        ref.current.onToggleHelp()
       }
     }
     window.addEventListener('keydown', onKeyDown)
