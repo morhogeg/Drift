@@ -28,18 +28,21 @@ export const connectKind = (key: string): ConnectKind => CONNECT_TYPES[key] ?? C
 export interface DriftLabels {
   opener: (term: string) => string
   connectFinding: (term: string) => string
+  connectHint: string
   bridge: (term: string, concept: string) => string
   prefixes: Record<string, string> // simplify | research | connect
 }
 const DRIFT_LABELS_EN: DriftLabels = {
   opener: (t) => `What would you like to know about "${t}"?`,
   connectFinding: (t) => `Finding connections for "${t}"…`,
+  connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
   prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Challenge this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
+  connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
   prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'ערער על זה' },
 }

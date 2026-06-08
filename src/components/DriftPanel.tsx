@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } fr
 import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
-  CONNECT_TYPES,
   connectKind,
   driftLabelsFor,
 } from '../lib/driftPanel'
@@ -167,6 +166,9 @@ export default function DriftPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
+  // Click-and-drag horizontal scroll for the sibling term strip. `dragged` lets a
+  // drag suppress the chip's click so dragging never accidentally switches drifts.
+  const stripDrag = useRef({ active: false, startX: 0, startScroll: 0, dragged: false })
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
@@ -679,21 +681,30 @@ export default function DriftPanel({
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
             {([
-              { tpl: undefined, label: 'Drift' },
-              { tpl: 'simplify', label: 'Simplify' },
-              { tpl: 'research', label: 'Deep dive' },
-              { tpl: 'connect', label: 'Connect' },
-              { tpl: 'challenge', label: 'Challenge' },
+              { tpl: undefined, label: 'Drift', key: 'drift' },
+              { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
+              { tpl: 'research', label: 'Deep dive', key: 'research' },
+              { tpl: 'connect', label: 'Connect', key: 'connect' },
+              { tpl: 'challenge', label: 'Challenge', key: 'challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
+              // Active lens wears its own signature hue — Connect cyan matches the
+              // Connections page below, mirroring the highlight-menu colors.
+              const activeTint: Record<string, string> = {
+                drift:     'bg-accent-violet/20 text-accent-violet border-accent-violet/40',
+                simplify:  'bg-amber-500/15 text-amber-500 border-amber-500/40',
+                research:  'bg-blue-500/15 text-blue-500 border-blue-500/40',
+                connect:   'bg-accent-discovery/15 text-accent-discovery border-accent-discovery/45',
+                challenge: 'bg-rose-500/15 text-rose-500 border-rose-500/40',
+              }
               return (
                 <button
                   key={l.label}
                   onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
-                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
                     ${active
-                      ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
-                      : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border'}`}
+                      ? activeTint[l.key]
+                      : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
                 >
                   {l.label}
                 </button>
@@ -728,8 +739,26 @@ export default function DriftPanel({
               </button>
               <div
                 ref={siblingStripRef}
-                className="flex-1 flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+                className="flex-1 flex items-center gap-1 overflow-x-auto cursor-grab active:cursor-grabbing select-none [&::-webkit-scrollbar]:hidden"
                 style={{ scrollbarWidth: 'none' }}
+                onPointerDown={(e) => {
+                  const el = siblingStripRef.current
+                  if (!el) return
+                  stripDrag.current = { active: true, startX: e.clientX, startScroll: el.scrollLeft, dragged: false }
+                }}
+                onPointerMove={(e) => {
+                  const el = siblingStripRef.current
+                  const d = stripDrag.current
+                  if (!el || !d.active) return
+                  const dx = e.clientX - d.startX
+                  if (Math.abs(dx) > 4) {
+                    d.dragged = true
+                    el.setPointerCapture?.(e.pointerId)
+                  }
+                  el.scrollLeft = d.startScroll - dx
+                }}
+                onPointerUp={() => { stripDrag.current.active = false }}
+                onPointerCancel={() => { stripDrag.current.active = false }}
               >
                 {siblingDrifts.map((sib) => {
                   const isCurrent = sib.driftChatId === currentDriftChatId
@@ -737,7 +766,7 @@ export default function DriftPanel({
                     <button
                       key={sib.driftChatId}
                       data-sibling-active={isCurrent}
-                      onClick={() => !isCurrent && onNavigateToSibling(sib)}
+                      onClick={() => { if (stripDrag.current.dragged) { stripDrag.current.dragged = false; return } if (!isCurrent) onNavigateToSibling(sib) }}
                       className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
                         ${isCurrent
                           ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
@@ -794,7 +823,6 @@ export default function DriftPanel({
               const dir = getTextDirection(selectedText)
               const Arrow = dir === 'rtl' ? ArrowUpLeft : ArrowUpRight
               const anyVisited = edges.some(e => connectAnswersRef.current.has(bridgeQuestion(e.concept)))
-              const presentKinds = [...new Set(edges.map(e => e.typeKey).filter(k => k in CONNECT_TYPES))]
               return (
                 <div dir={dir}>
                   <div className="flex items-center gap-1.5 mb-3">
@@ -865,22 +893,10 @@ export default function DriftPanel({
                       })}
                     </Stagger>
                   </div>
-                  {/* Footer: first-visit hint, then a legend of the kinds present */}
+                  {/* Footer: first-visit hint. (Color legend removed — each card
+                      already names its relationship in words + shows a tinted icon.) */}
                   {!anyVisited && (
-                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">Tap a connection to explore the bridge between them.</p>
-                  )}
-                  {presentKinds.length > 0 && (
-                    <div className="mt-4 ps-5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      {presentKinds.map(key => {
-                        const k = CONNECT_TYPES[key]
-                        return (
-                          <span key={key} className="inline-flex items-center gap-1.5 text-[10px] text-text-muted/70">
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 5px ${k.glow}` }} aria-hidden />
-                            {k.label}
-                          </span>
-                        )
-                      })}
-                    </div>
+                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">{driftLabels.connectHint}</p>
                   )}
                 </div>
               )

@@ -2080,6 +2080,10 @@ function App() {
                           `}
                           data-message-id={msg.id}
                           onClick={() => {
+                            // Don't hijack a text selection — let users highlight pushed
+                            // drift text and use the same drift/save tooltip on it.
+                            const sel = window.getSelection()
+                            if (sel && !sel.isCollapsed && sel.toString().trim()) return
                             if (isDriftMessage && msg.driftPushMetadata) {
                               if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
                                 const driftChat = chatHistory.find(c => c.id === msg.driftPushMetadata?.driftChatId)

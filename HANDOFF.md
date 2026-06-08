@@ -2,8 +2,8 @@
 
 **Date:** June 8, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 53 (iOS Xcode) / web
-**Status:** This session (Jun 8, entry 168): **Drag-to-resize columns + full-screen map (desktop)** — sidebar, sidechat (Drift panel), and the Drift Map can be dragged narrower/wider via thin edge handles; the main chat reflows live. The map's expand button became a full-viewport toggle. A `MIN_MAIN` (660px) floor stops the chat shrinking far enough to overlap its header icons. Widths are in-session only (reset on reload). Desktop (`lg`+) only; mobile keeps full-screen sheets. tsc + vite build clean. Prior session (Jun 7, entries 166–167): **Map + panel UX polish pass** — filter live-search (fade-away animation), chip-tap pulse highlight, RTL arrow fixes (Hebrew), Connect card light-mode colors (token-based), detail card coverage fix (reduced height), zoom button subtlety (transparent bg at rest), chips tone-down (removed glows, muted inactive). Added keyboard shortcuts overlay + honest Login screen. tsc + vite build + Capacitor sync clean (build bumped 52→53). **Ready for TestFlight.** Prior session (Jun 7 morning, entry 165): Drift Map redesigned to "luminous cards" (native-HTML glass cards, Hebrew/RTL fix, collision-free layout, docked inspector). Prior (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
+**Build:** 54 (iOS Xcode) / web
+**Status:** This session (Jun 8, entry 169): **Highlight-menu redesign + unified color system + side-chat fixes** — reworked the selection tooltip (unified Lucide icon set, per-action signature colors, "Drift into" primary label, Save tinted violet); made pushed-drift text selectable/driftable (was hijacked by the bubble's click-to-open); fixed the desktop tooltip flicker (kept open while a selection is active); added click-and-drag horizontal scroll to the sibling term strip; removed the redundant Connect color legend; propagated the per-action palette to the "View as" lens bar (Connect now cyan = matches its page); localized the Connect "tap a connection" hint (He/En). tsc + vite build + Capacitor sync clean (build bumped 53→54). **Ready for TestFlight.** Prior session (Jun 8, entry 168): **Drag-to-resize columns + full-screen map (desktop)** — sidebar, sidechat (Drift panel), and the Drift Map can be dragged narrower/wider via thin edge handles; the main chat reflows live. The map's expand button became a full-viewport toggle. A `MIN_MAIN` (660px) floor stops the chat shrinking far enough to overlap its header icons. Widths are in-session only (reset on reload). Desktop (`lg`+) only; mobile keeps full-screen sheets. tsc + vite build clean. Prior session (Jun 7, entries 166–167): **Map + panel UX polish pass** — filter live-search (fade-away animation), chip-tap pulse highlight, RTL arrow fixes (Hebrew), Connect card light-mode colors (token-based), detail card coverage fix (reduced height), zoom button subtlety (transparent bg at rest), chips tone-down (removed glows, muted inactive). Added keyboard shortcuts overlay + honest Login screen. tsc + vite build + Capacitor sync clean (build bumped 52→53). **Ready for TestFlight.** Prior session (Jun 7 morning, entry 165): Drift Map redesigned to "luminous cards" (native-HTML glass cards, Hebrew/RTL fix, collision-free layout, docked inspector). Prior (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,28 @@
 ---
 
 ## What Was Done This Session
+
+### 169. Highlight-menu redesign + unified color system + side-chat fixes (POLISH/BUG FIX, Jun 8)
+
+**Goal:** make the selection highlight-menu coherent, fix two long-standing side-chat selection bugs, and unify the template colors across the tooltip, the lens bar, and the Connect page.
+
+**Highlight menu / tooltip (`src/components/SelectionTooltip.tsx`):**
+- **Unified icon set** — replaced the mismatched glyphs with a consistent Lucide set: Simplify `Lightbulb`, Deep dive `Telescope`, Connect `Waypoints`, Challenge `Scale` (was `Swords` — too aggressive). Dropped `BookOpen`/`Link2`/`Swords` imports.
+- **Per-action signature colors** via an `ACTION_TINT` map (icon rest+hover, card hover border): Simplify=amber, Deep dive=blue, **Connect=`accent-discovery` cyan** (matches the Connections page), Challenge=rose. Replaced the earlier amber/sky two-group tint. A hairline divider still splits the menu into the understand (Simplify/Deep dive) and extend (Connect/Challenge) pairs.
+- **Primary button relabeled** "Drift" → **"Drift into"** (desktop + mobile) to disambiguate for new users.
+- **Save** tinted **violet** (moved off cyan to avoid clashing with Connect's cyan).
+
+**Bug — pushed-drift text now selectable (`src/App.tsx`):** the pushed-drift bubble's `onClick` (jump-to-drift) fired on the click that ends a drag-selection, hijacking the selection so the tooltip never persisted. Guarded the handler to bail when `window.getSelection()` is non-collapsed — the same drift/save tooltip now works on pushed text.
+
+**Bug — tooltip flicker in side chat (`SelectionTooltip.tsx`):** `handleMouseMove` dismissed purely on cursor geometry, so drifting a few px off the selection box scheduled a close ("needed 3–4 tries"). Now it keeps the tooltip open while a non-collapsed selection exists; it only closes on actual deselect / click-elsewhere.
+
+**Sibling term strip — drag to scroll (`src/components/DriftPanel.tsx`):** the chips strip had `overflow-x-auto` but no drag affordance. Added pointer-based click-and-drag horizontal scrolling (`cursor-grab`→`grabbing`, pointer capture) with a `dragged` guard so a drag never accidentally switches drifts. The ‹ › chevrons still work.
+
+**Connect page — legend removed (`DriftPanel.tsx`):** deleted the bottom color legend (History/Tension/Influence/Identity/Origin); each card already names its relationship in words + shows a tinted icon. Removed the now-unused `presentKinds` and `CONNECT_TYPES` import.
+
+**Lens bar consistency (`DriftPanel.tsx`):** the "View as" bar hard-coded violet for every active lens. Now each active lens wears its signature color (`activeTint` map) — active Connect is cyan, mirroring the page below and the tooltip. Drift stays violet; warm hues use `-500` shades for light-mode legibility.
+
+**Localization (`src/lib/driftPanel.ts` + `DriftPanel.tsx`):** the Connect "Tap a connection to explore the bridge between them." hint was hardcoded English. Added a language-aware `connectHint` to `DriftLabels` (EN + HE) and rendered it via the existing `driftLabels` memo.
 
 ### 168. Drag-to-resize columns + full-screen map (FEATURE, Jun 8)
 
@@ -489,7 +511,7 @@ VITE_GEMINI_API_KEY=your_key_here
 ## What's Pending / Next Ideas
 
 - [ ] **🔴 ACTION REQUIRED (security)** — rotate both exposed Gemini API keys in Google AI Studio (https://ai.studio); raise/reset spend cap at https://ai.studio/spend (currently 429 RESOURCE_EXHAUSTED). Details in entry 164.
-- [ ] **TestFlight submission (build 52)** — archive in Xcode → upload to App Store Connect. Build number incremented 51→52, Capacitor synced, web assets ready.
+- [ ] **TestFlight submission (build 54)** — archive in Xcode → upload to App Store Connect. Build number incremented 53→54, Capacitor synced, web assets ready.
 - [ ] **On-device pass — this session (Jun 6)** — verify: refactored hooks work on-device (drift → send message → reply → push/undo → save-as-chat); Connect mode (tap bridge → stream answer → cache hit on re-tap); no regressions from slices 4–5.
 - [ ] **On-device pass — prior sessions (Jun 4, Jun 3 PM)** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
