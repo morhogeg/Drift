@@ -17,9 +17,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
-import { getTextDirection, getRTLClassName } from './utils/rtl'
+import { getTextDirection, getRTLClassName, getRTLTruncateClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
-import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
 import SearchModal from './components/SearchModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -53,6 +52,18 @@ import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 import { SidebarChatRow, type SidebarRowKind } from '@/components/SidebarChatRow'
+
+/** Label + signature color for a pushed drift's origin tag, mirroring the
+ *  highlight-menu lens hues (amber/blue/cyan/rose) so a pushed Simplify reads
+ *  "simplify" not "drift". Falls back to plain violet "drift". */
+const PUSHED_LENS_TAG: Record<string, { label: string; chip: string; arrow: string }> = {
+  simplify:  { label: 'simplify',  chip: 'bg-amber-400/[0.10] border-amber-400/25 text-amber-400/85',                     arrow: '↗' },
+  research:  { label: 'deep dive', chip: 'bg-blue-400/[0.10] border-blue-400/25 text-blue-400/85',                       arrow: '↗' },
+  connect:   { label: 'connect',   chip: 'bg-accent-discovery/[0.10] border-accent-discovery/25 text-accent-discovery/90', arrow: '↗' },
+  challenge: { label: 'challenge', chip: 'bg-rose-400/[0.10] border-rose-400/25 text-rose-400/85',                       arrow: '↗' },
+}
+const pushedLensTag = (tpl?: string) =>
+  (tpl && PUSHED_LENS_TAG[tpl]) || { label: 'drift', chip: 'bg-accent-violet/[0.08] border-accent-violet/20 text-accent-violet/80', arrow: '↗' }
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -126,6 +137,7 @@ function App() {
   const activeMessageIdRef = useRef<string | null>(null)
   const listIndexedMessageIdsRef = useRef<Set<string>>(new Set())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     chatStore.setInputText((chatStore.inputText ? chatStore.inputText + ' ' : '') + transcript)
   })
@@ -297,6 +309,25 @@ function App() {
 
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
+
+  // Reveal where a freshly-pushed drift landed. Fires once the main chat is
+  // actually visible (panel + map closed) — so on mobile, where the full-screen
+  // panel hid the promotion, returning to the chat scrolls to the promoted block
+  // and gives it a brief "landed here" glow. Cleared after the reveal.
+  useEffect(() => {
+    if (!justPromotedChatId || driftOpen || knowledgeGraphOpen) return
+    const targetId = justPromotedChatId
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-promoted-chat="${CSS.escape(targetId)}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('drift-landing')
+        window.setTimeout(() => el.classList.remove('drift-landing'), 2600)
+      }
+      setJustPromotedChatId(null)
+    }, 360) // let the panel's close transition settle before scrolling
+    return () => window.clearTimeout(t)
+  }, [justPromotedChatId, driftOpen, knowledgeGraphOpen])
 
   // Margins the main column reserves so the open side panels never cover it
   // (match the live, drag-adjustable panel widths). When the map is full-screen it
@@ -1011,6 +1042,21 @@ function App() {
     }
   }, [message])
 
+  // ── Measure composer height → CSS var (--composer-h) ────────────────────────
+  // Keeps the touch selection action bar pinned just above the composer even as
+  // it grows to multiple lines.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    const update = () => {
+      document.documentElement.style.setProperty('--composer-h', `${el.offsetHeight}px`)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // ── Scroll button visibility ────────────────────────────────────────────────
   useEffect(() => {
     const chatContainer = document.querySelector('.chat-messages-container')
@@ -1362,7 +1408,7 @@ function App() {
         style={{ width: isLgUp ? sidebarWidth : undefined, transition: resizing ? 'none' : undefined }}
       >
         {/* Sidebar Header */}
-        <div className="px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
+        <div className="pt-safe px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
           {/* Search Bar */}
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
@@ -1454,14 +1500,53 @@ function App() {
           ))}
         </div>
 
-        {/* Settings */}
-        <div className="border-t border-dark-border/30 px-2 py-1">
+        {/* Compact footer toolbar — active model (flex, tap to switch) plus
+            quick-action icons. Gallery & Help are mobile-only (desktop reaches
+            them from the header icons); Settings is always available. */}
+        <div className="border-t border-dark-border/30 px-2 py-1.5 flex items-center gap-1">
+          {/* Model — takes the remaining width, shows the active model label */}
+          <button
+            onClick={() => { setModelPickerOpen(true); uiStore.setSidebarOpen(false) }}
+            className="flex-1 min-w-0 flex items-center gap-2 px-2 h-10 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
+            title="Switch model"
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              selectedTargets[0]?.provider === 'gemini' ? 'bg-sky-400' :
+              selectedTargets[0]?.provider === 'openrouter' ? 'bg-blue-400' :
+              selectedTargets[0]?.provider === 'ollama' ? 'bg-emerald-400' : 'bg-white/40'}`}
+            />
+            <span className="flex-1 min-w-0 text-left truncate">{selectedTargets[0]?.label ?? 'Model'}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+          </button>
+
+          {/* Snippet Gallery — mobile-only (desktop uses the header icon) */}
+          <button
+            onClick={() => { uiStore.setGalleryOpen(true); uiStore.setSidebarOpen(false) }}
+            className="lg:hidden flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-cyan-400 hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Snippet Gallery"
+            aria-label="Snippet Gallery"
+          >
+            <Bookmark className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* Keyboard & tips — mobile-only (desktop uses the header icon) */}
+          <button
+            onClick={() => { setHelpOpen(true); uiStore.setSidebarOpen(false) }}
+            className="lg:hidden flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-accent-violet hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Keyboard & tips"
+            aria-label="Keyboard and tips"
+          >
+            <HelpCircle className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* Settings */}
           <button
             onClick={() => uiStore.setSettingsOpen(true)}
-            className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
+            className="flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-text-primary hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Settings"
+            aria-label="Settings"
           >
-            <SettingsIcon className="w-4 h-4 text-text-muted" />
-            Settings
+            <SettingsIcon className="w-[18px] h-[18px]" />
           </button>
         </div>
 
@@ -1534,7 +1619,7 @@ function App() {
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
           <div className="px-2 py-0.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-4 min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               {!sidebarOpen ? (
                 <>
                   <button
@@ -1621,7 +1706,7 @@ function App() {
                       >
                         {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                         <span
-                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
+                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLTruncateClassName(title)}`}
                           dir={getTextDirection(title)}
                         >
                           {title}
@@ -1667,7 +1752,7 @@ function App() {
                               {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
                               {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                               <span
-                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLClassName(crumb.label)}`}
+                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLTruncateClassName(crumb.label)}`}
                                 dir={getTextDirection(crumb.label)}
                               >
                                 {crumb.label}
@@ -1683,7 +1768,7 @@ function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               {/* Reopen last drift — one tap back to the branch you just left.
                   Hidden while the panel/tree is open (you're already there), and
                   only shown for a drift that belongs to the chat you're viewing —
@@ -1693,10 +1778,10 @@ function App() {
                   onClick={reopenLastDrift}
                   haptic={null}
                   title={`Reopen drift · "${lastDrift.selectedText}"`}
-                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full
+                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full min-w-0
                              border border-accent-violet/25 bg-accent-violet/[0.07]
                              text-accent-violet/85 hover:text-accent-violet hover:bg-accent-violet/[0.12]
-                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[34vw] sm:max-w-[200px]"
+                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[28vw] sm:max-w-[200px]"
                 >
                   <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[12px] font-medium truncate">{lastDrift.selectedText}</span>
@@ -1706,7 +1791,7 @@ function App() {
               {/* Drift Tree Button — first-class control whenever the thread has
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
-                <div className="relative">
+                <div className="relative shrink-0">
                 {mapSpotlight && (
                   <span className="absolute inset-0 rounded-full border border-accent-violet/60 animate-ping pointer-events-none" aria-hidden />
                 )}
@@ -1754,7 +1839,7 @@ function App() {
               {/* New Chat Button */}
               <button
                 onClick={createNewChat}
-                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                className="p-2 min-w-[44px] min-h-[44px] shrink-0 flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
                 title="New chat (⌘⌥N)"
               >
                 <Plus className="w-4 h-4 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
@@ -2012,14 +2097,15 @@ function App() {
                   <div
                     className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
                     data-drift-promoted={isDriftMessage ? 'true' : undefined}
+                    data-promoted-chat={isDriftMessage ? msg.driftPushMetadata?.driftChatId : undefined}
                     key={msg.id}
                   >
                     {/* Drift group header */}
                     {isFirstDriftMessage && hasMultipleDriftMessages && (
                       <div className="px-6 mb-2">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 rounded-full bg-dark-elevated/60 border border-dark-border/50 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                            Drift
+                          <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${pushedLensTag(msg.driftPushMetadata?.templateType).chip}`}>
+                            {pushedLensTag(msg.driftPushMetadata?.templateType).label}
                           </span>
                           {msg.driftPushMetadata?.selectedText && (
                             <span className="text-xs text-text-muted italic">
@@ -2037,10 +2123,9 @@ function App() {
                       {/* Subtle drift origin tag — shown on every non-user pushed message */}
                       {isDriftMessage && !msg.isUser && (
                         <div className="flex items-center gap-1.5 mb-1.5 mt-0.5">
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md
-                            bg-accent-violet/[0.08] border border-accent-violet/20
-                            text-[9px] font-semibold text-accent-violet/80 tracking-wide uppercase">
-                            ↗ drift
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border
+                            text-[9px] font-semibold tracking-wide uppercase ${pushedLensTag(msg.driftPushMetadata?.templateType).chip}`}>
+                            {pushedLensTag(msg.driftPushMetadata?.templateType).arrow} {pushedLensTag(msg.driftPushMetadata?.templateType).label}
                           </span>
                           {(isSinglePushMessage || isFirstDriftMessage) && msg.driftPushMetadata?.selectedText && (
                             <span className="text-[11px] text-text-muted italic truncate max-w-[260px]">
@@ -2147,10 +2232,10 @@ function App() {
 
                                 if (needsSwitch) {
                                   setTimeout(() => {
-                                    handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                    handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                   }, 200)
                                 } else {
-                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                 }
                               }
                             }
@@ -2204,7 +2289,7 @@ function App() {
                                     driftStore.saveTempConversation(driftChatId, finalDriftConversation)
                                   }
 
-                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                 }
                               }}
                               title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
@@ -2576,7 +2661,7 @@ function App() {
         )}
 
         {/* Input area */}
-        <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
+        <div ref={composerRef} style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
           <div className="max-w-4xl mx-auto">
             {/* First-run hint — teaches the drift gesture when a reply is on screen. */}
             {!seenDriftHint && !driftOpen && !knowledgeGraphOpen && messages.some(m => !m.isUser && !!m.text) && (
@@ -2586,13 +2671,6 @@ function App() {
                 <button onClick={markDriftHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3.5 h-3.5" /></button>
               </div>
             )}
-            {/* Mobile-only: model pill row above textarea */}
-            <div className="lg:hidden">
-              <ModelPillRow
-                selectedTargets={selectedTargets}
-                onOpenPicker={() => setModelPickerOpen(true)}
-              />
-            </div>
             <div className="relative">
               <textarea
                 ref={textareaRef}
@@ -2632,7 +2710,7 @@ function App() {
                 {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
                   <button
                     onClick={voiceInput.startListening}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
                     title="Voice input"
                   >
                     <Mic className="w-4 h-4" />
@@ -2643,7 +2721,7 @@ function App() {
                 {isTyping && (
                   <button
                     onClick={stopGeneration}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
                     title="Stop generating"
                   >
                     <Square className="w-3.5 h-3.5" fill="currentColor" />
@@ -2654,7 +2732,7 @@ function App() {
                 {voiceInput.isListening && (
                   <button
                     onClick={voiceInput.stopListening}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
                     title="Stop listening"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -2667,7 +2745,7 @@ function App() {
                     onClick={() => sendMessage()}
                     disabled={!message.trim() && !voiceInput.isListening}
                     className={`
-                      w-9 h-9 rounded-xl flex items-center justify-center
+                      w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center
                       transition-all duration-150 active:scale-90
                       ${message.trim() || voiceInput.isListening
                         ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20'

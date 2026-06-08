@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
@@ -42,7 +42,7 @@ interface DriftPanelProps {
   highlightMessageId?: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => void
   onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
   onUndoPushToMain?: (sourceMessageId: string) => void
   onUndoSaveAsChat?: (chatId: string) => void
@@ -182,7 +182,9 @@ export default function DriftPanel({
   // thread but driftChatId has already flipped — the old conversation is never
   // written under the new thread's key (which would lose it on return: Bug 5).
   const messagesThreadRef = useRef<string | undefined>(driftChatId)
-  const [isComparing, setIsComparing] = useState(false)
+  // `isComparing` was only read by the removed multi-model Compare button; the
+  // stream hook still needs the setter, so keep the setter and drop the binding.
+  const [, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
@@ -224,7 +226,7 @@ export default function DriftPanel({
   })
 
   // Drift conversation send / stream pipeline (owns the abort controllers).
-  const { sendMessage, retryLastMessage, stopGeneration, handleCompareAcrossModels } = useDriftMessageStream({
+  const { sendMessage, retryLastMessage, stopGeneration } = useDriftMessageStream({
     message,
     driftOnlyMessages,
     isTyping,
@@ -263,6 +265,7 @@ export default function DriftPanel({
     sourceMessageId,
     parentChatId,
     driftChatId,
+    templateType,
     onPushToMain,
     onSaveAsChat,
     onUpdatePushedDriftSaveStatus,
@@ -638,18 +641,6 @@ export default function DriftPanel({
                       {pushedToMain ? <Undo2 className="w-[17px] h-[17px]" /> : <Upload className="w-[17px] h-[17px]" />}
                     </button>
 
-                    {selectedTargets && selectedTargets.length > 1 && (
-                      <button
-                        onClick={handleCompareAcrossModels}
-                        disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
-                        className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
-                        title="Compare across models"
-                      >
-                        <Megaphone className="w-[17px] h-[17px]" />
-                      </button>
-                    )}
-
                     <button
                       onClick={handleSaveAsChat}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 active:scale-90 shrink-0
@@ -673,6 +664,27 @@ export default function DriftPanel({
             )
           })()}
         </header>
+
+        {/* Push confirmation — on mobile the panel covers the whole screen, so a
+            corner toast is easy to miss. This makes "it landed in main" explicit
+            and gives a one-tap "View" that closes the panel and reveals where the
+            content was added. */}
+        {pushedToMain && !isPushing && (
+          <button
+            onClick={() => onClose(driftOnlyMessages)}
+            className="flex items-center gap-2 px-3 py-2 w-full text-left shrink-0
+                       border-b border-accent-violet/20 bg-accent-violet/[0.07]
+                       hover:bg-accent-violet/[0.11] transition-colors group animate-fade-in"
+          >
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent-violet/20 shrink-0">
+              <Check className="w-3 h-3 text-accent-violet" />
+            </span>
+            <span className="text-[12.5px] text-text-secondary flex-1 leading-snug">Added to the main thread</span>
+            <span className="text-[12px] font-semibold text-accent-violet group-hover:text-accent-pink inline-flex items-center gap-0.5 shrink-0 transition-colors">
+              View <ArrowUpRight className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        )}
 
         {/* "View as" lens switcher — re-view the same term through a different lens
             without returning to the chat. Each lens keeps its own thread. Hidden in
@@ -701,7 +713,7 @@ export default function DriftPanel({
                 <button
                   key={l.label}
                   onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
-                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
+                  className={`shrink-0 inline-flex items-center justify-center min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
                     ${active
                       ? activeTint[l.key]
                       : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
@@ -732,7 +744,7 @@ export default function DriftPanel({
               <button
                 onClick={() => prev && onNavigateToSibling(prev)}
                 disabled={!prev}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
+                className="p-1.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -781,7 +793,7 @@ export default function DriftPanel({
               <button
                 onClick={() => next && onNavigateToSibling(next)}
                 disabled={!next}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
+                className="p-1.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={next ? `Next: "${next.selectedText}"` : 'No next term'}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -792,7 +804,7 @@ export default function DriftPanel({
 
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto px-4 pt-4 custom-scrollbar" style={{ paddingBottom: 'calc(8rem + var(--kb-h, 0px))' }}>
             {/* Relationship map: the term is a hub with labeled edges to related
                 concepts. Tap an edge → the AI draws the bridge between the two,
                 which becomes its own thread. "Connect to anything" adds an edge. */}

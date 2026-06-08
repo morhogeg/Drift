@@ -540,7 +540,7 @@ export default function SelectionTooltip({
       <div
         style={{
           position: 'fixed',
-          bottom: `calc(env(safe-area-inset-bottom) + 76px)`,
+          bottom: `calc(env(safe-area-inset-bottom) + var(--composer-h, 64px) + 16px)`,
           left: '20px',
           right: '20px',
           zIndex: 99997,
@@ -548,7 +548,13 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-stretch rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+        {/* Outer wrapper clips to the rounded-pill shape; the inner row scrolls
+            horizontally on narrow phones so no action button is ever clipped. */}
+        <div className="rounded-2xl overflow-hidden bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)]">
+        <div
+          className="flex items-stretch flex-nowrap overflow-x-auto [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: 'none' }}
+        >
           {!tooltip.isUserMessage ? (
             <>
               {/* Primary Drift action — most prominent, pink→violet gradient */}
@@ -569,7 +575,7 @@ export default function SelectionTooltip({
                 <button
                   key={t.type}
                   type="button"
-                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
+                  className={`flex-shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
                              text-text-secondary transition-colors duration-150
                              active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap
                              ${i === 2 ? 'border-l-2 border-dark-border' : 'border-l border-dark-border'}`}
@@ -602,6 +608,7 @@ export default function SelectionTooltip({
               Save
             </button>
           )}
+        </div>
         </div>
       </div>
     )

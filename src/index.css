@@ -196,6 +196,22 @@ html, body {
   .drift-promoted-arrive { animation: none; }
 }
 
+/* "Landed here" reveal — applied when the user returns to the main chat after a
+   push. A longer, gentle violet glow that draws the eye to exactly where the
+   promoted content was added, then fades. */
+@keyframes driftLandingGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+  18%  { box-shadow: 0 0 30px 3px rgba(168, 85, 247, 0.24); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+}
+.drift-landing {
+  animation: driftLandingGlow 2.6s ease-out both;
+  border-radius: 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drift-landing { animation: none; }
+}
+
 @layer base {
   * {
     @apply transition-colors duration-200;

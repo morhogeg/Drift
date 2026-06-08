@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { snippetStorage } from '../services/snippetStorage'
-import { isDriftOpenerText } from '../lib/driftPanel'
+import { isDriftScaffoldText } from '../lib/driftPanel'
 import type { Message } from '../components/DriftPanel'
 
 interface DriftPanelActionsDeps {
@@ -14,8 +14,10 @@ interface DriftPanelActionsDeps {
   parentChatId: string
   /** The chat id of this drift, once it has one (used to reconstruct on click). */
   driftChatId?: string
+  /** The lens this drift was explored through, carried into the pushed tag. */
+  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   /** Push the given messages back into the main chat. */
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => void
   /** Persist the drift conversation as a standalone chat. */
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
   /** Mark already-pushed drift messages as saved (after a save-as-chat). */
@@ -56,6 +58,7 @@ export function useDriftPanelActions({
   sourceMessageId,
   parentChatId,
   driftChatId,
+  templateType,
   onPushToMain,
   onSaveAsChat,
   onUpdatePushedDriftSaveStatus,
@@ -78,7 +81,7 @@ export function useDriftPanelActions({
     if (pushedToMain && pushedMessageCount > 0) {
       // Filter out the system message
       const currentMessageCount = driftOnlyMessages.filter(
-        msg => !isDriftOpenerText(msg.text)
+        msg => !isDriftScaffoldText(msg.text)
       ).length
 
       // If there are more messages now than when we pushed, reset the button
@@ -121,7 +124,7 @@ export function useDriftPanelActions({
       const messageIndex = driftOnlyMessages.findIndex(m => m.id === message.id)
       const allMessagesUpToThis = driftOnlyMessages
         .slice(0, messageIndex + 1)
-        .filter(msg => !isDriftOpenerText(msg.text))
+        .filter(msg => !isDriftScaffoldText(msg.text))
 
       // Mark only the selected message as visible, others as hidden context
       const messagesToPush = allMessagesUpToThis.map((msg) => ({
@@ -148,7 +151,8 @@ export function useDriftPanelActions({
         singleMessageSourceId,
         savedAsChat,
         userQuestion,
-        chatIdToUse
+        chatIdToUse,
+        templateType
       )
     }
   }
@@ -268,9 +272,12 @@ export function useDriftPanelActions({
     }
 
     if (onPushToMain && driftOnlyMessages.length > 0) {
-      // Filter out the system message when pushing to main
+      // Filter out the system message AND the template trigger scaffold
+      // ("Simplify this: …", "Deep dive into this: …", etc.) when pushing to
+      // main, so a pushed lens drift carries only the real answer, not the
+      // scaffolding that drove it.
       const messagesToPush = driftOnlyMessages.filter(
-        msg => !isDriftOpenerText(msg.text)
+        msg => !isDriftScaffoldText(msg.text)
       )
 
       if (messagesToPush.length > 0) {
@@ -303,7 +310,7 @@ export function useDriftPanelActions({
           console.log(`[DRIFT-PANEL ${pushAttemptId}] Content signature:`, contentSignature.substring(0, 50))
 
           const chatIdToUse = savedChatId || driftChatId || `drift-temp-full-${Date.now()}`
-          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, chatIdToUse)
+          onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, chatIdToUse, templateType)
 
           console.log(`[DRIFT-PANEL ${pushAttemptId}] Push call completed`)
           setPushedToMain(true)
