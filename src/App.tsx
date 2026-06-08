@@ -3,6 +3,7 @@ import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, Arrow
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
+import ResizeHandle from './components/ResizeHandle'
 const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
 import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
@@ -220,10 +221,9 @@ function App() {
   }, [totalDriftCount, knowledgeGraphOpen, endMapSpotlight])
   useEffect(() => { if (knowledgeGraphOpen && mapSpotlight) endMapSpotlight() }, [knowledgeGraphOpen, mapSpotlight, endMapSpotlight])
 
-  // Drift Map "expand" (desktop): widens the map panel for a larger view. Tracked
-  // here (not inside the map) so the main column's right margin can match the panel
-  // width and never get covered.
-  const [mapExpanded, setMapExpanded] = useState(false)
+  // Drift Map full-screen (desktop): covers the whole viewport. Tracked here so the
+  // main column can drop its right-margin reserve while the map is full-screen.
+  const [mapFullscreen, setMapFullscreen] = useState(false)
   const [isLgUp, setIsLgUp] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -233,8 +233,32 @@ function App() {
     m.addEventListener('change', h)
     return () => m.removeEventListener('change', h)
   }, [])
-  // The map panel's width (kept in sync with DriftKnowledgeGraph's desktop panel).
-  const mapPanelWidth = mapExpanded ? 'min(1040px, 90vw)' : 'min(680px, 56vw)'
+
+  // ── Desktop drag-to-resize: per-panel widths (px) ────────────────────────────
+  // In-session only (reset on reload by design). The main column is flex-1 and
+  // reserves exactly these widths via margins, so it reflows for free as they change.
+  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [driftWidth, setDriftWidth] = useState(450)
+  const [mapWidth, setMapWidth] = useState(680)
+  // Smallest the main chat may get when a right panel grows — just enough that its
+  // header icons (search/gallery/help on the left, Map/new-chat pills on the right)
+  // stay laid out instead of clipping. Protecting this takes priority over a right
+  // panel's own minimum, so on a narrow window the panel yields rather than the chat.
+  const MIN_MAIN = 660
+  const clampSidebar = (w: number) => Math.max(240, Math.min(560, w))
+  // Most a right panel may take so the chat keeps MIN_MAIN (accounting for the open
+  // sidebar). Math.min(w, maxRight) wins even if maxRight is below the panel's floor.
+  const maxRightWidth = () => {
+    const leftReserve = isLgUp && sidebarOpen ? sidebarWidth : 0
+    return Math.max(0, window.innerWidth - leftReserve - MIN_MAIN)
+  }
+  const clampDrift = (w: number) => Math.min(Math.max(320, w), maxRightWidth())
+  const clampMap = (w: number) => Math.min(Math.max(400, w), maxRightWidth())
+  // True while any panel is being dragged — suppresses the layout's width/margin
+  // transitions so the columns track the pointer instead of easing behind it.
+  const [resizing, setResizing] = useState(false)
+  const startResize = useCallback(() => setResizing(true), [])
+  const endResize = useCallback(() => setResizing(false), [])
 
   // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
   // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
@@ -274,11 +298,13 @@ function App() {
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
 
-  // Right margin the main column reserves so the open side panel never covers it
-  // (matches the actual panel width, including the map's expanded width).
+  // Margins the main column reserves so the open side panels never cover it
+  // (match the live, drag-adjustable panel widths). When the map is full-screen it
+  // covers everything, so no reserve is needed.
   const mainRightMargin = isLgUp
-    ? (knowledgeGraphOpen ? mapPanelWidth : driftOpen ? 'min(450px, 56vw)' : 0)
+    ? (knowledgeGraphOpen ? (mapFullscreen ? 0 : mapWidth) : driftOpen ? driftWidth : 0)
     : 0
+  const mainLeftMargin = isLgUp && sidebarOpen ? sidebarWidth : 0
 
   // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
   // Index every prior drift by its term (cheap; reads only what's persisted).
@@ -1325,13 +1351,16 @@ function App() {
       )}
 
       {/* Sidebar */}
-      <aside className={`
-        fixed z-20 w-[85vw] max-w-[340px] h-full bg-dark-surface/95 backdrop-blur-sm
+      <aside
+        className={`
+        fixed z-20 w-[85vw] max-w-[340px] lg:max-w-none h-full bg-dark-surface/95 backdrop-blur-sm
         border-r border-dark-border/30 flex flex-col
         transition-all duration-150 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         shadow-[inset_-8px_0_10px_-8px_rgba(0,0,0,0.4)]
-      `}>
+      `}
+        style={{ width: isLgUp ? sidebarWidth : undefined, transition: resizing ? 'none' : undefined }}
+      >
         {/* Sidebar Header */}
         <div className="px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
           {/* Search Bar */}
@@ -1479,16 +1508,26 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* Drag to resize (desktop) */}
+        {sidebarOpen && (
+          <ResizeHandle
+            edge="right"
+            onResize={(clientX) => setSidebarWidth(clampSidebar(clientX))}
+            onResizeStart={startResize}
+            onResizeEnd={endResize}
+          />
+        )}
       </aside>
 
       {/* Main Chat Area */}
       <div
-        className={`
-          flex-1 min-w-0 flex flex-col relative
-          transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-        `}
-        style={{ marginRight: mainRightMargin }}
+        className="flex-1 min-w-0 flex flex-col relative"
+        style={{
+          marginLeft: mainLeftMargin,
+          marginRight: mainRightMargin,
+          transition: resizing ? 'none' : 'margin 0.3s ease-in-out',
+        }}
         onTouchStart={swipeHandlers.onTouchStart}
         onTouchEnd={swipeHandlers.onTouchEnd}
       >
@@ -2680,6 +2719,11 @@ function App() {
       {/* Drift Panel */}
       <DriftPanel
         isOpen={driftOpen}
+        width={isLgUp ? driftWidth : undefined}
+        onResize={(clientX) => setDriftWidth(clampDrift(window.innerWidth - clientX))}
+        onResizeStart={startResize}
+        onResizeEnd={endResize}
+        resizing={resizing}
         onClose={handleCloseDrift}
         selectedText={driftContext?.selectedText || ''}
         contextMessages={driftContext?.contextMessages || []}
@@ -2756,7 +2800,11 @@ function App() {
           if (has('openrouter')) return 'openrouter'
           return 'gemini'
         })()}
-        onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
+        onExpandedChange={(expanded) => {
+          driftStore.expandDrift(expanded)
+          // The expand/collapse button doubles as a quick width preset alongside drag.
+          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 450)
+        }}
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
         templateType={driftContext?.templateType}
@@ -2868,9 +2916,13 @@ function App() {
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
-          expanded={mapExpanded}
-          onToggleExpand={() => setMapExpanded(v => !v)}
-          onClose={() => { setMapExpanded(false); setKnowledgeGraphOpen(false) }}
+          fullscreen={mapFullscreen}
+          onToggleFullscreen={() => setMapFullscreen(v => !v)}
+          width={mapWidth}
+          onResize={(clientX) => setMapWidth(clampMap(window.innerWidth - clientX))}
+          onResizeStart={startResize}
+          onResizeEnd={endResize}
+          onClose={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false) }}
           onSwitchChat={switchChat}
           onScrollToMessage={(msgId) => {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)

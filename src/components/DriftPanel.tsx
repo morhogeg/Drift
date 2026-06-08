@@ -19,6 +19,7 @@ import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { Stagger, staggerChild } from './motion'
 import { motion } from 'framer-motion'
+import ResizeHandle from './ResizeHandle'
 
 export interface Message {
   id: string
@@ -57,6 +58,14 @@ interface DriftPanelProps {
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
+  /** Desktop drag-to-resize: explicit panel width (px). Undefined on mobile (full-screen sheet). */
+  width?: number
+  /** Desktop drag-to-resize: fires on every pointer move during a drag, with the pointer's viewport X. */
+  onResize?: (clientX: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
+  /** True while a panel is being dragged — suppresses the width transition. */
+  resizing?: boolean
   /** Breadcrumb trail from the root (main chat) up to (but not including) this drift. */
   ancestry?: AncestryEntry[]
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
@@ -100,6 +109,11 @@ export interface SiblingDrift {
 
 export default function DriftPanel({
   isOpen,
+  width,
+  onResize,
+  onResizeStart,
+  onResizeEnd,
+  resizing,
   onClose,
   selectedText,
   contextMessages,
@@ -475,13 +489,24 @@ export default function DriftPanel({
   }, [isOpen, highlightMessageId, driftOnlyMessages])
 
   return (
-    <div className={`
+    <div
+      className={`
       fixed inset-0 z-30
       lg:inset-auto lg:top-0 lg:right-0 lg:h-full lg:z-20
-      ${isExpanded ? 'lg:w-[70vw] lg:max-w-[920px]' : 'lg:w-[450px]'}
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
-    `}>
+    `}
+      style={{ width, transition: resizing ? 'none' : undefined }}
+    >
+      {/* Drag to resize (desktop) */}
+      {onResize && (
+        <ResizeHandle
+          edge="left"
+          onResize={onResize}
+          onResizeStart={onResizeStart}
+          onResizeEnd={onResizeEnd}
+        />
+      )}
       {/* Glow blooming behind the panel as it unfolds — keyed to retrigger on
           open and on branching into a new topic. */}
       <div

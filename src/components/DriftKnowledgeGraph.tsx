@@ -16,6 +16,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
 import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
+import ResizeHandle from './ResizeHandle'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,10 +32,16 @@ interface Props {
   onSynthesize?: (rootId: string) => void
   /** True while a synthesis request is in flight. */
   synthesizing?: boolean
-  /** Desktop: panel is widened for a larger view. */
-  expanded?: boolean
-  /** Desktop: toggle the wider view (also widens the host panel via the parent). */
-  onToggleExpand?: () => void
+  /** Desktop: map covers the whole viewport. */
+  fullscreen?: boolean
+  /** Desktop: toggle the full-viewport view. */
+  onToggleFullscreen?: () => void
+  /** Desktop drag-to-resize: explicit panel width (px). */
+  width?: number
+  /** Desktop drag-to-resize: fires on every pointer move during a drag, with the pointer's viewport X. */
+  onResize?: (clientX: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
 }
 
 interface TreeNode {
@@ -1443,9 +1450,13 @@ function useDragClose(onClose: () => void, enabled: boolean) {
 
 export default function DriftKnowledgeGraph({
   chatHistory, activeChatId, onClose, onSwitchChat, onOpenDrift, getTempMessages,
-  onSynthesize, synthesizing, expanded, onToggleExpand,
+  onSynthesize, synthesizing, fullscreen, onToggleFullscreen, width, onResize,
+  onResizeStart, onResizeEnd,
 }: Props) {
   const isMobile = useIsMobile()
+  // True while the user is dragging the resize handle — suppresses the width
+  // CSS transition so the panel tracks the pointer instead of easing behind it.
+  const [isResizing, setIsResizing] = useState(false)
 
   // The map always shows just the current conversation's tree.
   const [scope] = useState<'chat' | 'all'>('chat')
@@ -1514,7 +1525,7 @@ export default function DriftKnowledgeGraph({
       isMobile={isMobile}
       onSelect={onSelect}
       selectedId={selectedId}
-      expanded={expanded}
+      expanded={fullscreen}
     />
   ) : (
     <EmptyState isMobile={isMobile} />
@@ -1590,11 +1601,21 @@ export default function DriftKnowledgeGraph({
       <div
         className="dkg-sheet fixed top-0 right-0 bottom-0 z-40 flex flex-col"
         style={{
-          width: expanded ? 'min(1040px, 90vw)' : 'min(680px, 56vw)',
+          width: fullscreen ? '100vw' : (width ?? 'min(680px, 56vw)'),
+          left: fullscreen ? 0 : undefined,
           borderLeft: '1px solid rgb(var(--color-border))',
-          transition: 'width 0.3s cubic-bezier(0.16,1,0.3,1)',
+          transition: isResizing ? 'none' : 'width 0.3s cubic-bezier(0.16,1,0.3,1)',
         }}
       >
+        {/* Drag to resize (desktop) — hidden in full-screen */}
+        {onResize && !fullscreen && (
+          <ResizeHandle
+            edge="left"
+            onResize={onResize}
+            onResizeStart={() => { setIsResizing(true); onResizeStart?.() }}
+            onResizeEnd={() => { setIsResizing(false); onResizeEnd?.() }}
+          />
+        )}
         {/* Header */}
         <div className="px-5 pt-4 pb-3.5 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
           <div className="flex items-start justify-between gap-3">
@@ -1628,15 +1649,15 @@ export default function DriftKnowledgeGraph({
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              {onToggleExpand && (
+              {onToggleFullscreen && (
                 <button
-                  onClick={onToggleExpand}
+                  onClick={onToggleFullscreen}
                   className="p-1.5 rounded-lg hover:bg-white/10"
                   style={{ color: 'rgb(var(--color-text-secondary))' }}
-                  title={expanded ? 'Shrink map' : 'Expand map'}
-                  aria-label={expanded ? 'Shrink map' : 'Expand map'}
+                  title={fullscreen ? 'Exit full screen' : 'Full screen'}
+                  aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
                 >
-                  {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
               )}
               <button
