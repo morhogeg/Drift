@@ -97,6 +97,10 @@ interface DriftPanelProps {
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
   onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
+  /** Lens keys ('drift'|'simplify'|'research'|'connect'|'challenge') that already have
+   *  generated content for this term — marked in the "View as" bar so the user can tell
+   *  which lenses are instant (already explored) vs. which would fire a fresh API call. */
+  exploredLenses?: Set<string>
 }
 
 export interface SiblingDrift {
@@ -146,6 +150,7 @@ export default function DriftPanel({
   currentDriftChatId,
   onNavigateToSibling,
   onSwitchLens,
+  exploredLenses,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -700,8 +705,12 @@ export default function DriftPanel({
               { tpl: 'challenge', label: 'Challenge', key: 'challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
-              // Active lens wears its own signature hue — Connect cyan matches the
-              // Connections page below, mirroring the highlight-menu colors.
+              // Already-explored lenses (content exists → instant, no API call). The
+              // active lens is obviously explored; mark the OTHERS so the user knows
+              // which taps are free vs. which would fire a fresh generation.
+              const explored = !active && !!exploredLenses?.has(l.key)
+              // Each lens's signature hue — used filled when active, as a small dot
+              // when explored-but-inactive. Connect cyan matches the Connections page.
               const activeTint: Record<string, string> = {
                 drift:     'bg-accent-violet/20 text-accent-violet border-accent-violet/40',
                 simplify:  'bg-amber-500/15 text-amber-500 border-amber-500/40',
@@ -709,15 +718,26 @@ export default function DriftPanel({
                 connect:   'bg-accent-discovery/15 text-accent-discovery border-accent-discovery/45',
                 challenge: 'bg-rose-500/15 text-rose-500 border-rose-500/40',
               }
+              const dotTint: Record<string, string> = {
+                drift:     'bg-accent-violet',
+                simplify:  'bg-amber-500',
+                research:  'bg-blue-500',
+                connect:   'bg-accent-discovery',
+                challenge: 'bg-rose-500',
+              }
               return (
                 <button
                   key={l.label}
                   onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
-                  className={`shrink-0 inline-flex items-center justify-center min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
+                  title={explored ? `${l.label} — already explored` : undefined}
+                  className={`shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
                     ${active
                       ? activeTint[l.key]
-                      : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
+                      : explored
+                        ? 'text-text-secondary border-dark-border/80 hover:text-text-primary'
+                        : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
                 >
+                  {explored && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotTint[l.key]}`} />}
                   {l.label}
                 </button>
               )

@@ -5,7 +5,7 @@
  *   - 'chat'      → a regular conversation (message bubble icon, primary text)
  *   - 'drift'     → a branched exploration (drift-curl icon, violet quoted term,
  *                   nested under its parent + a "from <parent>" origin caption)
- *   - 'synthesis' → a woven "bring it home" chat (sparkle icon, violet/pink accent)
+ *   - 'synthesis' → a woven synthesis chat (sparkle icon, violet/pink accent)
  *
  * Purely presentational — all behavior (open, context menu, rename) is passed in.
  */

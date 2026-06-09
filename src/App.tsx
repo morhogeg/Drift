@@ -459,6 +459,64 @@ function App() {
     }
   }, [chatHistory])
 
+  // ── Which lenses already have content for the open term ──────────────────────
+  // Drives the dots in the panel's "View as" bar so the user can tell which lenses
+  // are instant (already explored — e.g. before a synthesis) vs. which would fire a
+  // fresh API call. "Explored" must be CONTENT-verified (a registry entry alone can
+  // be a navigated-but-empty thread), so each candidate driftChatId is checked for a
+  // real conversation / cached Connect cards before its lens is marked.
+  const exploredLenses = useMemo<Set<string>>(() => {
+    const set = new Set<string>()
+    const sm = driftContext?.sourceMessageId
+    const term = driftContext?.selectedText
+    if (!sm || !term) return set
+
+    const LENS_KEYS = ['drift', 'simplify', 'research', 'connect', 'challenge']
+    const hasContent = (id: string) =>
+      (driftStore.getTempConversation(id)?.length ?? 0) > 0 ||
+      ((chatHistory.find(c => c.id === id)?.messages?.length ?? 0) > 0) ||
+      (connectCardsCache.current.get(id)?.length ?? 0) > 0 ||
+      Object.keys(connectAnswersCache.current.get(id) ?? {}).length > 0
+
+    // The first lens used for a term is recorded on the source message's driftInfo;
+    // later lenses get synthetic ids (`<baseId>__research` …) so the suffix names them.
+    let baseLens = 'drift'
+    for (const c of chatHistory) {
+      const msg = c.messages.find(m => m.id === sm)
+      const di = msg?.driftInfos?.find(d => d.selectedText === term)
+      if (di) { baseLens = di.templateType ?? 'drift'; break }
+    }
+    const lensFromId = (id: string): string => {
+      const m = id.match(/__(\w+)$/)
+      if (m && LENS_KEYS.includes(m[1])) return m[1]
+      return baseLens
+    }
+
+    // In-session registry: every lens thread the user opened, with its real id.
+    const reg = lensRegistryRef.current.get(`${sm}::${term}`)
+    if (reg) for (const [tpl, id] of reg) if (hasContent(id)) set.add(tpl)
+
+    // Persisted drift chats branching from the same source+term (survives reload).
+    for (const c of chatHistory) {
+      if (c.metadata?.isDrift && c.metadata.sourceMessageId === sm &&
+          c.metadata.selectedText === term && (c.messages?.length ?? 0) > 0) {
+        set.add(lensFromId(c.id))
+      }
+    }
+
+    // Connect content persists on the source message's driftInfo even when the
+    // connections-list thread has no chat messages of its own.
+    for (const c of chatHistory) {
+      const msg = c.messages.find(m => m.id === sm)
+      for (const d of (msg?.driftInfos ?? [])) {
+        if (d.selectedText !== term) continue
+        if (d.connectCards?.length || (d.connectAnswers && Object.keys(d.connectAnswers).length)) set.add('connect')
+      }
+    }
+
+    return set
+  }, [driftContext?.sourceMessageId, driftContext?.selectedText, chatHistory]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Continuity: "pick up where you left off" ─────────────────────────────────
   // Unfinished drift trees — conversations with ≥2 explored drifts not yet woven
   // into a synthesis. Surfaced on the empty state to invite the user back rather
@@ -685,7 +743,7 @@ function App() {
     }
   }
 
-  // ── Drift synthesis: "bring it home" ──────────────────────────────────────────
+  // ── Drift synthesis ───────────────────────────────────────────────────────────
   // Weaves every descendant drift of a conversation into one cohesive synthesis,
   // posted back as a message on that conversation. Closes the explore→return loop.
   const handleSynthesize = async (rootId: string) => {
@@ -779,6 +837,97 @@ function App() {
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 150)
     toast.success('Forked — continue in a new direction')
+  }
+
+  // ── Open an already-explored drift in the side panel (no new API call) ────────
+  // Shared by the Drift Map node tap and the synthesis source chips. Restores the
+  // already-generated conversation (regular: existingMessages; Connect: cached
+  // cards/answers) so tapping a source just re-opens what was already there.
+  const openExistingDrift = (driftChat: ChatSession) => {
+    const sourceMessageId = driftChat.metadata?.sourceMessageId
+    const parentChatId = driftChat.metadata?.parentChatId
+    const selectedText = driftChat.metadata?.selectedText ?? ''
+    const driftChatId = driftChat.id
+
+    // Switch to the parent chat if needed
+    if (parentChatId && parentChatId !== activeChatId) {
+      switchChat(parentChatId)
+    }
+
+    // Scroll to the source anchor message
+    if (sourceMessageId) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          const el = document.querySelector(`[data-message-id="${sourceMessageId}"]`)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 150)
+      })
+    }
+
+    // Get context from parent chat (use the chat we're switching to)
+    const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
+    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
+
+    // Resolve the persisted drift metadata (templateType + Connect content)
+    // from the parent's driftInfos — search the resolved parent first, then
+    // fall back across all current messages.
+    const di = parentMessages
+      .flatMap(m => m.driftInfos ?? [])
+      .find(d => d.driftChatId === driftChatId)
+      ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
+
+    const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+    const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+    // A node whose only content is "Finding connections for…" is a Connect drift.
+    // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
+    const templateType = di?.templateType
+      ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
+
+    // The drift's own conversation. The chatHistory copy is a snapshot from
+    // first-message registration (often just the question — the streamed
+    // answer only lives in the temp store), so pick the FULLEST of the three
+    // sources rather than preferring chatHistory and losing the answer.
+    const driftMsgs: Message[] = [
+      chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+      driftStore.getTempConversation(driftChatId) ?? [],
+      driftChat.messages ?? [],
+    ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
+
+    // A Connect *bridge* node is itself a focused Q&A thread ("How does X
+    // connect to Y?") — NOT the connections list. Detect its question and
+    // open the thread on its answer (connectQuestion set → chip-chat view),
+    // instead of dropping back to the cards screen.
+    const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
+    const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
+
+    // The connections-LIST drift rebuilds its chips from cached cards, and
+    // passing the (prose) conversation as messages would poison the JSON card
+    // parser — so start it clean. A bridge thread (or any non-Connect drift)
+    // keeps its real messages so the actual conversation shows.
+    const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
+
+    // Open drift panel directly — restores the already-generated content with
+    // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
+    driftStore.openDrift({
+      selectedText,
+      sourceMessageId: sourceMessageId ?? '',
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sourceMessageId,
+      driftChatId,
+      existingMessages: existing,
+      templateType,
+      connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
+      connectCards: cachedCards?.length ? cachedCards : undefined,
+      connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
+      ancestry: [{
+        isMainChat: true,
+        label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
+        selectedText: '',
+        sourceMessageId: '',
+        contextMessages: [],
+      }],
+    })
   }
 
   // ── On mount ────────────────────────────────────────────────────────────────
@@ -1310,7 +1459,7 @@ function App() {
 
     const kindOf = (c: ChatSession): SidebarRowKind => {
       if (c.metadata?.isDrift) return 'drift'
-      // Synthesis = a chat whose latest message is a woven "bring it home" synthesis.
+      // Synthesis = a chat whose latest message is a woven synthesis.
       if (c.lastMessage && /✦\s*Synthesis/i.test(c.lastMessage)) return 'synthesis'
       return 'chat'
     }
@@ -2038,7 +2187,7 @@ function App() {
                               disabled={synthesizing}
                               className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
                             >
-                              <span className="text-[13px] leading-none">✦</span> Bring it home
+                              <span className="text-[13px] leading-none">✦</span> Synthesize {t.driftCount} drifts
                             </button>
                           </div>
                         ))}
@@ -2080,11 +2229,21 @@ function App() {
                 const synthSources: { term: string; chatId: string }[] = []
                 if (isSynthesis) {
                   const seenSrc = new Set<string>()
+                  // One chip per unique term: applying several lenses (Simplify /
+                  // Deep dive / Connect / Challenge) to the same term spawns separate
+                  // drift chats, which would otherwise repeat the chip. Show the term
+                  // once — the user switches lenses via the panel's "View as" bar.
+                  const seenTerm = new Set<string>()
                   const walkSrc = (pid: string) => {
                     for (const c of chatHistory) {
                       if (seenSrc.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
                       seenSrc.add(c.id)
-                      synthSources.push({ term: (c.metadata?.selectedText || c.title || 'Drift').trim(), chatId: c.id })
+                      const term = (c.metadata?.selectedText || c.title || 'Drift').trim()
+                      const key = term.toLowerCase()
+                      if (!seenTerm.has(key)) {
+                        seenTerm.add(key)
+                        synthSources.push({ term, chatId: c.id })
+                      }
                       walkSrc(c.id)
                     }
                   }
@@ -2443,7 +2602,15 @@ function App() {
                                     {synthSources.slice(0, 8).map((s) => (
                                       <button
                                         key={s.chatId}
-                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); switchChat(s.chatId) }}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          haptics.selection()
+                                          // Re-open the already-explored drift in the side
+                                          // panel — shows what was already there, no new call.
+                                          const driftChat = chatHistory.find(c => c.id === s.chatId)
+                                          if (driftChat) openExistingDrift(driftChat)
+                                          else switchChat(s.chatId)
+                                        }}
                                         dir={getTextDirection(s.term)}
                                         className="synthesis-source-chip"
                                         title={`Open drift: ${s.term}`}
@@ -2953,6 +3120,7 @@ function App() {
         currentDriftChatId={driftContext?.driftChatId}
         onNavigateToSibling={navigateToSiblingDrift}
         onSwitchLens={handleSwitchLens}
+        exploredLenses={exploredLenses}
       />
 
       {/* Settings Modal */}
@@ -3011,92 +3179,7 @@ function App() {
             el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
             setKnowledgeGraphOpen(false)
           }}
-          onOpenDrift={(driftChat) => {
-            const sourceMessageId = driftChat.metadata?.sourceMessageId
-            const parentChatId = driftChat.metadata?.parentChatId
-            const selectedText = driftChat.metadata?.selectedText ?? ''
-            const driftChatId = driftChat.id
-
-            // Switch to the parent chat if needed
-            if (parentChatId && parentChatId !== activeChatId) {
-              switchChat(parentChatId)
-            }
-
-            // Scroll to the source anchor message
-            if (sourceMessageId) {
-              requestAnimationFrame(() => {
-                setTimeout(() => {
-                  const el = document.querySelector(`[data-message-id="${sourceMessageId}"]`)
-                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                }, 150)
-              })
-            }
-
-            // Get context from parent chat (use the chat we're switching to)
-            const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
-            const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
-
-            // Resolve the persisted drift metadata (templateType + Connect content)
-            // from the parent's driftInfos — search the resolved parent first, then
-            // fall back across all current messages.
-            const di = parentMessages
-              .flatMap(m => m.driftInfos ?? [])
-              .find(d => d.driftChatId === driftChatId)
-              ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
-
-            const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
-            const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
-
-            // A node whose only content is "Finding connections for…" is a Connect drift.
-            // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
-            const templateType = di?.templateType
-              ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
-
-            // The drift's own conversation. The chatHistory copy is a snapshot from
-            // first-message registration (often just the question — the streamed
-            // answer only lives in the temp store), so pick the FULLEST of the three
-            // sources rather than preferring chatHistory and losing the answer.
-            const driftMsgs: Message[] = [
-              chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
-              driftStore.getTempConversation(driftChatId) ?? [],
-              driftChat.messages ?? [],
-            ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
-
-            // A Connect *bridge* node is itself a focused Q&A thread ("How does X
-            // connect to Y?") — NOT the connections list. Detect its question and
-            // open the thread on its answer (connectQuestion set → chip-chat view),
-            // instead of dropping back to the cards screen.
-            const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
-            const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
-
-            // The connections-LIST drift rebuilds its chips from cached cards, and
-            // passing the (prose) conversation as messages would poison the JSON card
-            // parser — so start it clean. A bridge thread (or any non-Connect drift)
-            // keeps its real messages so the actual conversation shows.
-            const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
-
-            // Open drift panel directly — restores the already-generated content with
-            // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
-            driftStore.openDrift({
-              selectedText,
-              sourceMessageId: sourceMessageId ?? '',
-              contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
-              highlightMessageId: sourceMessageId,
-              driftChatId,
-              existingMessages: existing,
-              templateType,
-              connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
-              connectCards: cachedCards?.length ? cachedCards : undefined,
-              connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
-              ancestry: [{
-                isMainChat: true,
-                label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
-                selectedText: '',
-                sourceMessageId: '',
-                contextMessages: [],
-              }],
-            })
-          }}
+          onOpenDrift={openExistingDrift}
           getTempMessages={(id) => {
             const temp = driftStore.getTempConversation(id)
             if (temp && temp.length) return temp

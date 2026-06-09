@@ -1489,7 +1489,7 @@ export default function DriftKnowledgeGraph({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
 
-  // "Bring it home" — synthesize the current conversation's drifts. Chat scope only.
+  // Synthesize the current conversation's drifts. Chat scope only.
   const synthBar = scope === 'chat' && rootId && driftCount >= 2 && onSynthesize ? (
     <div className="px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
       <button

@@ -318,7 +318,7 @@ html, body {
   -webkit-touch-callout: none;
 }
 
-/* Synthesis "bring it home" card — a deliberate intellectual artifact, not a chat
+/* Synthesis card — a deliberate intellectual artifact, not a chat
    bubble: an accent rule across the top, a luminous header band naming the drifts it
    was woven from, and a one-time settling reveal. */
 .synthesis-card {

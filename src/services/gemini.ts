@@ -332,7 +332,7 @@ ${LANGUAGE_DIRECTIVE}`,
 }
 
 // ── Synthesis ────────────────────────────────────────────────────────────────
-// "Bring it home" — weave the insights from several drift branches into one
+// Weave the insights from several drift branches into one
 // cohesive synthesis posted back on the parent conversation.
 
 export async function synthesizeDrifts(
@@ -353,15 +353,18 @@ export async function synthesizeDrifts(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are the synthesizing intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts") — these branches ARE the shape of their curiosity. Weave the key insights into ONE cohesive, illuminating synthesis that tells them something they could not see from any single branch.
+          text: `You are the reflecting intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts") — these branches ARE the shape of their curiosity. Your job is to give them something genuinely useful about where they went. NEVER manufacture a unifying idea that isn't really there — a forced connection is worse than no connection.
 
-Write engaging markdown:
-- Open with a single bold takeaway sentence — the one idea that ties the exploration together.
-- Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they reinforce, complicate, or stand in tension with each other. Reference branch topics by name, naturally.
-- Do NOT summarize each branch in isolation; surface the through-line and the surprising links the user may have missed.
-- Be honest: if two branches don't genuinely connect, say what each contributes rather than forcing a false link. Never invent facts not present in the branches.
-- End with one open question worth exploring next, prefixed "**Next:**".
-- Keep it under ~350 words. No preamble like "Here is the synthesis".
+FIRST, silently assess how much the branches actually relate:
+- If a real through-line exists (the branches reinforce, complicate, or stand in tension with each other in a way the user might have missed) → write a SYNTHESIS: open with a single bold takeaway sentence naming that through-line, then 3-5 tight paragraphs or bullets tracing the connective tissue. Reference branches by name, naturally. Surface the surprising links, not a per-branch recap.
+- If the branches are mostly independent tangents with no honest unifying thread → write a TRAIL instead: open with one bold sentence describing the SHAPE of the exploration (e.g. "You started at X and followed your curiosity into three loosely-related corners."). Then one tight line per branch naming what each one actually gave you. Call out ONLY the genuine links between branches, if any — and if there are none, say so plainly rather than inventing one.
+- It's fine to be partial: synthesize the branches that connect, list the rest as standalone threads.
+
+Rules for both modes:
+- Never invent facts not present in the branches. Never overstate a connection.
+- Don't pad. If there's little to say, say little — usefulness over length.
+- End with one open question genuinely worth exploring next, prefixed "**Next:**".
+- Keep it under ~350 words. No preamble like "Here is the synthesis". Write engaging markdown.
 
 ${LANGUAGE_DIRECTIVE}`,
         }],
@@ -372,7 +375,9 @@ ${LANGUAGE_DIRECTIVE}`,
       }],
       // gemini-3.5-flash is a thinking model: reasoning tokens count against this
       // budget, so a low cap truncates the answer mid-sentence. Give it headroom.
-      generationConfig: { temperature: 0.8, maxOutputTokens: 4096 },
+      // Lower temperature keeps it grounded — high temp nudges toward flowery,
+      // manufactured connections, which is exactly what we want to avoid here.
+      generationConfig: { temperature: 0.55, maxOutputTokens: 4096 },
     }
 
     const response = await fetch(url, {
