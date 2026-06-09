@@ -1084,12 +1084,19 @@ function App() {
    * Wraps AI-suggested drift highlight phrases in a clickable span with violet
    * dotted underline. Runs as a second pass after processEntityText.
    */
-  const processHighlightsText = (children: React.ReactNode, messageId: string, highlights: string[]): React.ReactNode => {
+  // Each term is underlined only on its FIRST occurrence in the message — tapping
+  // any repeat drifts identically, so marking every mention is just noise.
+  // Dedup must be render-PURE (StrictMode double-invokes render): `priorText` is
+  // the message source before this block, so "already appeared earlier" is decided
+  // from stable data, not mutation; `seen` is fresh per call (within-block only).
+  const processHighlightsText = (children: React.ReactNode, messageId: string, highlights: string[], priorText = ''): React.ReactNode => {
     if (!highlights.length) return children
+    const seen = new Set<string>()
 
     const injectHighlight = (text: string): React.ReactNode => {
       const matches: Array<{ start: number; end: number; phrase: string }> = []
       highlights.forEach(phrase => {
+        if (seen.has(phrase) || priorText.includes(phrase)) return
         const pos = text.indexOf(phrase)
         if (pos !== -1) matches.push({ start: pos, end: pos + phrase.length, phrase })
       })
@@ -1098,7 +1105,7 @@ function App() {
       const out: React.ReactNode[] = []
       let cursor = 0
       for (const m of matches) {
-        if (m.start < cursor) continue
+        if (m.start < cursor || seen.has(m.phrase) || priorText.includes(m.phrase)) continue
         if (m.start > cursor) out.push(text.slice(cursor, m.start))
         out.push(
           <span
@@ -1110,6 +1117,7 @@ function App() {
             {m.phrase}
           </span>
         )
+        seen.add(m.phrase)
         cursor = m.end
       }
       if (cursor < text.length) out.push(text.slice(cursor))
@@ -2500,12 +2508,22 @@ function App() {
                                 remarkPlugins={[remarkGfm]}
                                 components={(() => {
                                   let liCounter = 0
-                                  const processDriftText = (children: any): React.ReactNode => {
+                                  // Source the markdown renders from — block node offsets index into it.
+                                  // Heading lines blanked (length kept) so a heading mention doesn't
+                                  // suppress the first highlightable occurrence in the body.
+                                  const src = sanitizeText(msg.text)
+                                    .replace(/^[ \t]{0,3}#{1,6}[^\n]*/gm, (m) => ' '.repeat(m.length))
+                                  // Each drifted term links only on its first occurrence in the message.
+                                  // Render-pure: `priorText` (message before this block) decides "appeared
+                                  // earlier"; `usedInBlock` is fresh per call (within-block dedup only).
+                                  const processDriftText = (children: any, priorText = ''): React.ReactNode => {
                                     const drifts = msg.driftInfos!
+                                    const usedInBlock = new Set<string>()
 
                                     const injectIntoString = (text: string): React.ReactNode => {
                                       const matches: Array<{ start: number; end: number; drift: typeof drifts[0]; idx: number }> = []
                                       drifts.forEach((drift, idx) => {
+                                        if (usedInBlock.has(drift.selectedText) || priorText.includes(drift.selectedText)) return
                                         const pos = text.indexOf(drift.selectedText)
                                         if (pos !== -1) matches.push({ start: pos, end: pos + drift.selectedText.length, drift, idx })
                                       })
@@ -2514,7 +2532,7 @@ function App() {
                                       const out: React.ReactNode[] = []
                                       let cursor = 0
                                       for (const m of matches) {
-                                        if (m.start < cursor) continue
+                                        if (m.start < cursor || usedInBlock.has(m.drift.selectedText) || priorText.includes(m.drift.selectedText)) continue
                                         if (m.start > cursor) out.push(text.slice(cursor, m.start))
                                         out.push(
                                           <button
@@ -2544,6 +2562,7 @@ function App() {
                                             {m.drift.selectedText}
                                           </button>
                                         )
+                                        usedInBlock.add(m.drift.selectedText)
                                         cursor = m.end
                                       }
                                       if (cursor < text.length) out.push(text.slice(cursor))
@@ -2567,16 +2586,17 @@ function App() {
                                   // Unexplored suggestions: highlights not yet drifted on
                                   const exploredTexts = new Set(msg.driftInfos!.map(d => d.selectedText))
                                   const unexploredHl = (msg.suggestedHighlights ?? []).filter(h => !exploredTexts.has(h))
-                                  const procWithBoth = (children: any): React.ReactNode => {
-                                    const withDrifts = processDriftText(children)
-                                    return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl) : withDrifts
+                                  const procWithBoth = (children: any, node?: any): React.ReactNode => {
+                                    const prior = src.slice(0, node?.position?.start?.offset ?? 0)
+                                    const withDrifts = processDriftText(children, prior)
+                                    return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl, prior) : withDrifts
                                   }
                                   return {
-                                    p: ({ children }) => <p className="mb-2">{procWithBoth(children)}</p>,
-                                    td: ({ children }) => <td>{procWithBoth(children)}</td>,
-                                    th: ({ children }) => <th>{procWithBoth(children)}</th>,
-                                    li: ({ children }) => {
-                                      const processed = procWithBoth(children)
+                                    p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
+                                    td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
+                                    th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
+                                    li: ({ node, children }: any) => {
+                                      const processed = procWithBoth(children, node)
                                       const anchorId = getAnchorId(msg.id, liCounter++)
                                       return <li><span id={anchorId}>{processed}</span></li>
                                     }
@@ -2646,18 +2666,24 @@ function App() {
                                 components={(() => {
                                   let liCounter = 0
                                   const hl = msg.suggestedHighlights ?? []
-                                  const proc = (children: any) => {
+                                  // Source the markdown is rendered from — block node offsets index into
+                                  // it. Heading lines are blanked (length preserved so offsets stay valid)
+                                  // so a heading mention doesn't suppress the first highlightable one.
+                                  const src = sanitizeText(isSynthesis ? synthDisplay : msg.text)
+                                    .replace(/^[ \t]{0,3}#{1,6}[^\n]*/gm, (m) => ' '.repeat(m.length))
+                                  const proc = (children: any, node?: any) => {
                                     const base = processEntityText(children, msg.id)
-                                    return hl.length ? processHighlightsText(base, msg.id, hl) : base
+                                    const prior = src.slice(0, node?.position?.start?.offset ?? 0)
+                                    return hl.length ? processHighlightsText(base, msg.id, hl, prior) : base
                                   }
                                   return {
-                                    p: ({ children }: any) => <p className="mb-2">{proc(children)}</p>,
-                                    li: ({ children }: any) => {
+                                    p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
+                                    li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li><span id={anchorId}>{proc(children)}</span></li>
+                                      return <li><span id={anchorId}>{proc(children, node)}</span></li>
                                     },
-                                    th: ({ children }: any) => <th>{proc(children)}</th>,
-                                    td: ({ children }: any) => <td>{proc(children)}</td>,
+                                    th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
+                                    td: ({ node, children }: any) => <td>{proc(children, node)}</td>,
                                     br: () => <br />,
                                     table: ({ children }: any) => (
                                       <div className="overflow-x-auto my-4">
@@ -2703,7 +2729,7 @@ function App() {
                               "where do I go next" is explicit, not just inline. */}
                           {!msg.isUser && (() => {
                             const explored = new Set((msg.driftInfos ?? []).map(d => d.selectedText))
-                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 4)
+                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 5)
                             if (nextTerms.length === 0) return null
                             return (
                               <div className="mt-3.5">

@@ -65,6 +65,19 @@ function lensLabel(node: TreeNode): string {
   return node.lens ? LENS_LABELS[node.lens] : 'Drift'
 }
 
+// Per-lens accent, kept in sync with the lens chips in DriftPanel (so a Challenge
+// reads red here and there alike). Plain drifts use the Drift primary (violet).
+const LENS_COLORS: Record<NonNullable<TreeNode['lens']>, string> = {
+  simplify: '#f59e0b',  // amber-500
+  research: '#3b82f6',  // blue-500
+  connect: '#22d3ee',   // accent-discovery (cyan)
+  challenge: '#f43f5e', // rose-500
+}
+const DRIFT_LENS_COLOR = '#a855f7' // accent-violet
+function lensColor(node: TreeNode): string {
+  return node.lens ? LENS_COLORS[node.lens] : DRIFT_LENS_COLOR
+}
+
 /** The lens a drift was opened with, read from its parent message's driftInfos.
  *  Returns undefined for plain drifts (and when the link can't be found). */
 function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens'] {
@@ -1172,8 +1185,15 @@ function GraphCanvas({
               {/* The lens tag is ALWAYS shown (even zoomed-out) so every card is
                   identifiable at a glance; the msg-count/time only when zoomed in. */}
               <div className="dkg-card-meta">
-                <span className="dkg-card-orb" aria-hidden />
-                <span className="dkg-card-eyebrow">{isRoot ? 'Origin' : `↗ ${lensLabel(laid.node)}`}</span>
+                <span
+                  className="dkg-card-orb"
+                  aria-hidden
+                  style={isRoot ? undefined : ({ ['--hue-core' as string]: lensColor(laid.node), ['--hue-rim' as string]: lensColor(laid.node), ['--hue-halo' as string]: lensColor(laid.node) })}
+                />
+                <span
+                  className="dkg-card-eyebrow"
+                  style={isRoot ? undefined : { color: lensColor(laid.node) }}
+                >{isRoot ? 'Origin' : `↗ ${lensLabel(laid.node)}`}</span>
                 {!lod && (
                   <span className="tabular-nums" style={{ opacity: 0.75 }}>
                     · {msgs} {msgs === 1 ? 'msg' : 'msgs'}{ts ? ` · ${ts}` : ''}
@@ -1239,7 +1259,7 @@ function DetailCard({
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <span
               className="text-[10px] font-bold uppercase tracking-widest"
-              style={{ color: h.core }}
+              style={{ color: isDrift ? lensColor(laid.node) : h.core }}
             >
               {isDrift ? `↗ ${lensLabel(laid.node)}` : 'Origin'}
             </span>

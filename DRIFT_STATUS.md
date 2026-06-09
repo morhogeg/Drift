@@ -1,24 +1,25 @@
 # Drift — Quick Status
 
-**Date:** June 9, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 56 (iOS + web) — ready for TestFlight
+**Date:** June 9, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 57 (iOS + web) — ready for TestFlight
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ **CRITICAL ACTION REQUIRED:** Rotate both exposed Gemini API keys + raise spend cap in Google AI Studio. See HANDOFF.md entry 164.
 
-## Last Session (Jun 9) — Synthesis made honest + navigable
+## Last Session (Jun 9 continued) — Language fix + highlights polish + map lens colors
 
-- **Adaptive synthesis prompt** — model assesses relatedness first, then writes a true synthesis (real through-line) OR an honest "trail" (independent tangents → shape + per-branch contribution, links only where genuine). Never forces a connection. Temp 0.8→0.55.
-- **Wording cleanup** — killed "Bring it home" app-wide → "Synthesize" variations; resume-card button now "✦ Synthesize N drifts".
-- **Source chips open the drift in-panel (no API call)** — extracted the Drift Map's open-drift logic into shared `openExistingDrift`; synthesis chips reuse it to reopen the already-explored drift (was switchChat). Chips deduped by term.
-- **"View as" lens bar marks explored lenses** — content-verified dots show which lenses already have content (instant) vs. which would fire a fresh generation — no more blind tapping / wasted tokens. **Build 55→56**, tsc + vite + cap sync clean.
+- **Hebrew→English language detection + directive** — replaced soft "match user's language" instructions (which Gemini 3.1 Flash Lite ignored, defaulting to Hebrew) with explicit `languageDirective()` that detects script (Hebrew/Arabic/Cyrillic/Greek/etc.) and Latin-script languages via stopword matching (English/Spanish/French/German/Portuguese/Italian), returning an imperative instruction naming the detected language. Applied to `sendMessageToGemini` system prompt + all 5 standalone helpers. Verified English→English, Hebrew→Hebrew.
+- **Key terms now always highlighted** — rewrote `getSuggestedHighlights` prompt to two-tier: KEY SUBJECTS (central entities, esp. proper nouns) always first, THEN DOORWAYS (connective phrases). Previous prompt only asked for doorways, missing brand names. Raised cap from 4→7 terms. Verified: Patek Philippe, Rolex, Audemars Piguet all highlighted in watch brands test.
+- **Render-pure highlights dedup fix** — fixed the StrictMode bug where shared mutable `seen` Set broke underlines in React's double-render. Switched to `priorText` calculated from `node.position.start.offset` (message source before current block); internalized fresh per-call `usedInBlock` Set. Blanked heading lines in dedup source to prevent headings from suppressing first body mentions. Applied to both factories (drift links + suggestions). Result: each term underlined exactly once.
+- **Lens colors on the Drift Map** — added `LENS_COLORS` Record mapping lens types to hex codes (simplify: amber, research: blue, connect: cyan, challenge: rose) matching DriftPanel chips. Updated DriftKnowledgeGraph card eyebrows + orbs + DetailCard to apply lens color to non-drift nodes. Desktop Drift Map cards now color-coded by lens.
+- **Build 56→57**, production bundle: 294.16 kB JS / 124.41 kB CSS (gzip 85.44 / 18.38 kB). tsc + vite + cap sync all clean.
 
 ## Pending (priority order)
 
 - [ ] **🔴 Rotate Gemini keys + raise spend cap** (user action, not code) — two keys exposed
-- [ ] TestFlight: archive build 56 in Xcode → App Store Connect
-- [ ] On-device pass: synthesis (honest output / trail mode, chips open in-panel no API call, lens-bar dots)
-- [ ] On-device pass: mobile UX (build 55 — lens push, footer, header, audit fixes, keyboard lift, RTL)
-- [ ] On-device pass: prior sessions (highlight-menu, map/panel stability, Hebrew content, providers/settings)
+- [ ] **TestFlight build 57:** archive in Xcode → App Store Connect (language fix + highlights + map colors + synthesis)
+- [ ] On-device pass: highlights (English→English, Hebrew→Hebrew; key brands always included; each term ≤1 underline)
+- [ ] On-device pass: map lens colors (card colors match lens type — amber/blue/cyan/rose)
+- [ ] On-device pass: prior sessions (synthesis honest/trail, mobile UX, header/footer, audit fixes, keyboard lift, RTL)
 - [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 
@@ -28,4 +29,4 @@ React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Embeddings
 
 ## Key files
 
-`src/App.tsx` (`openExistingDrift`, `exploredLenses`) · `src/services/gemini.ts` (`synthesizeDrifts`) · `src/components/DriftPanel.tsx` (lens bar) · `src/components/SelectionTooltip.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/hooks/useKeyboardVisibility.ts` · `src/hooks/useDriftPanelActions.ts` · `src/utils/rtl.ts` · `vite.config.ts`
+`src/App.tsx` (`processHighlightsText`, `openExistingDrift`, `exploredLenses`) · `src/services/gemini.ts` (`detectLanguage`, `languageDirective`, `getSuggestedHighlights`, `synthesizeDrifts`) · `src/components/DriftPanel.tsx` (lens bar) · `src/components/DriftKnowledgeGraph.tsx` (`LENS_COLORS`, `lensColor`) · `src/components/SelectionTooltip.tsx` · `src/hooks/useDriftPanelActions.ts` · `src/utils/rtl.ts` · `vite.config.ts`
