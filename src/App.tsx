@@ -2284,9 +2284,6 @@ function App() {
                     )}
 
                     <div className={`px-5 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
-                      {isPlainAI && msg.modelTag && (
-                        <div className="text-[11px] text-text-secondary mb-1 mt-1">{msg.modelTag}</div>
-                      )}
                       {/* Subtle drift origin tag — shown on every non-user pushed message */}
                       {isDriftMessage && !msg.isUser && (
                         <div className="flex items-center gap-1.5 mb-1.5 mt-0.5">

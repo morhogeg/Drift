@@ -1,24 +1,22 @@
 # Drift — Quick Status
 
-**Date:** June 9, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 57 (iOS + web) — ready for TestFlight
+**Date:** June 9, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 58 (iOS + web) — ready for TestFlight
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
 > ⚠️ **CRITICAL ACTION REQUIRED:** Rotate both exposed Gemini API keys + raise spend cap in Google AI Studio. See HANDOFF.md entry 164.
 
-## Last Session (Jun 9 continued) — Language fix + highlights polish + map lens colors
+## Last Session (Jun 9 continued) — Model-name label removed
 
-- **Hebrew→English language detection + directive** — replaced soft "match user's language" instructions (which Gemini 3.1 Flash Lite ignored, defaulting to Hebrew) with explicit `languageDirective()` that detects script (Hebrew/Arabic/Cyrillic/Greek/etc.) and Latin-script languages via stopword matching (English/Spanish/French/German/Portuguese/Italian), returning an imperative instruction naming the detected language. Applied to `sendMessageToGemini` system prompt + all 5 standalone helpers. Verified English→English, Hebrew→Hebrew.
-- **Key terms now always highlighted** — rewrote `getSuggestedHighlights` prompt to two-tier: KEY SUBJECTS (central entities, esp. proper nouns) always first, THEN DOORWAYS (connective phrases). Previous prompt only asked for doorways, missing brand names. Raised cap from 4→7 terms. Verified: Patek Philippe, Rolex, Audemars Piguet all highlighted in watch brands test.
-- **Render-pure highlights dedup fix** — fixed the StrictMode bug where shared mutable `seen` Set broke underlines in React's double-render. Switched to `priorText` calculated from `node.position.start.offset` (message source before current block); internalized fresh per-call `usedInBlock` Set. Blanked heading lines in dedup source to prevent headings from suppressing first body mentions. Applied to both factories (drift links + suggestions). Result: each term underlined exactly once.
-- **Lens colors on the Drift Map** — added `LENS_COLORS` Record mapping lens types to hex codes (simplify: amber, research: blue, connect: cyan, challenge: rose) matching DriftPanel chips. Updated DriftKnowledgeGraph card eyebrows + orbs + DetailCard to apply lens color to non-drift nodes. Desktop Drift Map cards now color-coded by lens.
-- **Build 56→57**, production bundle: 294.16 kB JS / 124.41 kB CSS (gzip 85.44 / 18.38 kB). tsc + vite + cap sync all clean.
+- **Removed redundant model name from chat** — deleted the "Gemini 3.1 Flash Lite" label that appeared above each AI reply (line 2287–2289 in `App.tsx`). Model name still visible in header picker, so no loss of information — only visual clutter gone. Verified via Playwright: AI reply renders clean with no model-tag label or standalone model-name text.
+- **Build 57→58**, production bundle: 294.06 kB JS / 124.41 kB CSS (gzip 85.42 / 18.38 kB). tsc + vite + cap sync clean.
 
 ## Pending (priority order)
 
 - [ ] **🔴 Rotate Gemini keys + raise spend cap** (user action, not code) — two keys exposed
-- [ ] **TestFlight build 57:** archive in Xcode → App Store Connect (language fix + highlights + map colors + synthesis)
+- [ ] **TestFlight build 58:** archive in Xcode → App Store Connect (language fix + highlights + map colors + synthesis + model-label removal)
 - [ ] On-device pass: highlights (English→English, Hebrew→Hebrew; key brands always included; each term ≤1 underline)
 - [ ] On-device pass: map lens colors (card colors match lens type — amber/blue/cyan/rose)
+- [ ] On-device pass: UI polish (no model-name label above replies; chart/message content starts fresh)
 - [ ] On-device pass: prior sessions (synthesis honest/trail, mobile UX, header/footer, audit fixes, keyboard lift, RTL)
 - [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
