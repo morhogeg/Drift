@@ -26,7 +26,7 @@ import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
-import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { buildTermIndex, findRelatedDrifts, normalizeTerm, type TermOccurrence } from '@/lib/termIndex'
 import { runEmbeddingBackfill, getCachedVectors } from '@/lib/embeddingBackfill'
 import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
@@ -1093,6 +1093,14 @@ function App() {
     if (!highlights.length) return children
     const seen = new Set<string>()
 
+    // Recall: has this exact term (normalized) already been drifted on, anywhere?
+    // Exact-match only — a recall mark *reopens* a specific prior drift, so the
+    // looser containment matching used by the related strip would misfire here.
+    // Excludes the chat currently on screen (reopening it would be a no-op).
+    // Render-pure: reads the memoized termIndex, no mutation.
+    const recallFor = (phrase: string): TermOccurrence | undefined =>
+      termIndex.get(normalizeTerm(phrase))?.find(o => o.driftChatId !== activeChatId)
+
     const injectHighlight = (text: string): React.ReactNode => {
       const matches: Array<{ start: number; end: number; phrase: string }> = []
       highlights.forEach(phrase => {
@@ -1107,15 +1115,27 @@ function App() {
       for (const m of matches) {
         if (m.start < cursor || seen.has(m.phrase) || priorText.includes(m.phrase)) continue
         if (m.start > cursor) out.push(text.slice(cursor, m.start))
+        const recall = recallFor(m.phrase)
         out.push(
-          <span
-            key={`hl-${m.start}`}
-            className="drift-suggestion"
-            title="Explore ↗"
-            onClick={() => handleStartDrift(m.phrase, messageId)}
-          >
-            {m.phrase}
-          </span>
+          recall ? (
+            <span
+              key={`hl-${m.start}`}
+              className="drift-suggestion drift-suggestion-recall"
+              title={`Explored before — reopen "${recall.chatTitle}"`}
+              onClick={() => handleOpenRelatedDrift(recall)}
+            >
+              {m.phrase}
+            </span>
+          ) : (
+            <span
+              key={`hl-${m.start}`}
+              className="drift-suggestion"
+              title="Explore ↗"
+              onClick={() => handleStartDrift(m.phrase, messageId)}
+            >
+              {m.phrase}
+            </span>
+          )
         )
         seen.add(m.phrase)
         cursor = m.end
