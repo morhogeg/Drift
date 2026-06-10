@@ -16,6 +16,10 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
 import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
+import { getCachedVectors } from '@/lib/embeddingBackfill'
+import { cosineSimilarity } from '@/services/embeddings'
+import { SEMANTIC_THRESHOLD } from '@/lib/semanticRecall'
+import { normalizeTerm } from '@/lib/termIndex'
 import ResizeHandle from './ResizeHandle'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -653,6 +657,29 @@ function ribbonPath(
   )
 }
 
+/**
+ * Path for a resonance edge — a semantic (meaning) link between two drifts that
+ * have no lineage connection. Same-column pairs bow out to the right of both
+ * cards; cross-column pairs flow like a river but render dashed-cyan so lineage
+ * (solid, violet ramp) and resonance (dashed, discovery cyan) never read alike.
+ */
+function resonancePath(a: Laid, b: Laid): string {
+  const [L, R] = a.x <= b.x ? [a, b] : [b, a]
+  if (R.x - L.x < 1) {
+    const x1 = L.x + L.cardW / 2, x2 = R.x + R.cardW / 2
+    const bow = 56 + Math.min(90, Math.abs(R.y - L.y) * 0.12)
+    return `M ${x1} ${L.y} C ${x1 + bow} ${L.y}, ${x2 + bow} ${R.y}, ${x2} ${R.y}`
+  }
+  return flowPath(L.x + L.cardW / 2, L.y, R.x - R.cardW / 2, R.y)
+}
+
+/** A meaning-link between two laid-out drifts (ids + cosine score). */
+interface ResonancePair { a: string; b: string; score: number }
+
+// Keep the map calm: only the strongest few resonance edges are drawn.
+const RESONANCE_MAX_EDGES = 8
+const RESONANCE_MAX_PER_NODE = 2
+
 // ── The living graph (SVG) ───────────────────────────────────────────────────────
 
 function GraphCanvas({
@@ -793,6 +820,67 @@ function GraphCanvas({
   }
 
   const byId = useMemo(() => new Map(nodes.map(n => [n.node.chat.id, n])), [nodes])
+
+  // ── Resonance edges (semantic) ────────────────────────────────────────────────
+  // Lineage rivers show where a thought CAME FROM; resonance edges show which
+  // branches landed in the same conceptual water by different paths. Computed
+  // from the IDB vector cache (filled by the embedding backfill) — pairs above
+  // SEMANTIC_THRESHOLD that aren't already related by lineage or by being lens
+  // views of the same term. Graceful: no key / no vectors ⇒ no edges, map as before.
+  const [resonance, setResonance] = useState<ResonancePair[]>([])
+  // Custom resonance-edge tooltip (replaces the native <title>): glass + cyan,
+  // positioned in container space at the cursor. null = hidden.
+  const [resTip, setResTip] = useState<{ x: number; y: number; cw: number; ch: number; a: string; b: string } | null>(null)
+  useEffect(() => {
+    const drifts = nodes.filter(n => n.node.chat.metadata?.isDrift)
+    if (drifts.length < 2) { setResonance([]); return }
+
+    let cancelled = false
+    ;(async () => {
+      const vecs = await getCachedVectors(drifts.map(d => d.node.chat.id))
+      if (cancelled) return
+      if (vecs.length < 2) { setResonance([]); return }
+      const vecById = new Map(vecs.map(v => [v.driftChatId, v.vec]))
+
+      // Lineage already has a river — resonance is only for the UNrelated-by-tree.
+      const isAncestorOf = (anc: Laid, desc: Laid): boolean => {
+        for (let p = desc.parent; p; p = p.parent) if (p.node.chat.id === anc.node.chat.id) return true
+        return false
+      }
+      // Lens threads on one term are near-identical embeddings — linking
+      // "Simplify: X" to "Deep dive: X" is noise, not insight.
+      const termOf = (l: Laid) => normalizeTerm(l.node.chat.metadata?.selectedText || l.node.chat.title || '')
+
+      const pairs: ResonancePair[] = []
+      for (let i = 0; i < drifts.length; i++) {
+        for (let j = i + 1; j < drifts.length; j++) {
+          const A = drifts[i], B = drifts[j]
+          const va = vecById.get(A.node.chat.id), vb = vecById.get(B.node.chat.id)
+          if (!va || !vb) continue
+          const ta = termOf(A)
+          if (ta && ta === termOf(B)) continue
+          if (isAncestorOf(A, B) || isAncestorOf(B, A)) continue
+          const score = cosineSimilarity(va, vb)
+          if (score >= SEMANTIC_THRESHOLD) pairs.push({ a: A.node.chat.id, b: B.node.chat.id, score })
+        }
+      }
+      pairs.sort((x, y) => y.score - x.score)
+
+      const perNode = new Map<string, number>()
+      const kept: ResonancePair[] = []
+      for (const p of pairs) {
+        if (kept.length >= RESONANCE_MAX_EDGES) break
+        if ((perNode.get(p.a) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
+        if ((perNode.get(p.b) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
+        kept.push(p)
+        perNode.set(p.a, (perNode.get(p.a) ?? 0) + 1)
+        perNode.set(p.b, (perNode.get(p.b) ?? 0) + 1)
+      }
+      setResonance(kept)
+    })()
+
+    return () => { cancelled = true }
+  }, [nodes])
 
   // Tapping a node only previews it — selects + centers so the detail card shows.
   // Users glance between nodes; opening fully is a deliberate second tap.
@@ -1050,6 +1138,50 @@ function GraphCanvas({
         </button>
       </div>
 
+      {/* Legend for the resonance threads — only when at least one is on screen,
+          so the new mark explains itself the first time it appears. */}
+      {resonance.length > 0 && (
+        <div
+          className="absolute z-20 flex items-center gap-1.5 pointer-events-none"
+          style={{ bottom: 10, left: 10 }}
+          aria-hidden
+        >
+          <svg width="22" height="6" className="flex-shrink-0">
+            <line x1="1" y1="3" x2="21" y2="3" stroke="#22d3ee" strokeWidth="1.4" strokeDasharray="3 4" strokeLinecap="round" opacity="0.75" />
+          </svg>
+          <span className="text-[10px] leading-none" style={{ color: 'rgba(34,211,238,0.65)' }}>
+            related by meaning
+          </span>
+        </div>
+      )}
+
+      {/* Resonance tooltip — small, quiet glass chip. Anchored to whichever
+          side keeps it on-screen: grows left when the cursor is past the
+          mid-line, sits below only when near the top edge. Never crosses the
+          cursor, so it can't be clipped. Each term is dir="auto" for EN/HE. */}
+      {resTip && (() => {
+        // Anchor against the visible CONTAINER (resTip.cw/ch), not the virtual
+        // graph canvas. Tooltip hugs the cursor: grows left when the cursor is
+        // past the container mid-line, drops below only when near the top edge.
+        const onRight = resTip.x > resTip.cw / 2
+        const nearTop = resTip.y < 90
+        const pos: React.CSSProperties = onRight
+          ? { right: Math.max(8, resTip.cw - resTip.x + 12) }
+          : { left: Math.max(8, resTip.x + 12) }
+        if (nearTop) pos.top = resTip.y + 16
+        else pos.bottom = Math.max(8, resTip.ch - resTip.y + 12)
+        return (
+          <div className={'dkg-restip' + (onRight ? ' is-right' : '')} style={pos} aria-hidden>
+            <span className="dkg-restip-label">related by meaning</span>
+            <span className="dkg-restip-terms">
+              <span className="dkg-restip-term" dir="auto">{resTip.a}</span>
+              <span className="dkg-restip-arrow" aria-hidden>↔</span>
+              <span className="dkg-restip-term" dir="auto">{resTip.b}</span>
+            </span>
+          </div>
+        )
+      })()}
+
       <svg
         className="absolute top-0 left-0"
         width={width}
@@ -1122,6 +1254,57 @@ function GraphCanvas({
             )
           })}
         </g>
+
+        {/* Resonance edges — dashed cyan threads between drifts related by MEANING
+            (no lineage link). Selecting either endpoint brightens the thread. */}
+        {resonance.length > 0 && (
+          <g>
+            {resonance.map(r => {
+              const A = byId.get(r.a), B = byId.get(r.b)
+              if (!A || !B) return null
+              const dim = !!q && (!isMatch(A) || !isMatch(B))
+              const lit = selectedId === r.a || selectedId === r.b
+              const termA = A.node.chat.metadata?.selectedText || A.trigger
+              const termB = B.node.chat.metadata?.selectedText || B.trigger
+              const arcPath = resonancePath(A, B)
+              return (
+                <g key={`res-${r.a}-${r.b}`}>
+                  {/* Visible dashed arc — pointer-events off so the wide hit zone handles hover */}
+                  <path
+                    d={arcPath}
+                    fill="none"
+                    stroke="#22d3ee"
+                    strokeWidth={lit ? 1.8 : 1.1}
+                    strokeDasharray="3 7"
+                    strokeLinecap="round"
+                    className={reduce ? undefined : 'dkg-resonance'}
+                    opacity={dim ? 0 : lit ? 0.85 : 0.4}
+                    style={{ transition: 'opacity 0.3s ease', pointerEvents: 'none' }}
+                  />
+                  {/* Wide transparent hit zone — 16px stroke makes the thin arc reliably hoverable.
+                      Drives a custom glass tooltip (no native <title>) positioned at the cursor. */}
+                  <path
+                    d={arcPath}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    opacity={dim ? 0 : 1}
+                    style={{ pointerEvents: dim ? 'none' : 'stroke', cursor: 'help' }}
+                    onMouseEnter={(e) => {
+                      const box = wrapRef.current?.getBoundingClientRect()
+                      if (box) setResTip({ x: e.clientX - box.left, y: e.clientY - box.top, cw: box.width, ch: box.height, a: termA, b: termB })
+                    }}
+                    onMouseMove={(e) => {
+                      const box = wrapRef.current?.getBoundingClientRect()
+                      if (box) setResTip({ x: e.clientX - box.left, y: e.clientY - box.top, cw: box.width, ch: box.height, a: termA, b: termB })
+                    }}
+                    onMouseLeave={() => setResTip(null)}
+                  />
+                </g>
+              )
+            })}
+          </g>
+        )}
 
       </svg>
 
@@ -2043,10 +2226,61 @@ function StyleBlock() {
         from { stroke-dashoffset: 246; }
         to   { stroke-dashoffset: 0; }
       }
+      .dkg-resonance {
+        animation: dkgResonance 16s linear infinite;
+        filter: drop-shadow(0 0 3px rgba(34,211,238,0.3));
+      }
+      @keyframes dkgResonance {
+        from { stroke-dashoffset: 100; }
+        to   { stroke-dashoffset: 0; }
+      }
+
+      /* Resonance tooltip — glass card with a discovery-cyan edge, echoing the
+         dashed arc it describes. Pointer-events off so it never eats hover. */
+      /* Resonance tooltip — a small, quiet glass chip. Stacked label + terms so
+         it stays narrow; wraps rather than overflowing. Bottom/top anchored in
+         JS so it never crosses the cursor or the canvas edge. */
+      .dkg-restip {
+        position: absolute; z-index: 30; pointer-events: none;
+        display: flex; flex-direction: column; gap: 3px;
+        max-width: 220px;
+        padding: 6px 9px; border-radius: 9px;
+        font-family: Inter, system-ui, sans-serif;
+        background: rgba(14,18,22,0.86);
+        border: 1px solid rgba(34,211,238,0.22);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+        backdrop-filter: blur(10px) saturate(1.1);
+        -webkit-backdrop-filter: blur(10px) saturate(1.1);
+        animation: dkgRestipIn 0.12s ease-out;
+      }
+      .dkg-restip.is-right { text-align: right; }
+      .dkg-restip-label {
+        font-size: 8.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+        color: rgba(34,211,238,0.65);
+        line-height: 1;
+      }
+      .dkg-restip-terms {
+        font-size: 11.5px; font-weight: 500; line-height: 1.35;
+        color: rgba(241,247,248,0.92);
+        word-break: break-word;
+      }
+      .dkg-restip-term { unicode-bidi: plaintext; }
+      .dkg-restip-arrow { color: rgba(34,211,238,0.6); font-weight: 400; margin: 0 3px; }
+      @keyframes dkgRestipIn {
+        from { opacity: 0; transform: translateY(2px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      :root:not(.dark) .dkg-restip {
+        background: rgba(255,255,255,0.92);
+        border-color: rgba(6,138,160,0.28);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      }
+      :root:not(.dark) .dkg-restip-terms { color: #0c2a30; }
+      :root:not(.dark) .dkg-restip-label { color: rgba(6,138,160,0.85); }
 
       @media (prefers-reduced-motion: reduce) {
-        .dkg-flow, .dkg-card, .dkg-card.is-alive::after, .dkg-empty-orb,
-        .dkg-ghost-orb, .dkg-detail-inner { animation: none !important; }
+        .dkg-flow, .dkg-resonance, .dkg-card, .dkg-card.is-alive::after, .dkg-empty-orb,
+        .dkg-ghost-orb, .dkg-detail-inner, .dkg-restip { animation: none !important; }
       }
     `}</style>
   )
