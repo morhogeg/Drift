@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 10, 2026
-**Branch:** `fix/sidebar-map-chip-polish`
+**Date:** June 11, 2026
+**Branch:** `main` (today's work committed + pushed to main; `feature/cloud-*` branches still unmerged, awaiting PR)
 **Build:** 59 (iOS Xcode) / web
-**Status:** This session (Jun 10, entry 174): **Cloud accounts + UI polish** — (1) Cloud accounts implementation (Phase 1–3 complete): `src/lib/cloudConfig.ts` master gate, `src/services/firebase.ts` lazy init, `src/services/auth.ts` Apple sign-in (native iOS + web popup), `src/services/cloudSync.ts` backup/restore with 5s debounce, `src/services/cloudKeyStrip.ts` pure key-removal module + 6 vitest tests (zero keys in uploads guaranteed), `src/services/cloudHooks.ts` change-bus, `src/store/authStore.ts` Zustand, `src/components/account/SignInSheet.tsx` + `AccountSection.tsx` glassmorphic UI with EASE_OUT_EXPO animations, settings integration. Dynamic imports ensure Firebase code never fetches when disabled. Playwright verified: blank env ⇒ no Account UI, no Firebase init; env-filled ⇒ Account renders on-brand. `package.json` Firebase 12.x + @capacitor-firebase/authentication 8.3, vitest devDep. Three feature branches ready for PR: `feature/cloud-auth`, `feature/cloud-sync`, `feature/cloud-ui` (consolidates into `feature/cloud-accounts`). Owner setup checklist in HANDOFF.md. (2) UI polish fixes: arc label "related by field" → "related" (two places: legend + hover tooltip in DriftKnowledgeGraph); removed header "reopen last drift" chip block (38 lines deleted from App.tsx); fixed sidebar blank-chat dedup (demo-trim + load-time pruning + createChat guard). (3) Build: tsc clean, production build 298.45 kB JS / 125.54 kB CSS (gzip 86.48 / 18.60 kB), cap sync clean, build 58→59. All code committed + pushed to `fix/sidebar-map-chip-polish`. Next: open 3 cloud PRs (pending `gh auth login`), owner Firebase setup, TestFlight build. Prior session (Jun 9 continued, entry 173): **Model-name label removed**. Prior (Jun 9 continued, entry 172): **Language fix + highlights polish + map lens colors**.
+**Status:** This session (Jun 11, entry 175): **Launch prep — Arabic RTL + centralized language detection, prod API-key-leak fix, App Store metadata + 5 dark screenshots** (full detail in section 175 below; open screenshot decisions listed there). Prior session (Jun 10, entry 174): **Cloud accounts + UI polish** — (1) Cloud accounts implementation (Phase 1–3 complete): `src/lib/cloudConfig.ts` master gate, `src/services/firebase.ts` lazy init, `src/services/auth.ts` Apple sign-in (native iOS + web popup), `src/services/cloudSync.ts` backup/restore with 5s debounce, `src/services/cloudKeyStrip.ts` pure key-removal module + 6 vitest tests (zero keys in uploads guaranteed), `src/services/cloudHooks.ts` change-bus, `src/store/authStore.ts` Zustand, `src/components/account/SignInSheet.tsx` + `AccountSection.tsx` glassmorphic UI with EASE_OUT_EXPO animations, settings integration. Dynamic imports ensure Firebase code never fetches when disabled. Playwright verified: blank env ⇒ no Account UI, no Firebase init; env-filled ⇒ Account renders on-brand. `package.json` Firebase 12.x + @capacitor-firebase/authentication 8.3, vitest devDep. Three feature branches ready for PR: `feature/cloud-auth`, `feature/cloud-sync`, `feature/cloud-ui` (consolidates into `feature/cloud-accounts`). Owner setup checklist in HANDOFF.md. (2) UI polish fixes: arc label "related by field" → "related" (two places: legend + hover tooltip in DriftKnowledgeGraph); removed header "reopen last drift" chip block (38 lines deleted from App.tsx); fixed sidebar blank-chat dedup (demo-trim + load-time pruning + createChat guard). (3) Build: tsc clean, production build 298.45 kB JS / 125.54 kB CSS (gzip 86.48 / 18.60 kB), cap sync clean, build 58→59. All code committed + pushed to `fix/sidebar-map-chip-polish`. Next: open 3 cloud PRs (pending `gh auth login`), owner Firebase setup, TestFlight build. Prior session (Jun 9 continued, entry 173): **Model-name label removed**. Prior (Jun 9 continued, entry 172): **Language fix + highlights polish + map lens colors**.
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,33 @@
 ---
 
 ## What Was Done This Session
+
+### 175. Launch prep — i18n/RTL, prod key-leak fix, App Store assets (Jun 11)
+
+All work below committed + pushed to `main` (`28ec93b` RTL/lang, `ca9fb63` launch prep, `23e7432` + `e7538b8` screenshots).
+
+**Arabic RTL + centralized language detection** (`28ec93b`):
+- `src/utils/rtl.ts` — direction detection broadened from Hebrew-only to Hebrew **+ Arabic** (base + presentation-form ranges). New name `detectRTL`; `detectHebrew` kept as a back-compat alias. Fixes Arabic AI content rendering LTR.
+- `src/lib/lang.ts` (NEW) — single source of truth for language detection: `detectLangCode()` (script + Latin-stopword) + `langDisplayName()`.
+- `src/services/gemini.ts` — `detectLanguage()` now delegates to lang.ts; LLM `languageDirective()` output unchanged (behavior-preserving refactor).
+- DECISION: considered es/ru/ar/it/ja drift-scaffolding translation bundles in `src/lib/driftPanel.ts`; user chose to **revert and keep EN/HE only** (AI content already localizes via languageDirective; hand-written translations carry verification risk). driftPanel.ts unchanged from main.
+
+**Prod API-key-leak fix** (`ca9fb63`):
+- Vite inlines `import.meta.env.VITE_GEMINI_API_KEY` at build time, so a populated `.env` baked the dev key into release bundles (default at `settingsStorage.ts:11`). Fixed: personal key moved to `.env.development.local` (gitignored, dev-only), `.env` emptied, `.env.production` committed pinning keys empty, `.env.example` refreshed. **Verified:** `npm run build` bundle has no key; `vite build --mode development` still embeds it. Production = BYOK.
+
+**App Store assets** (`ca9fb63`, `23e7432`, `e7538b8`):
+- `APP_STORE_METADATA.md` — name/subtitle/promo/keywords/description/what's-new + checklist of ASC-only fields.
+- `PRIVACY_POLICY.md` — hostable (GitHub Pages) privacy policy.
+- `ios/App/App/PrivacyInfo.xcprivacy` — **BASELINE** manifest. ⚠️ must be ADDED TO THE XCODE TARGET to take effect; verify required-reason APIs vs SDKs.
+- Screenshot pipeline: `scripts/shots.mjs` seeds a "Why do we dream?" demo (root + 9 drifts, 2 levels) into IndexedDB and captures the real UI at 1290×2796 (6.7"); `scripts/frame.mjs` frames each on the brand gradient with a headline. Output in `screenshots/final/` (raw/ gitignored). Re-run: `npm run dev`, then `node scripts/shots.mjs <port>`, then `node scripts/frame.mjs`.
+- 5 **dark** shots: `1-main`, `2-suggest` (tap Drift → real AI "Try asking" suggestions), `3-lenses` (free-form Drift + 4 lenses), `4-map` (branched tree, zoomed to fit), `5-synthesis` (✦ Synthesis summary). Suggestions in shot 2 are real AI output (Gemini API reachable from dev env).
+
+**OPEN DECISIONS for next session (user to discuss):**
+1. Shots 2 & 3 share the drift-panel header (lens bar) — decide whether to merge into one and add a different 5th (e.g. Connect constellation / push-to-main).
+2. Whether to also render the **6.9"** size (1320×2868) for the latest Pro Max.
+3. Theme already decided: **DARK** (matches design system; light mode rejected).
+
+**Still blocking launch (unchanged):** add PrivacyInfo.xcprivacy to Xcode target; age-rating questionnaire; confirm/create ASC app record; on-device pass; owner Firebase setup; open the 3 cloud PRs.
 
 ### 174. Cloud accounts + UI polish (FEATURE/FIX, Jun 10)
 
