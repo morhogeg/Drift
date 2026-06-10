@@ -1,14 +1,17 @@
-export const detectHebrew = (text: string): boolean => {
-  const hebrewRegex = /[\u0590-\u05FF\uFB1D-\uFB4F]/
-  return hebrewRegex.test(text)
-}
+// Hebrew + Arabic (incl. presentation forms) \u2014 the RTL scripts Drift renders.
+const RTL_REGEX = /[\u0590-\u05FF\uFB1D-\uFB4F\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/
+
+export const detectRTL = (text: string): boolean => RTL_REGEX.test(text)
+
+/** @deprecated kept for back-compat \u2014 now matches any RTL script, not only Hebrew. */
+export const detectHebrew = detectRTL
 
 export const getTextDirection = (text: string): 'rtl' | 'ltr' => {
-  return detectHebrew(text) ? 'rtl' : 'ltr'
+  return detectRTL(text) ? 'rtl' : 'ltr'
 }
 
 export const getRTLClassName = (text: string): string => {
-  return detectHebrew(text) ? 'text-right dir-rtl' : ''
+  return detectRTL(text) ? 'text-right dir-rtl' : ''
 }
 
 // For truncated spans: rely on the `dir="rtl"` attribute for alignment instead

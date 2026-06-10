@@ -5,6 +5,8 @@
  * Streaming via SSE with alt=sse query param.
  */
 
+import { detectLangCode, langDisplayName } from '../lib/lang'
+
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 export const GEMINI_MODELS = {
@@ -17,68 +19,14 @@ export const GEMINI_MODELS = {
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
 
 /**
- * Detect the language the user is actually writing in so we can give the model
- * an explicit, named target language. A soft "match the user's language"
- * instruction is NOT reliable on small models (gemini-3.1-flash-lite in
- * particular would default to Hebrew even for English input), so we detect the
- * dominant script — and, within the Latin script, the language via stopwords —
- * and name it outright in the directive.
+ * Returns a human-readable language name (with native form) for a sample of text.
+ * Detection (script + Latin stopwords) lives in lib/lang.ts so the LLM directive
+ * and the localized drift scaffolding always agree on the language. Naming the
+ * target language explicitly is what makes small models (gemini-3.1-flash-lite
+ * would otherwise default to Hebrew even for English input) actually comply.
  */
-function detectLatinLanguage(text: string): string {
-  const words = (text.toLowerCase().match(/[a-zà-ÿ]+/g) ?? [])
-  if (!words.length) return 'English'
-  const set = new Set(words)
-  const profiles: [string, string[]][] = [
-    ['English', ['the', 'and', 'is', 'are', 'you', 'what', 'how', 'why', 'of', 'to', 'in', 'do', 'does', 'that', 'this', 'with']],
-    ['Spanish', ['el', 'la', 'los', 'las', 'que', 'de', 'y', 'es', 'por', 'para', 'cómo', 'qué', 'un', 'una', 'con', 'no']],
-    ['French', ['le', 'la', 'les', 'que', 'de', 'et', 'est', 'pour', 'comment', 'vous', 'un', 'une', 'des', 'dans', 'pas', 'je']],
-    ['German', ['der', 'die', 'das', 'und', 'ist', 'nicht', 'wie', 'was', 'für', 'ein', 'eine', 'mit', 'ich', 'sie', 'den']],
-    ['Portuguese', ['que', 'de', 'e', 'é', 'por', 'para', 'como', 'não', 'um', 'uma', 'com', 'os', 'as', 'do', 'da', 'em']],
-    ['Italian', ['il', 'la', 'che', 'di', 'e', 'è', 'per', 'come', 'non', 'un', 'una', 'con', 'gli', 'le', 'sono', 'questo']],
-  ]
-  let best = 'English'
-  let bestHits = -1
-  for (const [name, stop] of profiles) {
-    const hits = stop.reduce((acc, w) => acc + (set.has(w) ? 1 : 0), 0)
-    if (hits > bestHits) { bestHits = hits; best = name }
-  }
-  return best
-}
-
-/** Returns a human-readable language name (with native form) for a sample of text. */
 function detectLanguage(text: string): string {
-  const sample = (text ?? '').slice(0, 2000)
-  const scripts: [RegExp, string][] = [
-    [/[֐-׿]/g, 'Hebrew'],
-    [/[؀-ۿݐ-ݿ]/g, 'Arabic'],
-    [/[Ѐ-ӿ]/g, 'Cyrillic'],
-    [/[Ͱ-Ͽ]/g, 'Greek'],
-    [/[぀-ヿ]/g, 'Japanese'],
-    [/[가-힯]/g, 'Korean'],
-    [/[一-鿿]/g, 'Han'],
-    [/[ऀ-ॿ]/g, 'Devanagari'],
-    [/[฀-๿]/g, 'Thai'],
-    [/[A-Za-z]/g, 'Latin'],
-  ]
-  let best = ''
-  let bestN = 0
-  for (const [re, name] of scripts) {
-    const n = (sample.match(re) ?? []).length
-    if (n > bestN) { bestN = n; best = name }
-  }
-  switch (best) {
-    case 'Hebrew': return 'Hebrew (עברית)'
-    case 'Arabic': return 'Arabic (العربية)'
-    case 'Cyrillic': return 'Russian (Русский)'
-    case 'Greek': return 'Greek (Ελληνικά)'
-    case 'Japanese': return 'Japanese (日本語)'
-    case 'Korean': return 'Korean (한국어)'
-    case 'Han': return 'Chinese (中文)'
-    case 'Devanagari': return 'Hindi (हिन्दी)'
-    case 'Thai': return 'Thai (ไทย)'
-    case 'Latin': return detectLatinLanguage(sample)
-    default: return 'English'
-  }
+  return langDisplayName(detectLangCode(text))
 }
 
 /**
