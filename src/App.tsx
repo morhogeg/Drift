@@ -1375,7 +1375,6 @@ function App() {
   // lifecycle. Extracted into useDriftActions; the App-owned refs, setters and
   // stripMarkdown are passed through so behavior is identical to the inline impl.
   const {
-    reopenLastDrift,
     handleNavigateToBreadcrumb,
     handleUndoPushToMain,
     handleUndoSaveAsChat,
@@ -1969,25 +1968,6 @@ function App() {
             </div>
 
             <div className="flex items-center gap-1.5 min-w-0">
-              {/* Reopen last drift — one tap back to the branch you just left.
-                  Hidden while the panel/tree is open (you're already there), and
-                  only shown for a drift that belongs to the chat you're viewing —
-                  otherwise a stale branch from another conversation leaks in. */}
-              {lastDrift && lastDrift.parentChatId === activeChatId && !driftOpen && !knowledgeGraphOpen && (
-                <Pressable
-                  onClick={reopenLastDrift}
-                  haptic={null}
-                  title={`Reopen drift · "${lastDrift.selectedText}"`}
-                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full min-w-0
-                             border border-accent-violet/25 bg-accent-violet/[0.07]
-                             text-accent-violet/85 hover:text-accent-violet hover:bg-accent-violet/[0.12]
-                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[28vw] sm:max-w-[200px]"
-                >
-                  <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[12px] font-medium truncate">{lastDrift.selectedText}</span>
-                </Pressable>
-              )}
-
               {/* Drift Tree Button — first-class control whenever the thread has
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (

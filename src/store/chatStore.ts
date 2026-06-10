@@ -9,7 +9,10 @@ import { create } from 'zustand'
 import { chatDB, chatToDB, chatFromDB } from '@/services/db'
 import type { Message, ChatSession } from '@/types/chat'
 
-// ── Demo / initial chats ─────────────────────────────────────────────────────
+// ── Initial chat ──────────────────────────────────────────────────────────────
+// First run seeds a single empty chat — no fake "Project Planning"/"Creative
+// Brainstorming" placeholders (generic filler that contradicts the brand and
+// just reads as redundant "New Chat" rows).
 
 const DEMO_CHATS: ChatSession[] = [
   {
@@ -18,27 +21,6 @@ const DEMO_CHATS: ChatSession[] = [
     messages: [],
     lastMessage: "Let's explore ideas together...",
     createdAt: new Date(),
-  },
-  {
-    id: '2',
-    title: 'Project Planning Discussion',
-    messages: [],
-    lastMessage: 'The timeline looks good for Q2...',
-    createdAt: new Date(Date.now() - 86400000),
-  },
-  {
-    id: '3',
-    title: 'Creative Brainstorming',
-    messages: [],
-    lastMessage: "That's an innovative approach!",
-    createdAt: new Date(Date.now() - 172800000),
-  },
-  {
-    id: '4',
-    title: 'Technical Architecture',
-    messages: [],
-    lastMessage: 'The microservices pattern would...',
-    createdAt: new Date(Date.now() - 259200000),
   },
 ]
 
@@ -123,6 +105,19 @@ function persistChat(chat: ChatSession): void {
   })
 }
 
+/**
+ * A "blank" chat: no messages, still on the default title, and not a drift.
+ * These are pure placeholders — clicking "New chat" on one (or seeding several)
+ * just produces redundant identical rows, so we collapse them to a single one.
+ */
+function isBlankChat(c: ChatSession): boolean {
+  return (
+    (c.messages?.length ?? 0) === 0 &&
+    !c.metadata?.isDrift &&
+    (c.title === 'New Chat' || c.title === 'Current Conversation')
+  )
+}
+
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -149,6 +144,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const chats = raw.map(chatFromDB)
       // Sort newest first
       chats.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
+      // Collapse redundant blank chats (from older builds that seeded several,
+      // or repeated "New chat" taps): keep only the newest one, prune the rest
+      // from both state and IndexedDB. Pruning empty placeholders loses nothing.
+      const blanks = chats.filter(isBlankChat)
+      if (blanks.length > 1) {
+        const stale = blanks.slice(1) // keep blanks[0] (newest), drop the rest
+        const staleIds = new Set(stale.map((c) => c.id))
+        for (const c of stale) {
+          chatDB.delete(c.id).catch((err) =>
+            console.error(`[chatStore] pruning blank chat ${c.id} failed:`, err)
+          )
+        }
+        chats.splice(0, chats.length, ...chats.filter((c) => !staleIds.has(c.id)))
+      }
 
       const firstId = chats[0]?.id ?? '1'
       set({
@@ -197,6 +207,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const updatedHistory = chatHistory.map((c) =>
       c.id === activeChatId ? { ...c, messages } : c
     )
+
+    // Don't stack duplicate blank chats: if an empty "New Chat" already exists,
+    // just switch to it instead of spawning an identical sibling.
+    const existingBlank = updatedHistory.find(isBlankChat)
+    if (existingBlank) {
+      set({
+        chatHistory: updatedHistory,
+        activeChatId: existingBlank.id,
+        messages: existingBlank.messages ?? [],
+      })
+      return existingBlank.id
+    }
 
     const newId = Date.now().toString()
     const newChat: ChatSession = {
