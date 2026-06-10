@@ -2816,6 +2816,14 @@ function App() {
                             const explored = new Set((msg.driftInfos ?? []).map(d => d.selectedText))
                             const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 5)
                             if (nextTerms.length === 0) return null
+                            // Recall-aware chips: a term already drifted on (in any
+                            // chat) reopens that exploration instead of starting a
+                            // duplicate. Exact normalized match only — the click
+                            // navigates to a specific drift, so no containment
+                            // guessing. Cyan = link to existing knowledge; violet
+                            // stays "new exploration".
+                            const recallFor = (term: string) =>
+                              termIndex.get(normalizeTerm(term))?.find(o => o.driftChatId !== activeChatId)
                             return (
                               <div className="mt-3.5">
                                 <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
@@ -2823,22 +2831,42 @@ function App() {
                                   Drift into
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                  {nextTerms.map((term) => (
-                                    <button
-                                      key={term}
-                                      onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
-                                      className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
-                                        text-[12.5px] font-medium leading-none text-accent-violet/90
-                                        border border-accent-violet/25 bg-accent-violet/[0.07]
-                                        shadow-[0_1px_3px_rgba(0,0,0,0.15)]
-                                        hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
-                                        active:scale-[0.97] transition-all duration-150"
-                                      title={`Drift into "${term}"`}
-                                    >
-                                      <span className="truncate">{term}</span>
-                                      <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
-                                    </button>
-                                  ))}
+                                  {nextTerms.map((term) => {
+                                    const recall = recallFor(term)
+                                    if (recall) return (
+                                      <button
+                                        key={term}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); handleOpenRelatedDrift(recall) }}
+                                        dir={getTextDirection(term)}
+                                        className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                          text-[12.5px] font-medium leading-none text-cyan-400/90
+                                          border border-cyan-400/25 bg-cyan-400/[0.07]
+                                          shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                          hover:bg-cyan-400/[0.14] hover:border-cyan-400/50 hover:text-cyan-400
+                                          active:scale-[0.97] transition-all duration-150"
+                                        title={`Explored before — reopen "${recall.chatTitle}"`}
+                                      >
+                                        <span className="truncate">{term}</span>
+                                        <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-cyan-400/45 group-hover:text-cyan-400/90 transition-colors" />
+                                      </button>
+                                    )
+                                    return (
+                                      <button
+                                        key={term}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
+                                        className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                          text-[12.5px] font-medium leading-none text-accent-violet/90
+                                          border border-accent-violet/25 bg-accent-violet/[0.07]
+                                          shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                          hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                          active:scale-[0.97] transition-all duration-150"
+                                        title={`Drift into "${term}"`}
+                                      >
+                                        <span className="truncate">{term}</span>
+                                        <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                                      </button>
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )
