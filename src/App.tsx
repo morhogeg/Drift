@@ -1271,6 +1271,7 @@ function App() {
   // is identical to the inline implementation.
   const {
     sendMessage,
+    editAndRegenerate,
     stopGeneration,
   } = useMessageStream({
     aiSettings,
@@ -1279,6 +1280,28 @@ function App() {
     scrollToBottom,
     stripMarkdown,
   })
+
+  // ── Edit & regenerate (user messages) ──────────────────────────────────────
+  // Editing a sent question keeps the exploration continuous instead of forcing
+  // a new thread: the turn is revised in place, everything after it is
+  // discarded, and the reply regenerates through the normal send pipeline.
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const beginEdit = (messageId: string, text: string) => {
+    setEditingMessageId(messageId)
+    setEditDraft(text)
+  }
+  const cancelEdit = () => {
+    setEditingMessageId(null)
+    setEditDraft('')
+  }
+  const submitEdit = (messageId: string) => {
+    const text = editDraft.trim()
+    if (!text) return
+    setEditingMessageId(null)
+    setEditDraft('')
+    editAndRegenerate(messageId, text)
+  }
 
   // ── Settings ────────────────────────────────────────────────────────────────
   const handleSaveSettings = (newSettings: AISettings) => {
@@ -2330,6 +2353,18 @@ function App() {
                            per-index delay. */
                         style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
                       >
+                        {/* Edit & regenerate — user turns only (not drift-pushed ones).
+                            Sits beside the bubble; revealed on hover/focus. */}
+                        {msg.isUser && !msg.isDriftPush && !isTyping && editingMessageId !== msg.id && (
+                          <button
+                            onClick={() => beginEdit(msg.id, msg.text)}
+                            className="self-center me-2 p-1.5 rounded-lg text-text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-accent-violet hover:bg-accent-violet/10 transition-all duration-200"
+                            title="Edit & regenerate"
+                            aria-label="Edit message and regenerate"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <div
                           className={`
                             ${isSynthesis
@@ -2500,12 +2535,45 @@ function App() {
 
                           {/* Message content */}
                           {msg.isUser ? (
+                            editingMessageId === msg.id ? (
+                              <div className="w-full min-w-[260px] sm:min-w-[320px]">
+                                <textarea
+                                  value={editDraft}
+                                  onChange={(e) => setEditDraft(e.target.value)}
+                                  dir={getTextDirection(editDraft || msg.text)}
+                                  className={`w-full bg-white/10 text-white placeholder-white/50 rounded-lg p-2 text-[14px] leading-6 font-medium resize-none focus:outline-none focus:ring-1 focus:ring-white/40 ${getRTLClassName(editDraft || msg.text)}`}
+                                  rows={Math.min(6, Math.max(2, editDraft.split('\n').length))}
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(msg.id) }
+                                    if (e.key === 'Escape') cancelEdit()
+                                  }}
+                                />
+                                <div className="flex justify-end items-center gap-2 mt-1.5">
+                                  <span className="text-[10px] text-white/55 me-auto">Replies after this point will be regenerated</span>
+                                  <button
+                                    onClick={cancelEdit}
+                                    className="text-[11px] px-2.5 py-1 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors duration-200"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => submitEdit(msg.id)}
+                                    disabled={!editDraft.trim()}
+                                    className="text-[11px] px-2.5 py-1 rounded-md bg-white/15 hover:bg-white/25 text-white font-semibold transition-colors duration-200 disabled:opacity-40"
+                                  >
+                                    Regenerate
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
                             <p
                               className={`text-[14px] leading-6 font-medium ${getRTLClassName(msg.text)}`}
                               dir={getTextDirection(msg.text)}
                             >
                               {msg.text}
                             </p>
+                            )
                           ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
                             <div
                               className={`text-[13px] leading-6 ${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
