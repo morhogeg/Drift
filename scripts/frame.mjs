@@ -10,11 +10,11 @@ const OUT = 'screenshots/final'
 mkdirSync(OUT, { recursive: true })
 
 const SHOTS = [
-  { file: '1-main.png',        eyebrow: 'MEET DRIFT',        title: 'Think in branches,\nnot threads',     sub: 'Highlight any idea in a reply and explore it in a focused side-conversation.' },
-  { file: '2-highlight.png',   eyebrow: 'ONE TAP DEEPER',    title: 'Four lenses on\nany idea',             sub: 'Simplify it, dive deep, see what it connects to, or challenge it — instantly.' },
-  { file: '3-drift-panel.png', eyebrow: 'STAY IN FLOW',      title: 'Explore without\nlosing your place',   sub: 'Every drift is its own thread. Push the insight back when you’re done.' },
-  { file: '4-map.png',         eyebrow: 'SEE THE SHAPE',     title: 'Your ideas,\nmapped',                  sub: 'Each branch becomes a glowing node on your living knowledge map.' },
-  { file: '5-settings.png',    eyebrow: 'PRIVATE BY DESIGN', title: 'Your key.\nYour data.',                sub: 'Bring your own AI key. Your conversations stay on your device.' },
+  { file: '1-main.png',      eyebrow: 'MEET DRIFT',     title: 'Think in branches,\nnot threads',   sub: 'Highlight any idea in a reply and explore it in a focused side-thread.' },
+  { file: '2-suggest.png',   eyebrow: 'NEVER A BLANK PAGE', title: 'Tap Drift,\nnever stall',       sub: 'Open a free-form branch on any phrase — and Drift suggests what to ask next.' },
+  { file: '3-lenses.png',    eyebrow: 'FIVE WAYS IN',   title: 'Drift free —\nor pick a lens',      sub: 'Simplify, deep-dive, connect, or challenge any idea in a single tap.' },
+  { file: '4-map.png',       eyebrow: 'SEE THE SHAPE',  title: 'Your ideas,\nmapped',               sub: 'Every branch becomes a glowing node on your living knowledge map.' },
+  { file: '5-synthesis.png', eyebrow: 'TIE IT TOGETHER', title: 'Weave it all\ninto one insight',   sub: 'Synthesize every branch into a single, clear takeaway.' },
 ]
 
 const html = (s) => `<!doctype html><html><head><meta charset="utf-8">
