@@ -1150,7 +1150,7 @@ function GraphCanvas({
             <line x1="1" y1="3" x2="21" y2="3" stroke="#22d3ee" strokeWidth="1.4" strokeDasharray="3 4" strokeLinecap="round" opacity="0.75" />
           </svg>
           <span className="text-[10px] leading-none" style={{ color: 'rgba(34,211,238,0.65)' }}>
-            related by field
+            related
           </span>
         </div>
       )}
@@ -1172,7 +1172,7 @@ function GraphCanvas({
         else pos.bottom = Math.max(8, resTip.ch - resTip.y + 12)
         return (
           <div className={'dkg-restip' + (onRight ? ' is-right' : '')} style={pos} aria-hidden>
-            <span className="dkg-restip-label">related by field</span>
+            <span className="dkg-restip-label">related</span>
             <span className="dkg-restip-terms">
               <span className="dkg-restip-term" dir="auto">{resTip.a}</span>
               <span className="dkg-restip-arrow" aria-hidden>↔</span>
