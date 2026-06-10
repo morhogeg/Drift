@@ -1,30 +1,28 @@
 # Drift — Quick Status
 
-**Date:** June 9, 2026 | **Branch:** `feature/apple-level-overhaul` | **Build:** 58 (iOS + web) — ready for TestFlight
+**Date:** June 10, 2026 | **Branch:** `fix/sidebar-map-chip-polish` | **Build:** 59 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-> ⚠️ **CRITICAL ACTION REQUIRED:** Rotate both exposed Gemini API keys + raise spend cap in Google AI Studio. See HANDOFF.md entry 164.
+## Last Session (Jun 10) — Cloud accounts + UI polish
 
-## Last Session (Jun 9 continued) — Model-name label removed
-
-- **Removed redundant model name from chat** — deleted the "Gemini 3.1 Flash Lite" label that appeared above each AI reply (line 2287–2289 in `App.tsx`). Model name still visible in header picker, so no loss of information — only visual clutter gone. Verified via Playwright: AI reply renders clean with no model-tag label or standalone model-name text.
-- **Build 57→58**, production bundle: 294.06 kB JS / 124.41 kB CSS (gzip 85.42 / 18.38 kB). tsc + vite + cap sync clean.
+- **Cloud accounts (Phase 1–3 complete):** Apple Sign-In (native iOS + web), backup/restore with 5s debounce, key-stripping guarantee (6 vitest tests). Dynamic imports ensure Firebase never fetches when disabled. Playwright verified. Three feature branches ready for PR (pending `gh auth login`). Owner setup checklist in HANDOFF.md.
+- **UI polish:** Arc label "related" (not "by field"), removed header "reopen last drift" chip, fixed sidebar blank-chat deduplication.
+- **Build 58→59**, production bundle: 298.45 kB JS / 125.54 kB CSS (gzip 86.48 / 18.60 kB). tsc + vite + cap sync clean.
 
 ## Pending (priority order)
 
-- [ ] **🔴 Rotate Gemini keys + raise spend cap** (user action, not code) — two keys exposed
-- [ ] **TestFlight build 58:** archive in Xcode → App Store Connect (language fix + highlights + map colors + synthesis + model-label removal)
-- [ ] On-device pass: highlights (English→English, Hebrew→Hebrew; key brands always included; each term ≤1 underline)
-- [ ] On-device pass: map lens colors (card colors match lens type — amber/blue/cyan/rose)
-- [ ] On-device pass: UI polish (no model-name label above replies; chart/message content starts fresh)
-- [ ] On-device pass: prior sessions (synthesis honest/trail, mobile UX, header/footer, audit fixes, keyboard lift, RTL)
+- [ ] **☁️ Owner setup — Cloud accounts** — Firebase project + .env vars + Apple provider + Services ID + Xcode capability + plist + firestore.rules. Checklist in CLOUD_ACCOUNTS_HANDOFF.md.
+- [ ] **Open 3 cloud PRs** (code ready, awaiting `gh auth login`)
+- [ ] **TestFlight build 59:** archive in Xcode → App Store Connect
+- [ ] On-device pass: cloud accounts (sign-in flow, backup/restore, no Account UI when disabled, API keys not leaked)
+- [ ] On-device pass: UI polish (arc label, sidebar blanks, no reopen chip)
 - [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 
 ## Stack snapshot
 
-React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache + semantic recall. **Primary LLM:** Gemini REST+SSE (native, language-aware, transliterating). **Routed labs:** OpenRouter (OpenAI/Anthropic/Grok streaming). **Single-model only** (broadcast removed Jun 5). **State:** Zustand 5 (chat/drift/model/ui) · **DB:** IndexedDB via idb (v2 schema). Drift Map = pure SVG + HTML cards (Hebrew-safe). **Synthesis:** adaptive (synthesis/trail), source chips reopen drifts in-panel. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3.2k lines · DriftPanel.tsx ~1.3k (decomposed into hooks).
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Cloud:** Firebase 12.x (JS SDK) + @capacitor-firebase/authentication 8.3 (Apple Sign-In native sheet iOS, popup web). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache. **Primary LLM:** Gemini REST+SSE. **Routed labs:** OpenRouter. **Single-model only**. **State:** Zustand 5 (chat/drift/model/ui/auth) · **DB:** IndexedDB via idb (v2 schema + users backup). Drift Map = pure SVG + HTML. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3k lines · DriftPanel.tsx ~1.3k.
 
 ## Key files
 
-`src/App.tsx` (`processHighlightsText`, `openExistingDrift`, `exploredLenses`) · `src/services/gemini.ts` (`detectLanguage`, `languageDirective`, `getSuggestedHighlights`, `synthesizeDrifts`) · `src/components/DriftPanel.tsx` (lens bar) · `src/components/DriftKnowledgeGraph.tsx` (`LENS_COLORS`, `lensColor`) · `src/components/SelectionTooltip.tsx` · `src/hooks/useDriftPanelActions.ts` · `src/utils/rtl.ts` · `vite.config.ts`
+`src/lib/cloudConfig.ts` (gate) · `src/services/firebase.ts` (lazy init) · `src/services/auth.ts` (Apple sign-in) · `src/services/cloudSync.ts` (backup/restore) · `src/services/cloudKeyStrip.ts` (key removal + tests) · `src/components/account/SignInSheet.tsx` · `src/components/account/AccountSection.tsx` · `src/App.tsx` (main integration) · `src/services/gemini.ts` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`

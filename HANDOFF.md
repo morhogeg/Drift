@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 9, 2026
-**Branch:** `feature/apple-level-overhaul`
-**Build:** 58 (iOS Xcode) / web
-**Status:** This session (Jun 9 continued, entry 173): **Model-name label removed** — (1) Removed the redundant `Gemini 3.1 Flash Lite` label that appeared above each AI message in the chat (line 2287–2289 in `App.tsx`); the model name still lives in the header's model picker, so nothing's lost — visual clutter gone, no info loss; (2) Verified via Playwright: AI reply renders cleanly without any standalone model-name label or the exact removed element class combo; (3) Bundle size stable at 294.06 kB JS / 124.41 kB CSS (gzip 85.42 / 18.38 kB), tsc + vite + cap sync clean, build 57→58. **Ready for TestFlight.** Prior session (Jun 9 continued, entry 172): **Language fix + highlights polish + map lens colors** — (1) Fixed the Hebrew-output bug by replacing soft language-matching prompts with explicit `languageDirective()` that detects script (Hebrew/Arabic/Cyrillic/Greek/etc.) and Latin-script languages (English/Spanish/French/German/Portuguese/Italian via stopword matching), then returns an imperative instruction naming the detected language with neutral examples (Gemini 3 Flash Lite now honors it); (2) Rewrote `getSuggestedHighlights` prompt to two-tier: always include KEY SUBJECTS (the central entities in the answer, esp. any proper nouns) first, THEN DOORWAYS (other rich connective phrases) — previous prompt only asked for doorways, missing brand names; raised cap from 4→7 terms; (3) Fixed highlights dedup bug (render-pure): switched from shared mutable `seen` Set (broke underlines in StrictMode) to `priorText` calculated from `node.position.start.offset` (message source before current block); blanked heading lines to prevent headings from suppressing first body mentions; applied to both factories (drift links + suggestions); (4) Added `LENS_COLORS` Record to DriftKnowledgeGraph, mapping each lens type (simplify: amber, research: blue, connect: cyan, challenge: rose) to hex codes matching DriftPanel chips; updated card eyebrows + orbs + DetailCard to use lens colors; (5) Verified: English→English, Hebrew→Hebrew; all terms underlined exactly once; key brands now always highlighted; lens colors visible on map. TypeScript clean, production build 294.16 kB JS / 124.41 kB CSS (gzip 85.44 / 18.38 kB), `npx cap sync ios` synced, build 56→57. Prior session (Jun 9 early, entry 171): **Synthesis made honest + navigable**. Prior (Jun 8, entry 170): **Mobile UX overhaul + audit fixes + footer redesign**.
+**Date:** June 10, 2026
+**Branch:** `fix/sidebar-map-chip-polish`
+**Build:** 59 (iOS Xcode) / web
+**Status:** This session (Jun 10, entry 174): **Cloud accounts + UI polish** — (1) Cloud accounts implementation (Phase 1–3 complete): `src/lib/cloudConfig.ts` master gate, `src/services/firebase.ts` lazy init, `src/services/auth.ts` Apple sign-in (native iOS + web popup), `src/services/cloudSync.ts` backup/restore with 5s debounce, `src/services/cloudKeyStrip.ts` pure key-removal module + 6 vitest tests (zero keys in uploads guaranteed), `src/services/cloudHooks.ts` change-bus, `src/store/authStore.ts` Zustand, `src/components/account/SignInSheet.tsx` + `AccountSection.tsx` glassmorphic UI with EASE_OUT_EXPO animations, settings integration. Dynamic imports ensure Firebase code never fetches when disabled. Playwright verified: blank env ⇒ no Account UI, no Firebase init; env-filled ⇒ Account renders on-brand. `package.json` Firebase 12.x + @capacitor-firebase/authentication 8.3, vitest devDep. Three feature branches ready for PR: `feature/cloud-auth`, `feature/cloud-sync`, `feature/cloud-ui` (consolidates into `feature/cloud-accounts`). Owner setup checklist in HANDOFF.md. (2) UI polish fixes: arc label "related by field" → "related" (two places: legend + hover tooltip in DriftKnowledgeGraph); removed header "reopen last drift" chip block (38 lines deleted from App.tsx); fixed sidebar blank-chat dedup (demo-trim + load-time pruning + createChat guard). (3) Build: tsc clean, production build 298.45 kB JS / 125.54 kB CSS (gzip 86.48 / 18.60 kB), cap sync clean, build 58→59. All code committed + pushed to `fix/sidebar-map-chip-polish`. Next: open 3 cloud PRs (pending `gh auth login`), owner Firebase setup, TestFlight build. Prior session (Jun 9 continued, entry 173): **Model-name label removed**. Prior (Jun 9 continued, entry 172): **Language fix + highlights polish + map lens colors**.
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,36 @@
 ---
 
 ## What Was Done This Session
+
+### 174. Cloud accounts + UI polish (FEATURE/FIX, Jun 10)
+
+**Cloud accounts (Phase 1–3 complete):**
+- `src/lib/cloudConfig.ts` — Master gate `isCloudEnabled()` checking all 6 VITE_FIREBASE_* env vars (inert if blank).
+- `src/services/firebase.ts` — Lazy dynamic-import singleton (app, auth, db) initialized only when `isCloudEnabled()` is true.
+- `src/services/auth.ts` — `signInWithApple()` (native sheet on iOS via @capacitor-firebase/authentication, popup on web), `signOut()`, `onAuthChange(cb)` returning unsubscribe, `getCurrentUser()`. Normalized `CloudUser {uid, displayName, email}`.
+- `src/services/cloudSync.ts` — `pushBackup()` calls `buildBackup()` → `stripApiKeysDeep()` → `assertNoApiKeys()` → `setDoc(users/{uid}/backup/current)` with `serverTimestamp()`. `pullBackup()` reads → `restoreBackup(merge)` with `suppressAutoPush` flag. Debounced 5s auto-push with in-flight coalescing.
+- `src/services/cloudKeyStrip.ts` — Pure module: `stripApiKeysDeep<T>(value)` removes any field matching `/apikey/i` at any depth, `findApiKeyFields(value, path)` returns dotted leak paths, `assertNoApiKeys(value)` throws if any remain. **6 vitest tests** prove: strips top-level/preset/nested keys, case-insensitive, preserves non-secret data, no input mutation, exact leak detection, assert throws on dirty/passes on clean.
+- `src/services/cloudHooks.ts` — Dependency-free change-bus: `onLocalDataChange(cb)` returns unsubscribe, `emitLocalDataChange()` notifies listeners (no-op when no subscribers).
+- `src/store/authStore.ts` — Zustand: `user`, `status`, `authError` + sync-status fields (`syncStatus`, `lastSyncedAt`, `syncError`).
+- `src/components/account/SignInSheet.tsx` — Glassmorphic bottom sheet, framer-motion EASE_OUT_EXPO entrance, glowing violet/pink orb, Apple brand SVG button, pitch copy.
+- `src/components/account/AccountSection.tsx` — "Account" section in Settings (above Models). Signed out: pitch + Sign in. Signed in: gradient avatar, identity, sync-status indicator (amber pulse syncing / emerald synced + relative time / red error), Back up now / Restore / Sign out buttons.
+- `src/components/Settings.tsx` — 3-line edit: lazy import AccountSection, gated render with `isCloudEnabled()`.
+- `src/main.tsx` — Guarded dynamic import: `if (isCloudEnabled()) initCloudSync()` (auto-push + auth listeners).
+- `src/services/db.ts` — 3 `emitLocalDataChange()` calls after chatDB.put/delete/clear.
+- `.env.example` — Placeholders for 6 VITE_FIREBASE_* vars.
+- `firestore.rules` — Deny cross-user access; `match /users/{uid}/{document=**}` allow read/write if `auth.uid == uid`.
+- `scripts/verify-cloud-disabled.mjs` — Playwright proof: blank env ⇒ no Account UI, no Firebase init, no cloud requests.
+- `scripts/verify-cloud-enabled.mjs` — Smoke test: env-filled build ⇒ Account section + sign-in sheet render on-brand.
+- `CLOUD_ACCOUNTS_HANDOFF.md` — Full handoff: branch stack, files-by-phase, verification status, owner setup checklist.
+- `package.json` — Firebase 12.x, @capacitor-firebase/authentication 8.3, vitest devDep; test script.
+- **Three feature branches ready for PR:** `feature/cloud-auth`, `feature/cloud-sync`, `feature/cloud-ui` (consolidates into `feature/cloud-accounts`). Awaiting `gh auth login` to open PRs.
+
+**UI polish fixes:**
+- DriftKnowledgeGraph.tsx: arc tooltip label "related by field" → "related" (legend line ~1153, hover chip ~1175).
+- App.tsx: deleted "reopen last drift" chip block (lines 1976–1989), removed `reopenLastDrift` from destructure (line 1378).
+- chatStore.ts: new helper `isBlankChat(c)` dedupes blank chats. In `loadChatsFromDB()` added pruning logic. In `createChat()` added guard: if blank exists, switch to it instead of stacking another.
+
+**Verification:** Playwright smoke tests pass (cloud disabled/enabled states correct). All chats built clean. Bundle size 298.45 kB JS / 125.54 kB CSS (gzip 86.48 / 18.60 kB). tsc + vite clean, cap sync synced, build 58→59.
 
 ### 171. Synthesis made honest + navigable (QUALITY/FEATURE, Jun 9)
 
@@ -592,9 +622,11 @@ VITE_GEMINI_API_KEY=your_key_here
 
 ## What's Pending / Next Ideas
 
-- [ ] **🔴 ACTION REQUIRED (security)** — rotate both exposed Gemini API keys in Google AI Studio (https://ai.studio); raise/reset spend cap at https://ai.studio/spend (currently 429 RESOURCE_EXHAUSTED). Details in entry 164.
-- [ ] **TestFlight submission (build 56)** — archive in Xcode GUI → upload to App Store Connect. Build number incremented 55→56, Capacitor synced, web assets ready. Requires: Xcode `ios/App/App.xcworkspace` → Product > Archive → Distribute App → TestFlight → Upload.
-- [ ] **On-device pass — synthesis (this session, build 56)** — verify: synthesis reads honest (no forced links; produces a "trail" for unrelated tangents); source chips open the source drift in the panel with NO new API call; chips show one per term; "View as" lens bar dots correctly mark already-explored lenses (instant) vs. empty ones.
+- [ ] **☁️ OWNER SETUP — Cloud accounts** — Create Firebase project (pay-as-you-go, no free tier), fill `.env` with 6 VITE_FIREBASE_* vars, enable Apple provider, register Services ID (com.morhogeg.drift.icloud-container), add Xcode capability (Sign in with Apple), update GoogleService-Info.plist, deploy firestore.rules. Detailed checklist in CLOUD_ACCOUNTS_HANDOFF.md.
+- [ ] **Open 3 cloud PRs** — Once `gh auth login` is executed: `feature/cloud-auth` → `feature/cloud-accounts`, `feature/cloud-sync` → `feature/cloud-accounts`, `feature/cloud-ui` → `feature/cloud-accounts`. Code complete, tests pass, Playwright verified.
+- [ ] **TestFlight submission (build 59)** — Archive in Xcode GUI → upload to App Store Connect. Build number incremented 58→59, Capacitor synced, web assets ready. Requires: Xcode `ios/App/App.xcworkspace` → Product > Archive → Distribute App → TestFlight → Upload.
+- [ ] **On-device pass — cloud accounts (build 59)** — verify: (1) Sign in with Apple works on device; (2) Back up now / Restore / Sign out flow; (3) No Account UI visible when cloud disabled; (4) API keys NOT in backup payload (key-strip tests prove it, but verify on device).
+- [ ] **On-device pass — UI polish (build 59)** — verify: arc label reads "related" (not "by field"); sidebar shows exactly one blank "New Chat" (no dupes); no "reopen last drift" chip in header.
 - [ ] **On-device pass — mobile UX (build 55)** — verify: model picker moved to sidebar (no composer clutter); lens-drift push works + shows in-panel confirmation + glow on return to main; header no longer crowded (breadcrumb/pill flex correctly); mobile audit fixes (keyboard lift, selection bar scroll, touch targets, safe-area, RTL, footer compact); no regressions.
 - [ ] **On-device pass — prior sessions** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall; Drift + map redesign stability.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
