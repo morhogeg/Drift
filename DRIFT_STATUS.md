@@ -10,9 +10,14 @@
 - **Removed redundant model name from chat** — deleted the "Gemini 3.1 Flash Lite" label that appeared above each AI reply (line 2287–2289 in `App.tsx`). Model name still visible in header picker, so no loss of information — only visual clutter gone. Verified via Playwright: AI reply renders clean with no model-tag label or standalone model-name text.
 - **Build 57→58**, production bundle: 294.06 kB JS / 124.41 kB CSS (gzip 85.42 / 18.38 kB). tsc + vite + cap sync clean.
 
+## Cloud accounts (Jun 10) — built, awaiting owner Firebase setup
+
+Optional Apple sign-in + cloud backup/restore (Firestore, `users/{uid}/backup/current`). Stacked branches `feature/cloud-auth` → `feature/cloud-sync` → `feature/cloud-ui`, PRs into `feature/cloud-accounts`. **Inert until `.env` has all `VITE_FIREBASE_*` filled** — verified zero behavior change when blank. API keys never upload (deep-strip + test). Owner checklist in HANDOFF.md "☁️ Cloud accounts" section: Firebase project + Apple provider + Services ID + Xcode capability + `GoogleService-Info.plist` + deploy `firestore.rules`. ⚠️ Don't build iOS from these branches until the plist is in place.
+
 ## Pending (priority order)
 
 - [ ] **🔴 Rotate Gemini keys + raise spend cap** (user action, not code) — two keys exposed
+- [ ] **Cloud accounts owner setup** — Firebase project, Apple auth provider, `.env` vars, plist (see HANDOFF.md ☁️ section)
 - [ ] **TestFlight build 58:** archive in Xcode → App Store Connect (language fix + highlights + map colors + synthesis + model-label removal)
 - [ ] On-device pass: highlights (English→English, Hebrew→Hebrew; key brands always included; each term ≤1 underline)
 - [ ] On-device pass: map lens colors (card colors match lens type — amber/blue/cyan/rose)
