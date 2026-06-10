@@ -624,3 +624,25 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   border-bottom: 1.5px solid rgba(168, 85, 247, 0.9);
   background: rgba(168, 85, 247, 0.08);
 }
+
+/* Recall marks — this term was already explored in a prior drift. Cyan
+   (accent-discovery, the "connections" hue) instead of violet; clicking
+   reopens the prior exploration rather than starting a new one. The dot is
+   the re-encounter cue; margin-inline keeps it RTL-safe. */
+.drift-suggestion-recall {
+  border-bottom: 1.5px dotted rgba(34, 211, 238, 0.55);
+}
+.drift-suggestion-recall:hover {
+  border-bottom: 1.5px solid rgba(34, 211, 238, 0.9);
+  background: rgba(34, 211, 238, 0.08);
+}
+.drift-suggestion-recall::after {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(34, 211, 238, 0.85);
+  margin-inline-start: 3px;
+  vertical-align: super;
+}
