@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { Bookmark, GitBranch, BookOpen, Telescope, Link2, Swords } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback, Fragment } from 'react'
+import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 
@@ -401,7 +401,20 @@ export default function SelectionTooltip({
 
       if (inside) {
         clearHideTimer()
-      } else if (hideTimerRef.current == null) {
+        return
+      }
+
+      // Keep the tooltip alive while a real selection is still active. Dismissing
+      // purely on cursor geometry made it flicker shut when the pointer drifted a
+      // few px off the selection box — so the menu only goes away once the text is
+      // actually deselected (handled on mouseup / click-elsewhere).
+      const sel = window.getSelection()
+      if (sel && !sel.isCollapsed && sel.toString().trim()) {
+        clearHideTimer()
+        return
+      }
+
+      if (hideTimerRef.current == null) {
         hideTimerRef.current = window.setTimeout(() => {
           dismissTooltip()
           hideTimerRef.current = null
@@ -477,12 +490,24 @@ export default function SelectionTooltip({
     }
   }
 
+  // Each action carries its own signature hue. Connect uses the app's discovery
+  // cyan so it matches the Connections page exactly; the others read amber/blue/
+  // rose so all four are distinguishable. A divider still splits the menu into
+  // the "go deeper" (Simplify, Deep dive) and "push outward" (Connect, Challenge)
+  // pairs without relying on color alone.
   const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; Icon: LucideIcon }> = [
-    { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: BookOpen },
+    { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: Lightbulb },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
-    { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Link2 },
-    { type: 'challenge', label: 'Challenge', desc: 'Argue the other side',  Icon: Swords },
+    { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Waypoints },
+    { type: 'challenge', label: 'Challenge', desc: 'Argue the other side',  Icon: Scale },
   ]
+  /** Per-action tint — icon (rest + hover) and the card's hover border. */
+  const ACTION_TINT: Record<TemplateType, { icon: string; border: string }> = {
+    simplify:  { icon: 'text-amber-400/70 group-hover:text-amber-400',                       border: 'hover:border-amber-400/40' },
+    research:  { icon: 'text-blue-400/70 group-hover:text-blue-400',                         border: 'hover:border-blue-400/40' },
+    connect:   { icon: 'text-accent-discovery/70 group-hover:text-accent-discovery',          border: 'hover:border-accent-discovery/40' },
+    challenge: { icon: 'text-rose-400/70 group-hover:text-rose-400',                         border: 'hover:border-rose-400/40' },
+  }
 
   const handleSave = () => {
     const data =
@@ -515,7 +540,7 @@ export default function SelectionTooltip({
       <div
         style={{
           position: 'fixed',
-          bottom: `calc(env(safe-area-inset-bottom) + 76px)`,
+          bottom: `calc(env(safe-area-inset-bottom) + var(--composer-h, 64px) + 16px)`,
           left: '20px',
           right: '20px',
           zIndex: 99997,
@@ -523,7 +548,13 @@ export default function SelectionTooltip({
         className="animate-fade-up"
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="flex items-stretch rounded-2xl bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+        {/* Outer wrapper clips to the rounded-pill shape; the inner row scrolls
+            horizontally on narrow phones so no action button is ever clipped. */}
+        <div className="rounded-2xl overflow-hidden bg-dark-surface/95 backdrop-blur-2xl border border-dark-border shadow-[0_16px_48px_rgba(0,0,0,0.6),0_4px_16px_rgba(0,0,0,0.4)]">
+        <div
+          className="flex items-stretch flex-nowrap overflow-x-auto [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: 'none' }}
+        >
           {!tooltip.isUserMessage ? (
             <>
               {/* Primary Drift action — most prominent, pink→violet gradient */}
@@ -536,27 +567,29 @@ export default function SelectionTooltip({
                 onClick={() => handleDrift()}
               >
                 <GitBranch className="w-[15px] h-[15px]" strokeWidth={2.25} />
-                Drift
+                Drift into
               </button>
-              {/* Template actions — uniform, calm styling so the bar reads as one control */}
-              {TEMPLATES.map((t) => (
+              {/* Template actions — uniform layout; icon tint + a divider before the
+                  'extend' pair groups them into understand vs. push-outward. */}
+              {TEMPLATES.map((t, i) => (
                 <button
                   key={t.type}
                   type="button"
-                  className="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
-                             text-text-secondary border-l border-dark-border
-                             transition-colors duration-150 active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap"
+                  className={`flex-shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
+                             text-text-secondary transition-colors duration-150
+                             active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap
+                             ${i === 2 ? 'border-l-2 border-dark-border' : 'border-l border-dark-border'}`}
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
-                  <t.Icon className="w-[17px] h-[17px] text-text-muted" strokeWidth={1.9} />
+                  <t.Icon className={`w-[17px] h-[17px] ${ACTION_TINT[t.type].icon}`} strokeWidth={1.9} />
                   <span className="text-[11px] font-medium leading-none">{t.label}</span>
                 </button>
               ))}
               <button
                 type="button"
-                className="flex items-center justify-center px-3.5 py-3 text-text-muted border-l border-dark-border
-                           active:text-text-primary active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
+                className="flex items-center justify-center px-3.5 py-3 text-accent-violet/80 border-l border-dark-border
+                           active:text-accent-violet active:bg-black/[0.06] dark:active:bg-white/[0.07] transition-colors duration-150 flex-shrink-0"
                 onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
                 onClick={handleSave}
                 aria-label="Save to snippets"
@@ -571,10 +604,11 @@ export default function SelectionTooltip({
               onTouchEnd={(e) => { e.preventDefault(); handleSave() }}
               onClick={handleSave}
             >
-              <Bookmark className="w-4 h-4" />
+              <Bookmark className="w-4 h-4 text-accent-violet/80" />
               Save
             </button>
           )}
+        </div>
         </div>
       </div>
     )
@@ -614,7 +648,7 @@ export default function SelectionTooltip({
                          transition-all duration-150 cursor-pointer text-[12px] font-semibold"
             >
               <GitBranch className="w-3.5 h-3.5" />
-              Drift
+              Drift into
             </button>
           )}
 
@@ -625,37 +659,39 @@ export default function SelectionTooltip({
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSave() }}
             title="Save selection to snippets (S)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-xl
                        bg-dark-elevated border border-dark-border/70 text-text-secondary
-                       hover:border-accent-violet/40 hover:text-text-primary active:scale-95
+                       hover:border-accent-violet/40 hover:text-accent-violet active:scale-95
                        transition-all duration-150 cursor-pointer text-[12px] font-medium"
           >
-            <Bookmark className="w-3.5 h-3.5" />
+            <Bookmark className="w-3.5 h-3.5 text-accent-violet/70 group-hover:text-accent-violet" />
             Save
           </button>
         </div>
 
-        {/* Template quick-action row */}
+        {/* Template quick-action row — grouped: [Simplify · Deep dive] | [Connect · Challenge] */}
         {!tooltip.isUserMessage && (
-          <div className="flex gap-1">
-            {TEMPLATES.map(t => (
-              <button
-                key={t.type}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift(t.type) }}
-                title={t.desc}
-                className="flex flex-col items-start gap-0 px-2.5 py-1.5 rounded-lg
-                           bg-dark-elevated/60 border border-dark-border/50
-                           hover:border-accent-violet/40 active:scale-95
-                           transition-all duration-150 cursor-pointer whitespace-nowrap"
-              >
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-text-secondary">
-                  <t.Icon className="w-3 h-3" strokeWidth={1.9} />
-                  <span>{t.label}</span>
-                </span>
-                <span className="text-[9px] text-text-muted/60 leading-tight">{t.desc}</span>
-              </button>
+          <div className="flex items-stretch gap-1">
+            {TEMPLATES.map((t, i) => (
+              <Fragment key={t.type}>
+                {i === 2 && <div className="self-stretch w-px my-0.5 bg-dark-border/60" aria-hidden />}
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift(t.type) }}
+                  title={t.desc}
+                  className={`group flex flex-col items-start gap-0 px-2.5 py-1.5 rounded-lg
+                             bg-dark-elevated/60 border border-dark-border/50 active:scale-95
+                             transition-all duration-150 cursor-pointer whitespace-nowrap
+                             ${ACTION_TINT[t.type].border}`}
+                >
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-text-muted group-hover:text-text-secondary">
+                    <t.Icon className={`w-3 h-3 ${ACTION_TINT[t.type].icon}`} strokeWidth={1.9} />
+                    <span>{t.label}</span>
+                  </span>
+                  <span className="text-[9px] text-text-muted/60 leading-tight">{t.desc}</span>
+                </button>
+              </Fragment>
             ))}
           </div>
         )}

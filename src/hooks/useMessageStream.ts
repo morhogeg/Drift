@@ -47,7 +47,9 @@ export function useMessageStream({
   const message = chatStore.inputText
 
   // ── sendMessage ─────────────────────────────────────────────────────────────
-  const sendMessage = async (overrideText?: string) => {
+  // `baseMessages` overrides the conversation the new turn appends to — used by
+  // editAndRegenerate to truncate at the edited turn. Normal sends omit it.
+  const sendMessage = async (overrideText?: string, baseMessages?: Message[]) => {
     const text = overrideText ?? message
     if (text.trim()) {
       const newMessage: Message = {
@@ -60,9 +62,11 @@ export function useMessageStream({
       // Sending a message has weight — a light, confident thunk.
       haptics.impact('light')
 
-      const updatedMessages = [...messages, newMessage]
+      const updatedMessages = [...(baseMessages ?? messages), newMessage]
       chatStore.setMessages(updatedMessages)
-      chatStore.setInputText('')
+      // Edits regenerate an old turn — they must not eat a draft sitting in the
+      // composer. Normal sends clear it exactly as before.
+      if (!baseMessages) chatStore.setInputText('')
       chatStore.setIsTyping(true)
       chatStore.setStreaming('')
 
@@ -203,6 +207,33 @@ export function useMessageStream({
     }
   }
 
+  // ── editAndRegenerate ───────────────────────────────────────────────────────
+  // Edit a sent user message and regenerate from that point. Everything after
+  // the edited turn is discarded (the conversation honestly diverges there);
+  // the revised text then flows through the normal send pipeline so streaming,
+  // titles and suggested highlights behave identically to a fresh send.
+  // Drift conversations opened from discarded replies survive as their own
+  // sessions (sidebar, map and recall marks still reach them).
+  const editAndRegenerate = async (messageId: string, newText: string) => {
+    const text = newText.trim()
+    if (!text) return
+    if (useChatStore.getState().isTyping) return // never truncate mid-stream
+    const current = useChatStore.getState().messages
+    const idx = current.findIndex(m => m.id === messageId && m.isUser)
+    if (idx === -1) return
+
+    // If the chat was auto-titled from this exact message, retitle from the
+    // edited text so the sidebar stays honest.
+    const edited = current[idx]
+    const oldAutoTitle = edited.text.slice(0, 50) + (edited.text.length > 50 ? '...' : '')
+    const chat = useChatStore.getState().chatHistory.find(c => c.id === useChatStore.getState().activeChatId)
+    if (chat && chat.title === oldAutoTitle) {
+      chatStore.updateChat(chat.id, { title: text.slice(0, 50) + (text.length > 50 ? '...' : '') })
+    }
+
+    await sendMessage(text, current.slice(0, idx))
+  }
+
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -215,6 +246,7 @@ export function useMessageStream({
 
   return {
     sendMessage,
+    editAndRegenerate,
     stopGeneration,
   }
 }

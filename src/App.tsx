@@ -3,6 +3,7 @@ import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, Arrow
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
+import ResizeHandle from './components/ResizeHandle'
 const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
 import ErrorBoundary from './components/ErrorBoundary'
 import SelectionTooltip from './components/SelectionTooltip'
@@ -16,9 +17,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
-import { getTextDirection, getRTLClassName } from './utils/rtl'
+import { getTextDirection, getRTLClassName, getRTLTruncateClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
-import ModelPillRow from './components/ModelPillRow'
 import ModelPickerSheet from './components/ModelPickerSheet'
 import SearchModal from './components/SearchModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -26,7 +26,7 @@ import AddModelSheet from './components/AddModelSheet'
 import { registerGlobalNavigationHandlers } from './components/conversation/ConversationScroller'
 import { indexListMessage, getAnchorId, matchListItemsInText } from './services/lists/index'
 import InlineListLink from './components/lists/InlineListLink'
-import { buildTermIndex, findRelatedDrifts, type TermOccurrence } from '@/lib/termIndex'
+import { buildTermIndex, findRelatedDrifts, normalizeTerm, type TermOccurrence } from '@/lib/termIndex'
 import { runEmbeddingBackfill, getCachedVectors } from '@/lib/embeddingBackfill'
 import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
@@ -52,6 +52,18 @@ import { ToastContainer } from '@/components/ui'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 import { SidebarChatRow, type SidebarRowKind } from '@/components/SidebarChatRow'
+
+/** Label + signature color for a pushed drift's origin tag, mirroring the
+ *  highlight-menu lens hues (amber/blue/cyan/rose) so a pushed Simplify reads
+ *  "simplify" not "drift". Falls back to plain violet "drift". */
+const PUSHED_LENS_TAG: Record<string, { label: string; chip: string; arrow: string }> = {
+  simplify:  { label: 'simplify',  chip: 'bg-amber-400/[0.10] border-amber-400/25 text-amber-400/85',                     arrow: '↗' },
+  research:  { label: 'deep dive', chip: 'bg-blue-400/[0.10] border-blue-400/25 text-blue-400/85',                       arrow: '↗' },
+  connect:   { label: 'connect',   chip: 'bg-accent-discovery/[0.10] border-accent-discovery/25 text-accent-discovery/90', arrow: '↗' },
+  challenge: { label: 'challenge', chip: 'bg-rose-400/[0.10] border-rose-400/25 text-rose-400/85',                       arrow: '↗' },
+}
+const pushedLensTag = (tpl?: string) =>
+  (tpl && PUSHED_LENS_TAG[tpl]) || { label: 'drift', chip: 'bg-accent-violet/[0.08] border-accent-violet/20 text-accent-violet/80', arrow: '↗' }
 
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -125,6 +137,7 @@ function App() {
   const activeMessageIdRef = useRef<string | null>(null)
   const listIndexedMessageIdsRef = useRef<Set<string>>(new Set())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const voiceInput = useVoiceInput((transcript) => {
     chatStore.setInputText((chatStore.inputText ? chatStore.inputText + ' ' : '') + transcript)
   })
@@ -220,10 +233,9 @@ function App() {
   }, [totalDriftCount, knowledgeGraphOpen, endMapSpotlight])
   useEffect(() => { if (knowledgeGraphOpen && mapSpotlight) endMapSpotlight() }, [knowledgeGraphOpen, mapSpotlight, endMapSpotlight])
 
-  // Drift Map "expand" (desktop): widens the map panel for a larger view. Tracked
-  // here (not inside the map) so the main column's right margin can match the panel
-  // width and never get covered.
-  const [mapExpanded, setMapExpanded] = useState(false)
+  // Drift Map full-screen (desktop): covers the whole viewport. Tracked here so the
+  // main column can drop its right-margin reserve while the map is full-screen.
+  const [mapFullscreen, setMapFullscreen] = useState(false)
   const [isLgUp, setIsLgUp] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -233,8 +245,32 @@ function App() {
     m.addEventListener('change', h)
     return () => m.removeEventListener('change', h)
   }, [])
-  // The map panel's width (kept in sync with DriftKnowledgeGraph's desktop panel).
-  const mapPanelWidth = mapExpanded ? 'min(1040px, 90vw)' : 'min(680px, 56vw)'
+
+  // ── Desktop drag-to-resize: per-panel widths (px) ────────────────────────────
+  // In-session only (reset on reload by design). The main column is flex-1 and
+  // reserves exactly these widths via margins, so it reflows for free as they change.
+  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [driftWidth, setDriftWidth] = useState(450)
+  const [mapWidth, setMapWidth] = useState(680)
+  // Smallest the main chat may get when a right panel grows — just enough that its
+  // header icons (search/gallery/help on the left, Map/new-chat pills on the right)
+  // stay laid out instead of clipping. Protecting this takes priority over a right
+  // panel's own minimum, so on a narrow window the panel yields rather than the chat.
+  const MIN_MAIN = 660
+  const clampSidebar = (w: number) => Math.max(240, Math.min(560, w))
+  // Most a right panel may take so the chat keeps MIN_MAIN (accounting for the open
+  // sidebar). Math.min(w, maxRight) wins even if maxRight is below the panel's floor.
+  const maxRightWidth = () => {
+    const leftReserve = isLgUp && sidebarOpen ? sidebarWidth : 0
+    return Math.max(0, window.innerWidth - leftReserve - MIN_MAIN)
+  }
+  const clampDrift = (w: number) => Math.min(Math.max(320, w), maxRightWidth())
+  const clampMap = (w: number) => Math.min(Math.max(400, w), maxRightWidth())
+  // True while any panel is being dragged — suppresses the layout's width/margin
+  // transitions so the columns track the pointer instead of easing behind it.
+  const [resizing, setResizing] = useState(false)
+  const startResize = useCallback(() => setResizing(true), [])
+  const endResize = useCallback(() => setResizing(false), [])
 
   // Bug 2 fix: on touch devices a single tap can surface as both a `pointerup`/
   // framer-motion tap AND a synthesized `click`, firing the toggle twice in the
@@ -274,11 +310,32 @@ function App() {
   const driftOpen = driftStore.driftOpen
   const driftContext = driftStore.driftContext
 
-  // Right margin the main column reserves so the open side panel never covers it
-  // (matches the actual panel width, including the map's expanded width).
+  // Reveal where a freshly-pushed drift landed. Fires once the main chat is
+  // actually visible (panel + map closed) — so on mobile, where the full-screen
+  // panel hid the promotion, returning to the chat scrolls to the promoted block
+  // and gives it a brief "landed here" glow. Cleared after the reveal.
+  useEffect(() => {
+    if (!justPromotedChatId || driftOpen || knowledgeGraphOpen) return
+    const targetId = justPromotedChatId
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-promoted-chat="${CSS.escape(targetId)}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('drift-landing')
+        window.setTimeout(() => el.classList.remove('drift-landing'), 2600)
+      }
+      setJustPromotedChatId(null)
+    }, 360) // let the panel's close transition settle before scrolling
+    return () => window.clearTimeout(t)
+  }, [justPromotedChatId, driftOpen, knowledgeGraphOpen])
+
+  // Margins the main column reserves so the open side panels never cover it
+  // (match the live, drag-adjustable panel widths). When the map is full-screen it
+  // covers everything, so no reserve is needed.
   const mainRightMargin = isLgUp
-    ? (knowledgeGraphOpen ? mapPanelWidth : driftOpen ? 'min(450px, 56vw)' : 0)
+    ? (knowledgeGraphOpen ? (mapFullscreen ? 0 : mapWidth) : driftOpen ? driftWidth : 0)
     : 0
+  const mainLeftMargin = isLgUp && sidebarOpen ? sidebarWidth : 0
 
   // ── Intelligence layer: cross-drift connection surfacing ─────────────────────
   // Index every prior drift by its term (cheap; reads only what's persisted).
@@ -401,6 +458,64 @@ function App() {
       }
     }
   }, [chatHistory])
+
+  // ── Which lenses already have content for the open term ──────────────────────
+  // Drives the dots in the panel's "View as" bar so the user can tell which lenses
+  // are instant (already explored — e.g. before a synthesis) vs. which would fire a
+  // fresh API call. "Explored" must be CONTENT-verified (a registry entry alone can
+  // be a navigated-but-empty thread), so each candidate driftChatId is checked for a
+  // real conversation / cached Connect cards before its lens is marked.
+  const exploredLenses = useMemo<Set<string>>(() => {
+    const set = new Set<string>()
+    const sm = driftContext?.sourceMessageId
+    const term = driftContext?.selectedText
+    if (!sm || !term) return set
+
+    const LENS_KEYS = ['drift', 'simplify', 'research', 'connect', 'challenge']
+    const hasContent = (id: string) =>
+      (driftStore.getTempConversation(id)?.length ?? 0) > 0 ||
+      ((chatHistory.find(c => c.id === id)?.messages?.length ?? 0) > 0) ||
+      (connectCardsCache.current.get(id)?.length ?? 0) > 0 ||
+      Object.keys(connectAnswersCache.current.get(id) ?? {}).length > 0
+
+    // The first lens used for a term is recorded on the source message's driftInfo;
+    // later lenses get synthetic ids (`<baseId>__research` …) so the suffix names them.
+    let baseLens = 'drift'
+    for (const c of chatHistory) {
+      const msg = c.messages.find(m => m.id === sm)
+      const di = msg?.driftInfos?.find(d => d.selectedText === term)
+      if (di) { baseLens = di.templateType ?? 'drift'; break }
+    }
+    const lensFromId = (id: string): string => {
+      const m = id.match(/__(\w+)$/)
+      if (m && LENS_KEYS.includes(m[1])) return m[1]
+      return baseLens
+    }
+
+    // In-session registry: every lens thread the user opened, with its real id.
+    const reg = lensRegistryRef.current.get(`${sm}::${term}`)
+    if (reg) for (const [tpl, id] of reg) if (hasContent(id)) set.add(tpl)
+
+    // Persisted drift chats branching from the same source+term (survives reload).
+    for (const c of chatHistory) {
+      if (c.metadata?.isDrift && c.metadata.sourceMessageId === sm &&
+          c.metadata.selectedText === term && (c.messages?.length ?? 0) > 0) {
+        set.add(lensFromId(c.id))
+      }
+    }
+
+    // Connect content persists on the source message's driftInfo even when the
+    // connections-list thread has no chat messages of its own.
+    for (const c of chatHistory) {
+      const msg = c.messages.find(m => m.id === sm)
+      for (const d of (msg?.driftInfos ?? [])) {
+        if (d.selectedText !== term) continue
+        if (d.connectCards?.length || (d.connectAnswers && Object.keys(d.connectAnswers).length)) set.add('connect')
+      }
+    }
+
+    return set
+  }, [driftContext?.sourceMessageId, driftContext?.selectedText, chatHistory]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Continuity: "pick up where you left off" ─────────────────────────────────
   // Unfinished drift trees — conversations with ≥2 explored drifts not yet woven
@@ -628,7 +743,7 @@ function App() {
     }
   }
 
-  // ── Drift synthesis: "bring it home" ──────────────────────────────────────────
+  // ── Drift synthesis ───────────────────────────────────────────────────────────
   // Weaves every descendant drift of a conversation into one cohesive synthesis,
   // posted back as a message on that conversation. Closes the explore→return loop.
   const handleSynthesize = async (rootId: string) => {
@@ -722,6 +837,97 @@ function App() {
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 150)
     toast.success('Forked — continue in a new direction')
+  }
+
+  // ── Open an already-explored drift in the side panel (no new API call) ────────
+  // Shared by the Drift Map node tap and the synthesis source chips. Restores the
+  // already-generated conversation (regular: existingMessages; Connect: cached
+  // cards/answers) so tapping a source just re-opens what was already there.
+  const openExistingDrift = (driftChat: ChatSession) => {
+    const sourceMessageId = driftChat.metadata?.sourceMessageId
+    const parentChatId = driftChat.metadata?.parentChatId
+    const selectedText = driftChat.metadata?.selectedText ?? ''
+    const driftChatId = driftChat.id
+
+    // Switch to the parent chat if needed
+    if (parentChatId && parentChatId !== activeChatId) {
+      switchChat(parentChatId)
+    }
+
+    // Scroll to the source anchor message
+    if (sourceMessageId) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          const el = document.querySelector(`[data-message-id="${sourceMessageId}"]`)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 150)
+      })
+    }
+
+    // Get context from parent chat (use the chat we're switching to)
+    const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
+    const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
+
+    // Resolve the persisted drift metadata (templateType + Connect content)
+    // from the parent's driftInfos — search the resolved parent first, then
+    // fall back across all current messages.
+    const di = parentMessages
+      .flatMap(m => m.driftInfos ?? [])
+      .find(d => d.driftChatId === driftChatId)
+      ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
+
+    const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
+    const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+
+    // A node whose only content is "Finding connections for…" is a Connect drift.
+    // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
+    const templateType = di?.templateType
+      ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
+
+    // The drift's own conversation. The chatHistory copy is a snapshot from
+    // first-message registration (often just the question — the streamed
+    // answer only lives in the temp store), so pick the FULLEST of the three
+    // sources rather than preferring chatHistory and losing the answer.
+    const driftMsgs: Message[] = [
+      chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
+      driftStore.getTempConversation(driftChatId) ?? [],
+      driftChat.messages ?? [],
+    ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
+
+    // A Connect *bridge* node is itself a focused Q&A thread ("How does X
+    // connect to Y?") — NOT the connections list. Detect its question and
+    // open the thread on its answer (connectQuestion set → chip-chat view),
+    // instead of dropping back to the cards screen.
+    const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
+    const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
+
+    // The connections-LIST drift rebuilds its chips from cached cards, and
+    // passing the (prose) conversation as messages would poison the JSON card
+    // parser — so start it clean. A bridge thread (or any non-Connect drift)
+    // keeps its real messages so the actual conversation shows.
+    const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
+
+    // Open drift panel directly — restores the already-generated content with
+    // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
+    driftStore.openDrift({
+      selectedText,
+      sourceMessageId: sourceMessageId ?? '',
+      contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
+      highlightMessageId: sourceMessageId,
+      driftChatId,
+      existingMessages: existing,
+      templateType,
+      connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
+      connectCards: cachedCards?.length ? cachedCards : undefined,
+      connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
+      ancestry: [{
+        isMainChat: true,
+        label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
+        selectedText: '',
+        sourceMessageId: '',
+        contextMessages: [],
+      }],
+    })
   }
 
   // ── On mount ────────────────────────────────────────────────────────────────
@@ -878,12 +1084,27 @@ function App() {
    * Wraps AI-suggested drift highlight phrases in a clickable span with violet
    * dotted underline. Runs as a second pass after processEntityText.
    */
-  const processHighlightsText = (children: React.ReactNode, messageId: string, highlights: string[]): React.ReactNode => {
+  // Each term is underlined only on its FIRST occurrence in the message — tapping
+  // any repeat drifts identically, so marking every mention is just noise.
+  // Dedup must be render-PURE (StrictMode double-invokes render): `priorText` is
+  // the message source before this block, so "already appeared earlier" is decided
+  // from stable data, not mutation; `seen` is fresh per call (within-block only).
+  const processHighlightsText = (children: React.ReactNode, messageId: string, highlights: string[], priorText = ''): React.ReactNode => {
     if (!highlights.length) return children
+    const seen = new Set<string>()
+
+    // Recall: has this exact term (normalized) already been drifted on, anywhere?
+    // Exact-match only — a recall mark *reopens* a specific prior drift, so the
+    // looser containment matching used by the related strip would misfire here.
+    // Excludes the chat currently on screen (reopening it would be a no-op).
+    // Render-pure: reads the memoized termIndex, no mutation.
+    const recallFor = (phrase: string): TermOccurrence | undefined =>
+      termIndex.get(normalizeTerm(phrase))?.find(o => o.driftChatId !== activeChatId)
 
     const injectHighlight = (text: string): React.ReactNode => {
       const matches: Array<{ start: number; end: number; phrase: string }> = []
       highlights.forEach(phrase => {
+        if (seen.has(phrase) || priorText.includes(phrase)) return
         const pos = text.indexOf(phrase)
         if (pos !== -1) matches.push({ start: pos, end: pos + phrase.length, phrase })
       })
@@ -892,18 +1113,31 @@ function App() {
       const out: React.ReactNode[] = []
       let cursor = 0
       for (const m of matches) {
-        if (m.start < cursor) continue
+        if (m.start < cursor || seen.has(m.phrase) || priorText.includes(m.phrase)) continue
         if (m.start > cursor) out.push(text.slice(cursor, m.start))
+        const recall = recallFor(m.phrase)
         out.push(
-          <span
-            key={`hl-${m.start}`}
-            className="drift-suggestion"
-            title="Explore ↗"
-            onClick={() => handleStartDrift(m.phrase, messageId)}
-          >
-            {m.phrase}
-          </span>
+          recall ? (
+            <span
+              key={`hl-${m.start}`}
+              className="drift-suggestion drift-suggestion-recall"
+              title={`Explored before — reopen "${recall.chatTitle}"`}
+              onClick={() => handleOpenRelatedDrift(recall)}
+            >
+              {m.phrase}
+            </span>
+          ) : (
+            <span
+              key={`hl-${m.start}`}
+              className="drift-suggestion"
+              title="Explore ↗"
+              onClick={() => handleStartDrift(m.phrase, messageId)}
+            >
+              {m.phrase}
+            </span>
+          )
         )
+        seen.add(m.phrase)
         cursor = m.end
       }
       if (cursor < text.length) out.push(text.slice(cursor))
@@ -985,6 +1219,21 @@ function App() {
     }
   }, [message])
 
+  // ── Measure composer height → CSS var (--composer-h) ────────────────────────
+  // Keeps the touch selection action bar pinned just above the composer even as
+  // it grows to multiple lines.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    const update = () => {
+      document.documentElement.style.setProperty('--composer-h', `${el.offsetHeight}px`)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // ── Scroll button visibility ────────────────────────────────────────────────
   useEffect(() => {
     const chatContainer = document.querySelector('.chat-messages-container')
@@ -1022,6 +1271,7 @@ function App() {
   // is identical to the inline implementation.
   const {
     sendMessage,
+    editAndRegenerate,
     stopGeneration,
   } = useMessageStream({
     aiSettings,
@@ -1030,6 +1280,28 @@ function App() {
     scrollToBottom,
     stripMarkdown,
   })
+
+  // ── Edit & regenerate (user messages) ──────────────────────────────────────
+  // Editing a sent question keeps the exploration continuous instead of forcing
+  // a new thread: the turn is revised in place, everything after it is
+  // discarded, and the reply regenerates through the normal send pipeline.
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const beginEdit = (messageId: string, text: string) => {
+    setEditingMessageId(messageId)
+    setEditDraft(text)
+  }
+  const cancelEdit = () => {
+    setEditingMessageId(null)
+    setEditDraft('')
+  }
+  const submitEdit = (messageId: string) => {
+    const text = editDraft.trim()
+    if (!text) return
+    setEditingMessageId(null)
+    setEditDraft('')
+    editAndRegenerate(messageId, text)
+  }
 
   // ── Settings ────────────────────────────────────────────────────────────────
   const handleSaveSettings = (newSettings: AISettings) => {
@@ -1238,7 +1510,7 @@ function App() {
 
     const kindOf = (c: ChatSession): SidebarRowKind => {
       if (c.metadata?.isDrift) return 'drift'
-      // Synthesis = a chat whose latest message is a woven "bring it home" synthesis.
+      // Synthesis = a chat whose latest message is a woven synthesis.
       if (c.lastMessage && /✦\s*Synthesis/i.test(c.lastMessage)) return 'synthesis'
       return 'chat'
     }
@@ -1325,15 +1597,18 @@ function App() {
       )}
 
       {/* Sidebar */}
-      <aside className={`
-        fixed z-20 w-[85vw] max-w-[340px] h-full bg-dark-surface/95 backdrop-blur-sm
+      <aside
+        className={`
+        fixed z-20 w-[85vw] max-w-[340px] lg:max-w-none h-full bg-dark-surface/95 backdrop-blur-sm
         border-r border-dark-border/30 flex flex-col
         transition-all duration-150 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         shadow-[inset_-8px_0_10px_-8px_rgba(0,0,0,0.4)]
-      `}>
+      `}
+        style={{ width: isLgUp ? sidebarWidth : undefined, transition: resizing ? 'none' : undefined }}
+      >
         {/* Sidebar Header */}
-        <div className="px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
+        <div className="pt-safe px-2 py-2 border-b border-dark-border/30 flex items-center gap-1.5">
           {/* Search Bar */}
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
@@ -1425,14 +1700,53 @@ function App() {
           ))}
         </div>
 
-        {/* Settings */}
-        <div className="border-t border-dark-border/30 px-2 py-1">
+        {/* Compact footer toolbar — active model (flex, tap to switch) plus
+            quick-action icons. Gallery & Help are mobile-only (desktop reaches
+            them from the header icons); Settings is always available. */}
+        <div className="border-t border-dark-border/30 px-2 py-1.5 flex items-center gap-1">
+          {/* Model — takes the remaining width, shows the active model label */}
+          <button
+            onClick={() => { setModelPickerOpen(true); uiStore.setSidebarOpen(false) }}
+            className="flex-1 min-w-0 flex items-center gap-2 px-2 h-10 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
+            title="Switch model"
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              selectedTargets[0]?.provider === 'gemini' ? 'bg-sky-400' :
+              selectedTargets[0]?.provider === 'openrouter' ? 'bg-blue-400' :
+              selectedTargets[0]?.provider === 'ollama' ? 'bg-emerald-400' : 'bg-white/40'}`}
+            />
+            <span className="flex-1 min-w-0 text-left truncate">{selectedTargets[0]?.label ?? 'Model'}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+          </button>
+
+          {/* Snippet Gallery — mobile-only (desktop uses the header icon) */}
+          <button
+            onClick={() => { uiStore.setGalleryOpen(true); uiStore.setSidebarOpen(false) }}
+            className="lg:hidden flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-cyan-400 hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Snippet Gallery"
+            aria-label="Snippet Gallery"
+          >
+            <Bookmark className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* Keyboard & tips — mobile-only (desktop uses the header icon) */}
+          <button
+            onClick={() => { setHelpOpen(true); uiStore.setSidebarOpen(false) }}
+            className="lg:hidden flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-accent-violet hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Keyboard & tips"
+            aria-label="Keyboard and tips"
+          >
+            <HelpCircle className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* Settings */}
           <button
             onClick={() => uiStore.setSettingsOpen(true)}
-            className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-dark-elevated/60 transition-colors text-sm text-text-primary"
+            className="flex items-center justify-center w-10 h-10 rounded-lg text-text-muted hover:text-text-primary hover:bg-dark-elevated/60 transition-colors flex-shrink-0"
+            title="Settings"
+            aria-label="Settings"
           >
-            <SettingsIcon className="w-4 h-4 text-text-muted" />
-            Settings
+            <SettingsIcon className="w-[18px] h-[18px]" />
           </button>
         </div>
 
@@ -1479,23 +1793,33 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* Drag to resize (desktop) */}
+        {sidebarOpen && (
+          <ResizeHandle
+            edge="right"
+            onResize={(clientX) => setSidebarWidth(clampSidebar(clientX))}
+            onResizeStart={startResize}
+            onResizeEnd={endResize}
+          />
+        )}
       </aside>
 
       {/* Main Chat Area */}
       <div
-        className={`
-          flex-1 min-w-0 flex flex-col relative
-          transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'lg:ml-[340px]' : 'ml-0'}
-        `}
-        style={{ marginRight: mainRightMargin }}
+        className="flex-1 min-w-0 flex flex-col relative"
+        style={{
+          marginLeft: mainLeftMargin,
+          marginRight: mainRightMargin,
+          transition: resizing ? 'none' : 'margin 0.3s ease-in-out',
+        }}
         onTouchStart={swipeHandlers.onTouchStart}
         onTouchEnd={swipeHandlers.onTouchEnd}
       >
         {/* Header */}
         <header className="relative z-10 border-b border-dark-border/30 backdrop-blur-sm bg-dark-bg/80 pt-safe">
           <div className="px-2 py-0.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-4 min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               {!sidebarOpen ? (
                 <>
                   <button
@@ -1582,7 +1906,7 @@ function App() {
                       >
                         {isDriftChat && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                         <span
-                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLClassName(title)}`}
+                          className={`truncate text-[13px] font-medium ${isDriftChat ? 'text-accent-violet/85' : 'text-text-secondary'} group-hover:text-text-primary transition-colors max-w-[40vw] lg:max-w-[280px] ${getRTLTruncateClassName(title)}`}
                           dir={getTextDirection(title)}
                         >
                           {title}
@@ -1628,7 +1952,7 @@ function App() {
                               {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
                               {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                               <span
-                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLClassName(crumb.label)}`}
+                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLTruncateClassName(crumb.label)}`}
                                 dir={getTextDirection(crumb.label)}
                               >
                                 {crumb.label}
@@ -1644,7 +1968,7 @@ function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               {/* Reopen last drift — one tap back to the branch you just left.
                   Hidden while the panel/tree is open (you're already there), and
                   only shown for a drift that belongs to the chat you're viewing —
@@ -1654,10 +1978,10 @@ function App() {
                   onClick={reopenLastDrift}
                   haptic={null}
                   title={`Reopen drift · "${lastDrift.selectedText}"`}
-                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full
+                  className="flex items-center gap-1.5 h-9 pl-2 pr-2.5 rounded-full min-w-0
                              border border-accent-violet/25 bg-accent-violet/[0.07]
                              text-accent-violet/85 hover:text-accent-violet hover:bg-accent-violet/[0.12]
-                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[34vw] sm:max-w-[200px]"
+                             hover:border-accent-violet/40 transition-all duration-150 group max-w-[28vw] sm:max-w-[200px]"
                 >
                   <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[12px] font-medium truncate">{lastDrift.selectedText}</span>
@@ -1667,7 +1991,7 @@ function App() {
               {/* Drift Tree Button — first-class control whenever the thread has
                   branched. Shows a label on mobile so it's unmistakably reachable. */}
               {totalDriftCount > 0 && (
-                <div className="relative">
+                <div className="relative shrink-0">
                 {mapSpotlight && (
                   <span className="absolute inset-0 rounded-full border border-accent-violet/60 animate-ping pointer-events-none" aria-hidden />
                 )}
@@ -1715,7 +2039,7 @@ function App() {
               {/* New Chat Button */}
               <button
                 onClick={createNewChat}
-                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
+                className="p-2 min-w-[44px] min-h-[44px] shrink-0 flex items-center justify-center hover:bg-dark-elevated rounded-lg transition-colors duration-75 group"
                 title="New chat (⌘⌥N)"
               >
                 <Plus className="w-4 h-4 text-text-muted group-hover:text-accent-pink transition-colors duration-75" />
@@ -1914,7 +2238,7 @@ function App() {
                               disabled={synthesizing}
                               className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
                             >
-                              <span className="text-[13px] leading-none">✦</span> Bring it home
+                              <span className="text-[13px] leading-none">✦</span> Synthesize {t.driftCount} drifts
                             </button>
                           </div>
                         ))}
@@ -1956,11 +2280,21 @@ function App() {
                 const synthSources: { term: string; chatId: string }[] = []
                 if (isSynthesis) {
                   const seenSrc = new Set<string>()
+                  // One chip per unique term: applying several lenses (Simplify /
+                  // Deep dive / Connect / Challenge) to the same term spawns separate
+                  // drift chats, which would otherwise repeat the chip. Show the term
+                  // once — the user switches lenses via the panel's "View as" bar.
+                  const seenTerm = new Set<string>()
                   const walkSrc = (pid: string) => {
                     for (const c of chatHistory) {
                       if (seenSrc.has(c.id) || !c.metadata?.isDrift || c.metadata?.parentChatId !== pid) continue
                       seenSrc.add(c.id)
-                      synthSources.push({ term: (c.metadata?.selectedText || c.title || 'Drift').trim(), chatId: c.id })
+                      const term = (c.metadata?.selectedText || c.title || 'Drift').trim()
+                      const key = term.toLowerCase()
+                      if (!seenTerm.has(key)) {
+                        seenTerm.add(key)
+                        synthSources.push({ term, chatId: c.id })
+                      }
                       walkSrc(c.id)
                     }
                   }
@@ -1973,14 +2307,15 @@ function App() {
                   <div
                     className={`max-w-5xl mx-auto ${msg.isUser ? 'mt-6' : 'mb-1'} ${isDriftMessage ? 'drift-promoted' : ''} ${isDriftMessage && justPromotedChatId && msg.driftPushMetadata?.driftChatId === justPromotedChatId ? 'drift-promoted-arrive' : ''}`}
                     data-drift-promoted={isDriftMessage ? 'true' : undefined}
+                    data-promoted-chat={isDriftMessage ? msg.driftPushMetadata?.driftChatId : undefined}
                     key={msg.id}
                   >
                     {/* Drift group header */}
                     {isFirstDriftMessage && hasMultipleDriftMessages && (
                       <div className="px-6 mb-2">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 rounded-full bg-dark-elevated/60 border border-dark-border/50 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                            Drift
+                          <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${pushedLensTag(msg.driftPushMetadata?.templateType).chip}`}>
+                            {pushedLensTag(msg.driftPushMetadata?.templateType).label}
                           </span>
                           {msg.driftPushMetadata?.selectedText && (
                             <span className="text-xs text-text-muted italic">
@@ -1992,16 +2327,12 @@ function App() {
                     )}
 
                     <div className={`px-5 ${isDriftMessage && hasMultipleDriftMessages ? 'pl-8 border-l border-dark-border/40' : ''}`}>
-                      {isPlainAI && msg.modelTag && (
-                        <div className="text-[11px] text-text-secondary mb-1 mt-1">{msg.modelTag}</div>
-                      )}
                       {/* Subtle drift origin tag — shown on every non-user pushed message */}
                       {isDriftMessage && !msg.isUser && (
                         <div className="flex items-center gap-1.5 mb-1.5 mt-0.5">
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md
-                            bg-accent-violet/[0.08] border border-accent-violet/20
-                            text-[9px] font-semibold text-accent-violet/80 tracking-wide uppercase">
-                            ↗ drift
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border
+                            text-[9px] font-semibold tracking-wide uppercase ${pushedLensTag(msg.driftPushMetadata?.templateType).chip}`}>
+                            {pushedLensTag(msg.driftPushMetadata?.templateType).arrow} {pushedLensTag(msg.driftPushMetadata?.templateType).label}
                           </span>
                           {(isSinglePushMessage || isFirstDriftMessage) && msg.driftPushMetadata?.selectedText && (
                             <span className="text-[11px] text-text-muted italic truncate max-w-[260px]">
@@ -2022,6 +2353,18 @@ function App() {
                            per-index delay. */
                         style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
                       >
+                        {/* Edit & regenerate — user turns only (not drift-pushed ones).
+                            Sits beside the bubble; revealed on hover/focus. */}
+                        {msg.isUser && !msg.isDriftPush && !isTyping && editingMessageId !== msg.id && (
+                          <button
+                            onClick={() => beginEdit(msg.id, msg.text)}
+                            className="self-center me-2 p-1.5 rounded-lg text-text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-accent-violet hover:bg-accent-violet/10 transition-all duration-200"
+                            title="Edit & regenerate"
+                            aria-label="Edit message and regenerate"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <div
                           className={`
                             ${isSynthesis
@@ -2041,6 +2384,10 @@ function App() {
                           `}
                           data-message-id={msg.id}
                           onClick={() => {
+                            // Don't hijack a text selection — let users highlight pushed
+                            // drift text and use the same drift/save tooltip on it.
+                            const sel = window.getSelection()
+                            if (sel && !sel.isCollapsed && sel.toString().trim()) return
                             if (isDriftMessage && msg.driftPushMetadata) {
                               if (msg.driftPushMetadata.wasSavedAsChat && msg.driftPushMetadata.driftChatId) {
                                 const driftChat = chatHistory.find(c => c.id === msg.driftPushMetadata?.driftChatId)
@@ -2104,10 +2451,10 @@ function App() {
 
                                 if (needsSwitch) {
                                   setTimeout(() => {
-                                    handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                    handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                   }, 200)
                                 } else {
-                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                 }
                               }
                             }
@@ -2161,7 +2508,7 @@ function App() {
                                     driftStore.saveTempConversation(driftChatId, finalDriftConversation)
                                   }
 
-                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation)
+                                  handleStartDrift(msg.driftPushMetadata!.selectedText, originalSourceId, driftChatId, finalDriftConversation, msg.driftPushMetadata!.templateType)
                                 }
                               }}
                               title={msg.driftPushMetadata?.wasSavedAsChat ? "Click to open drift conversation" : "Click to view full drift"}
@@ -2188,12 +2535,45 @@ function App() {
 
                           {/* Message content */}
                           {msg.isUser ? (
+                            editingMessageId === msg.id ? (
+                              <div className="w-full min-w-[260px] sm:min-w-[320px]">
+                                <textarea
+                                  value={editDraft}
+                                  onChange={(e) => setEditDraft(e.target.value)}
+                                  dir={getTextDirection(editDraft || msg.text)}
+                                  className={`w-full bg-white/10 text-white placeholder-white/50 rounded-lg p-2 text-[14px] leading-6 font-medium resize-none focus:outline-none focus:ring-1 focus:ring-white/40 ${getRTLClassName(editDraft || msg.text)}`}
+                                  rows={Math.min(6, Math.max(2, editDraft.split('\n').length))}
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(msg.id) }
+                                    if (e.key === 'Escape') cancelEdit()
+                                  }}
+                                />
+                                <div className="flex justify-end items-center gap-2 mt-1.5">
+                                  <span className="text-[10px] text-white/55 me-auto">Replies after this point will be regenerated</span>
+                                  <button
+                                    onClick={cancelEdit}
+                                    className="text-[11px] px-2.5 py-1 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors duration-200"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => submitEdit(msg.id)}
+                                    disabled={!editDraft.trim()}
+                                    className="text-[11px] px-2.5 py-1 rounded-md bg-white/15 hover:bg-white/25 text-white font-semibold transition-colors duration-200 disabled:opacity-40"
+                                  >
+                                    Regenerate
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
                             <p
                               className={`text-[14px] leading-6 font-medium ${getRTLClassName(msg.text)}`}
                               dir={getTextDirection(msg.text)}
                             >
                               {msg.text}
                             </p>
+                            )
                           ) : msg.driftInfos && msg.driftInfos.length > 0 ? (
                             <div
                               className={`text-[13px] leading-6 ${getRTLClassName(msg.text)} ${streamingMessageId === msg.id ? 'drift-text-shimmer' : ''}`}
@@ -2213,12 +2593,22 @@ function App() {
                                 remarkPlugins={[remarkGfm]}
                                 components={(() => {
                                   let liCounter = 0
-                                  const processDriftText = (children: any): React.ReactNode => {
+                                  // Source the markdown renders from — block node offsets index into it.
+                                  // Heading lines blanked (length kept) so a heading mention doesn't
+                                  // suppress the first highlightable occurrence in the body.
+                                  const src = sanitizeText(msg.text)
+                                    .replace(/^[ \t]{0,3}#{1,6}[^\n]*/gm, (m) => ' '.repeat(m.length))
+                                  // Each drifted term links only on its first occurrence in the message.
+                                  // Render-pure: `priorText` (message before this block) decides "appeared
+                                  // earlier"; `usedInBlock` is fresh per call (within-block dedup only).
+                                  const processDriftText = (children: any, priorText = ''): React.ReactNode => {
                                     const drifts = msg.driftInfos!
+                                    const usedInBlock = new Set<string>()
 
                                     const injectIntoString = (text: string): React.ReactNode => {
                                       const matches: Array<{ start: number; end: number; drift: typeof drifts[0]; idx: number }> = []
                                       drifts.forEach((drift, idx) => {
+                                        if (usedInBlock.has(drift.selectedText) || priorText.includes(drift.selectedText)) return
                                         const pos = text.indexOf(drift.selectedText)
                                         if (pos !== -1) matches.push({ start: pos, end: pos + drift.selectedText.length, drift, idx })
                                       })
@@ -2227,7 +2617,7 @@ function App() {
                                       const out: React.ReactNode[] = []
                                       let cursor = 0
                                       for (const m of matches) {
-                                        if (m.start < cursor) continue
+                                        if (m.start < cursor || usedInBlock.has(m.drift.selectedText) || priorText.includes(m.drift.selectedText)) continue
                                         if (m.start > cursor) out.push(text.slice(cursor, m.start))
                                         out.push(
                                           <button
@@ -2257,6 +2647,7 @@ function App() {
                                             {m.drift.selectedText}
                                           </button>
                                         )
+                                        usedInBlock.add(m.drift.selectedText)
                                         cursor = m.end
                                       }
                                       if (cursor < text.length) out.push(text.slice(cursor))
@@ -2280,16 +2671,17 @@ function App() {
                                   // Unexplored suggestions: highlights not yet drifted on
                                   const exploredTexts = new Set(msg.driftInfos!.map(d => d.selectedText))
                                   const unexploredHl = (msg.suggestedHighlights ?? []).filter(h => !exploredTexts.has(h))
-                                  const procWithBoth = (children: any): React.ReactNode => {
-                                    const withDrifts = processDriftText(children)
-                                    return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl) : withDrifts
+                                  const procWithBoth = (children: any, node?: any): React.ReactNode => {
+                                    const prior = src.slice(0, node?.position?.start?.offset ?? 0)
+                                    const withDrifts = processDriftText(children, prior)
+                                    return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl, prior) : withDrifts
                                   }
                                   return {
-                                    p: ({ children }) => <p className="mb-2">{procWithBoth(children)}</p>,
-                                    td: ({ children }) => <td>{procWithBoth(children)}</td>,
-                                    th: ({ children }) => <th>{procWithBoth(children)}</th>,
-                                    li: ({ children }) => {
-                                      const processed = procWithBoth(children)
+                                    p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
+                                    td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
+                                    th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
+                                    li: ({ node, children }: any) => {
+                                      const processed = procWithBoth(children, node)
                                       const anchorId = getAnchorId(msg.id, liCounter++)
                                       return <li><span id={anchorId}>{processed}</span></li>
                                     }
@@ -2315,7 +2707,15 @@ function App() {
                                     {synthSources.slice(0, 8).map((s) => (
                                       <button
                                         key={s.chatId}
-                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); switchChat(s.chatId) }}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          haptics.selection()
+                                          // Re-open the already-explored drift in the side
+                                          // panel — shows what was already there, no new call.
+                                          const driftChat = chatHistory.find(c => c.id === s.chatId)
+                                          if (driftChat) openExistingDrift(driftChat)
+                                          else switchChat(s.chatId)
+                                        }}
                                         dir={getTextDirection(s.term)}
                                         className="synthesis-source-chip"
                                         title={`Open drift: ${s.term}`}
@@ -2351,18 +2751,24 @@ function App() {
                                 components={(() => {
                                   let liCounter = 0
                                   const hl = msg.suggestedHighlights ?? []
-                                  const proc = (children: any) => {
+                                  // Source the markdown is rendered from — block node offsets index into
+                                  // it. Heading lines are blanked (length preserved so offsets stay valid)
+                                  // so a heading mention doesn't suppress the first highlightable one.
+                                  const src = sanitizeText(isSynthesis ? synthDisplay : msg.text)
+                                    .replace(/^[ \t]{0,3}#{1,6}[^\n]*/gm, (m) => ' '.repeat(m.length))
+                                  const proc = (children: any, node?: any) => {
                                     const base = processEntityText(children, msg.id)
-                                    return hl.length ? processHighlightsText(base, msg.id, hl) : base
+                                    const prior = src.slice(0, node?.position?.start?.offset ?? 0)
+                                    return hl.length ? processHighlightsText(base, msg.id, hl, prior) : base
                                   }
                                   return {
-                                    p: ({ children }: any) => <p className="mb-2">{proc(children)}</p>,
-                                    li: ({ children }: any) => {
+                                    p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
+                                    li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li><span id={anchorId}>{proc(children)}</span></li>
+                                      return <li><span id={anchorId}>{proc(children, node)}</span></li>
                                     },
-                                    th: ({ children }: any) => <th>{proc(children)}</th>,
-                                    td: ({ children }: any) => <td>{proc(children)}</td>,
+                                    th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
+                                    td: ({ node, children }: any) => <td>{proc(children, node)}</td>,
                                     br: () => <br />,
                                     table: ({ children }: any) => (
                                       <div className="overflow-x-auto my-4">
@@ -2408,8 +2814,16 @@ function App() {
                               "where do I go next" is explicit, not just inline. */}
                           {!msg.isUser && (() => {
                             const explored = new Set((msg.driftInfos ?? []).map(d => d.selectedText))
-                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 4)
+                            const nextTerms = (msg.suggestedHighlights ?? []).filter(h => h && !explored.has(h)).slice(0, 5)
                             if (nextTerms.length === 0) return null
+                            // Recall-aware chips: a term already drifted on (in any
+                            // chat) reopens that exploration instead of starting a
+                            // duplicate. Exact normalized match only — the click
+                            // navigates to a specific drift, so no containment
+                            // guessing. Cyan = link to existing knowledge; violet
+                            // stays "new exploration".
+                            const recallFor = (term: string) =>
+                              termIndex.get(normalizeTerm(term))?.find(o => o.driftChatId !== activeChatId)
                             return (
                               <div className="mt-3.5">
                                 <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent-violet/55">
@@ -2417,22 +2831,42 @@ function App() {
                                   Drift into
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                  {nextTerms.map((term) => (
-                                    <button
-                                      key={term}
-                                      onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
-                                      className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
-                                        text-[12.5px] font-medium leading-none text-accent-violet/90
-                                        border border-accent-violet/25 bg-accent-violet/[0.07]
-                                        shadow-[0_1px_3px_rgba(0,0,0,0.15)]
-                                        hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
-                                        active:scale-[0.97] transition-all duration-150"
-                                      title={`Drift into "${term}"`}
-                                    >
-                                      <span className="truncate">{term}</span>
-                                      <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
-                                    </button>
-                                  ))}
+                                  {nextTerms.map((term) => {
+                                    const recall = recallFor(term)
+                                    if (recall) return (
+                                      <button
+                                        key={term}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); handleOpenRelatedDrift(recall) }}
+                                        dir={getTextDirection(term)}
+                                        className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                          text-[12.5px] font-medium leading-none text-cyan-400/90
+                                          border border-cyan-400/25 bg-cyan-400/[0.07]
+                                          shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                          hover:bg-cyan-400/[0.14] hover:border-cyan-400/50 hover:text-cyan-400
+                                          active:scale-[0.97] transition-all duration-150"
+                                        title={`Explored before — reopen "${recall.chatTitle}"`}
+                                      >
+                                        <span className="truncate">{term}</span>
+                                        <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-cyan-400/45 group-hover:text-cyan-400/90 transition-colors" />
+                                      </button>
+                                    )
+                                    return (
+                                      <button
+                                        key={term}
+                                        onClick={(e) => { e.stopPropagation(); haptics.selection(); handleStartDrift(term, msg.id) }}
+                                        className="group inline-flex items-center gap-1.5 max-w-full pl-3 pr-2 py-1.5 rounded-full
+                                          text-[12.5px] font-medium leading-none text-accent-violet/90
+                                          border border-accent-violet/25 bg-accent-violet/[0.07]
+                                          shadow-[0_1px_3px_rgba(0,0,0,0.15)]
+                                          hover:bg-accent-violet/[0.14] hover:border-accent-violet/50 hover:text-accent-violet
+                                          active:scale-[0.97] transition-all duration-150"
+                                        title={`Drift into "${term}"`}
+                                      >
+                                        <span className="truncate">{term}</span>
+                                        <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 text-accent-violet/45 group-hover:text-accent-violet/90 transition-colors" />
+                                      </button>
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )
@@ -2533,7 +2967,7 @@ function App() {
         )}
 
         {/* Input area */}
-        <div style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
+        <div ref={composerRef} style={{ paddingBottom: keyboardVisible ? '0px' : 'env(safe-area-inset-bottom, 8px)', transform: 'translateY(calc(-1 * var(--kb-h, 0px)))', transition: 'transform 250ms cubic-bezier(0.36, 0.66, 0.04, 1)' }} className={`absolute bottom-0 left-0 right-0 z-10 px-4 pt-2 w-full box-border `}>
           <div className="max-w-4xl mx-auto">
             {/* First-run hint — teaches the drift gesture when a reply is on screen. */}
             {!seenDriftHint && !driftOpen && !knowledgeGraphOpen && messages.some(m => !m.isUser && !!m.text) && (
@@ -2543,13 +2977,6 @@ function App() {
                 <button onClick={markDriftHint} aria-label="Dismiss tip" className="text-text-muted/60 hover:text-text-muted shrink-0 p-0.5"><X className="w-3.5 h-3.5" /></button>
               </div>
             )}
-            {/* Mobile-only: model pill row above textarea */}
-            <div className="lg:hidden">
-              <ModelPillRow
-                selectedTargets={selectedTargets}
-                onOpenPicker={() => setModelPickerOpen(true)}
-              />
-            </div>
             <div className="relative">
               <textarea
                 ref={textareaRef}
@@ -2589,7 +3016,7 @@ function App() {
                 {voiceInput.isSupported && !message.trim() && !voiceInput.isListening && !isTyping && (
                   <button
                     onClick={voiceInput.startListening}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/8 transition-all active:scale-90"
                     title="Voice input"
                   >
                     <Mic className="w-4 h-4" />
@@ -2600,7 +3027,7 @@ function App() {
                 {isTyping && (
                   <button
                     onClick={stopGeneration}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center bg-white/10 border border-white/20 text-text-muted hover:text-text-primary transition-all active:scale-90"
                     title="Stop generating"
                   >
                     <Square className="w-3.5 h-3.5" fill="currentColor" />
@@ -2611,7 +3038,7 @@ function App() {
                 {voiceInput.isListening && (
                   <button
                     onClick={voiceInput.stopListening}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
+                    className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center bg-red-500/15 border border-red-500/30 text-red-400 animate-pulse active:scale-90"
                     title="Stop listening"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -2624,7 +3051,7 @@ function App() {
                     onClick={() => sendMessage()}
                     disabled={!message.trim() && !voiceInput.isListening}
                     className={`
-                      w-9 h-9 rounded-xl flex items-center justify-center
+                      w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center
                       transition-all duration-150 active:scale-90
                       ${message.trim() || voiceInput.isListening
                         ? 'bg-gradient-to-br from-accent-pink to-accent-violet text-white shadow-lg shadow-accent-violet/20'
@@ -2680,6 +3107,11 @@ function App() {
       {/* Drift Panel */}
       <DriftPanel
         isOpen={driftOpen}
+        width={isLgUp ? driftWidth : undefined}
+        onResize={(clientX) => setDriftWidth(clampDrift(window.innerWidth - clientX))}
+        onResizeStart={startResize}
+        onResizeEnd={endResize}
+        resizing={resizing}
         onClose={handleCloseDrift}
         selectedText={driftContext?.selectedText || ''}
         contextMessages={driftContext?.contextMessages || []}
@@ -2756,7 +3188,11 @@ function App() {
           if (has('openrouter')) return 'openrouter'
           return 'gemini'
         })()}
-        onExpandedChange={(expanded) => driftStore.expandDrift(expanded)}
+        onExpandedChange={(expanded) => {
+          driftStore.expandDrift(expanded)
+          // The expand/collapse button doubles as a quick width preset alongside drag.
+          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 450)
+        }}
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
         templateType={driftContext?.templateType}
@@ -2823,6 +3259,7 @@ function App() {
         currentDriftChatId={driftContext?.driftChatId}
         onNavigateToSibling={navigateToSiblingDrift}
         onSwitchLens={handleSwitchLens}
+        exploredLenses={exploredLenses}
       />
 
       {/* Settings Modal */}
@@ -2868,101 +3305,20 @@ function App() {
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
           activeChatId={activeChatId}
-          expanded={mapExpanded}
-          onToggleExpand={() => setMapExpanded(v => !v)}
-          onClose={() => { setMapExpanded(false); setKnowledgeGraphOpen(false) }}
+          fullscreen={mapFullscreen}
+          onToggleFullscreen={() => setMapFullscreen(v => !v)}
+          width={mapWidth}
+          onResize={(clientX) => setMapWidth(clampMap(window.innerWidth - clientX))}
+          onResizeStart={startResize}
+          onResizeEnd={endResize}
+          onClose={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false) }}
           onSwitchChat={switchChat}
           onScrollToMessage={(msgId) => {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)
             el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
             setKnowledgeGraphOpen(false)
           }}
-          onOpenDrift={(driftChat) => {
-            const sourceMessageId = driftChat.metadata?.sourceMessageId
-            const parentChatId = driftChat.metadata?.parentChatId
-            const selectedText = driftChat.metadata?.selectedText ?? ''
-            const driftChatId = driftChat.id
-
-            // Switch to the parent chat if needed
-            if (parentChatId && parentChatId !== activeChatId) {
-              switchChat(parentChatId)
-            }
-
-            // Scroll to the source anchor message
-            if (sourceMessageId) {
-              requestAnimationFrame(() => {
-                setTimeout(() => {
-                  const el = document.querySelector(`[data-message-id="${sourceMessageId}"]`)
-                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                }, 150)
-              })
-            }
-
-            // Get context from parent chat (use the chat we're switching to)
-            const parentMessages = chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.messages ?? messages
-            const msgIdx = sourceMessageId ? parentMessages.findIndex(m => m.id === sourceMessageId) : -1
-
-            // Resolve the persisted drift metadata (templateType + Connect content)
-            // from the parent's driftInfos — search the resolved parent first, then
-            // fall back across all current messages.
-            const di = parentMessages
-              .flatMap(m => m.driftInfos ?? [])
-              .find(d => d.driftChatId === driftChatId)
-              ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
-
-            const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
-            const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
-
-            // A node whose only content is "Finding connections for…" is a Connect drift.
-            // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
-            const templateType = di?.templateType
-              ?? ((cachedCards?.length || (cachedAnswers && Object.keys(cachedAnswers).length)) ? 'connect' : undefined)
-
-            // The drift's own conversation. The chatHistory copy is a snapshot from
-            // first-message registration (often just the question — the streamed
-            // answer only lives in the temp store), so pick the FULLEST of the three
-            // sources rather than preferring chatHistory and losing the answer.
-            const driftMsgs: Message[] = [
-              chatHistory.find(c => c.id === driftChatId)?.messages ?? [],
-              driftStore.getTempConversation(driftChatId) ?? [],
-              driftChat.messages ?? [],
-            ].reduce((a, b) => (b.length > a.length ? b : a), [] as Message[])
-
-            // A Connect *bridge* node is itself a focused Q&A thread ("How does X
-            // connect to Y?") — NOT the connections list. Detect its question and
-            // open the thread on its answer (connectQuestion set → chip-chat view),
-            // instead of dropping back to the cards screen.
-            const bridgeUserMsg = driftMsgs.find(m => m.isUser && (/connect(?:s|ed)?\s+to\s+.+/i.test(m.text) || /קשור\s+ל-?\s*.+/.test(m.text)))
-            const isConnectBridge = templateType === 'connect' && !!bridgeUserMsg
-
-            // The connections-LIST drift rebuilds its chips from cached cards, and
-            // passing the (prose) conversation as messages would poison the JSON card
-            // parser — so start it clean. A bridge thread (or any non-Connect drift)
-            // keeps its real messages so the actual conversation shows.
-            const existing: Message[] = (templateType === 'connect' && !isConnectBridge) ? [] : driftMsgs
-
-            // Open drift panel directly — restores the already-generated content with
-            // no new LLM/API call (regular: existingMessages; Connect: cards/answers).
-            driftStore.openDrift({
-              selectedText,
-              sourceMessageId: sourceMessageId ?? '',
-              contextMessages: msgIdx >= 0 ? parentMessages.slice(0, msgIdx + 1) : [],
-              highlightMessageId: sourceMessageId,
-              driftChatId,
-              existingMessages: existing,
-              templateType,
-              connectQuestion: isConnectBridge ? bridgeUserMsg!.text : undefined,
-              connectCards: cachedCards?.length ? cachedCards : undefined,
-              connectAnswers: cachedAnswers && Object.keys(cachedAnswers).length ? cachedAnswers : undefined,
-              ancestry: [{
-                isMainChat: true,
-                label: chatHistory.find(c => c.id === (parentChatId ?? activeChatId))?.title || 'Chat',
-                selectedText: '',
-                sourceMessageId: '',
-                contextMessages: [],
-              }],
-            })
-          }}
+          onOpenDrift={openExistingDrift}
           getTempMessages={(id) => {
             const temp = driftStore.getTempConversation(id)
             if (temp && temp.length) return temp

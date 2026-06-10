@@ -472,7 +472,7 @@ export function useDriftActions({
     chatStore.setMessages(updatedMessages)
   }
 
-  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => {
+  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => {
     const pushCallId = Math.random().toString(36).substring(7)
     console.log(`[PUSH ${pushCallId}] handlePushDriftToMain called`)
 
@@ -537,7 +537,8 @@ export function useDriftActions({
         userQuestion,
         driftChatId: actualDriftChatId,
         originSide,
-        originModelTag
+        originModelTag,
+        templateType
       },
       modelTag: originModelTag
     }
@@ -546,7 +547,7 @@ export function useDriftActions({
       if (msg.driftInfos?.some(d => d.selectedText === selectedText)) {
         const existingDriftIndex = msg.driftInfos.findIndex(d => d.selectedText === selectedText)
         const updatedDriftInfos = [...msg.driftInfos]
-        updatedDriftInfos[existingDriftIndex] = { selectedText, driftChatId: actualDriftChatId }
+        updatedDriftInfos[existingDriftIndex] = { ...updatedDriftInfos[existingDriftIndex], selectedText, driftChatId: actualDriftChatId, templateType }
         return { ...msg, hasDrift: true, driftInfos: updatedDriftInfos }
       }
       if (msg.id === originalSourceId && !msg.isDriftPush) {
@@ -555,7 +556,7 @@ export function useDriftActions({
           hasDrift: true,
           driftInfos: [
             ...(msg.driftInfos || []),
-            { selectedText, driftChatId: actualDriftChatId }
+            { selectedText, driftChatId: actualDriftChatId, templateType }
           ]
         }
       }
@@ -566,7 +567,7 @@ export function useDriftActions({
             hasDrift: true,
             driftInfos: [
               ...(msg.driftInfos || []),
-              { selectedText, driftChatId: actualDriftChatId }
+              { selectedText, driftChatId: actualDriftChatId, templateType }
             ]
           }
         }
@@ -591,7 +592,8 @@ export function useDriftActions({
         userQuestion,
         driftChatId: actualDriftChatId,
         originSide,
-        originModelTag
+        originModelTag,
+        templateType
       }
     }))
 
@@ -611,10 +613,14 @@ export function useDriftActions({
     const promoteLabel = selectedText.length > 28 ? selectedText.slice(0, 28) + '…' : selectedText
     toast.success(`Promoted "${promoteLabel}" to the main thread`)
 
-    // Trigger a one-time settle-in arrival for the freshly-promoted messages.
-    setJustPromotedChatId(actualDriftChatId)
+    // Mark this drift as freshly promoted. On desktop the main chat is already
+    // visible so the settle-in arrival plays now; on mobile the panel covers the
+    // screen, so App's reveal effect waits until the panel closes, then scrolls
+    // to the promoted block and gives it a sustained "landed here" glow. The id
+    // is cleared by that reveal (or when the next push overwrites it), not on a
+    // short timer — otherwise the mobile indication would expire behind the panel.
     if (justPromotedTimerRef.current) clearTimeout(justPromotedTimerRef.current)
-    justPromotedTimerRef.current = setTimeout(() => setJustPromotedChatId(null), 1200)
+    setJustPromotedChatId(actualDriftChatId)
   }
 
   const handleSavePushedDriftAsChat = (msg: Message) => {

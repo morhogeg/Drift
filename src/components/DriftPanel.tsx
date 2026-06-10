@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, Megaphone, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
-  CONNECT_TYPES,
   connectKind,
   driftLabelsFor,
 } from '../lib/driftPanel'
 import type { AncestryEntry } from '../types/chat'
-import type { TermOccurrence } from '../lib/termIndex'
+import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
 import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
 import { useDriftPanelActions } from '../hooks/useDriftPanelActions'
@@ -19,6 +18,7 @@ import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { Stagger, staggerChild } from './motion'
 import { motion } from 'framer-motion'
+import ResizeHandle from './ResizeHandle'
 
 export interface Message {
   id: string
@@ -42,7 +42,7 @@ interface DriftPanelProps {
   highlightMessageId?: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string) => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => void
   onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
   onUndoPushToMain?: (sourceMessageId: string) => void
   onUndoSaveAsChat?: (chatId: string) => void
@@ -57,6 +57,14 @@ interface DriftPanelProps {
   // Optional: allow running compare against multiple targets from main
   selectedTargets?: Array<{ provider: 'openrouter' | 'ollama' | 'gemini'; key: string; label: string }>
   onExpandedChange?: (expanded: boolean) => void
+  /** Desktop drag-to-resize: explicit panel width (px). Undefined on mobile (full-screen sheet). */
+  width?: number
+  /** Desktop drag-to-resize: fires on every pointer move during a drag, with the pointer's viewport X. */
+  onResize?: (clientX: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
+  /** True while a panel is being dragged — suppresses the width transition. */
+  resizing?: boolean
   /** Breadcrumb trail from the root (main chat) up to (but not including) this drift. */
   ancestry?: AncestryEntry[]
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
@@ -89,6 +97,10 @@ interface DriftPanelProps {
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
   onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
+  /** Lens keys ('drift'|'simplify'|'research'|'connect'|'challenge') that already have
+   *  generated content for this term — marked in the "View as" bar so the user can tell
+   *  which lenses are instant (already explored) vs. which would fire a fresh API call. */
+  exploredLenses?: Set<string>
 }
 
 export interface SiblingDrift {
@@ -100,6 +112,11 @@ export interface SiblingDrift {
 
 export default function DriftPanel({
   isOpen,
+  width,
+  onResize,
+  onResizeStart,
+  onResizeEnd,
+  resizing,
   onClose,
   selectedText,
   contextMessages,
@@ -129,10 +146,12 @@ export default function DriftPanel({
   onConnectStateChange,
   onConnectAnswerSaved,
   relatedDrifts,
+  onOpenRelatedDrift,
   siblingDrifts,
   currentDriftChatId,
   onNavigateToSibling,
   onSwitchLens,
+  exploredLenses,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -153,6 +172,9 @@ export default function DriftPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
+  // Click-and-drag horizontal scroll for the sibling term strip. `dragged` lets a
+  // drag suppress the chip's click so dragging never accidentally switches drifts.
+  const stripDrag = useRef({ active: false, startX: 0, startScroll: 0, dragged: false })
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
@@ -166,7 +188,9 @@ export default function DriftPanel({
   // thread but driftChatId has already flipped — the old conversation is never
   // written under the new thread's key (which would lose it on return: Bug 5).
   const messagesThreadRef = useRef<string | undefined>(driftChatId)
-  const [isComparing, setIsComparing] = useState(false)
+  // `isComparing` was only read by the removed multi-model Compare button; the
+  // stream hook still needs the setter, so keep the setter and drop the binding.
+  const [, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
@@ -208,7 +232,7 @@ export default function DriftPanel({
   })
 
   // Drift conversation send / stream pipeline (owns the abort controllers).
-  const { sendMessage, retryLastMessage, stopGeneration, handleCompareAcrossModels } = useDriftMessageStream({
+  const { sendMessage, retryLastMessage, stopGeneration } = useDriftMessageStream({
     message,
     driftOnlyMessages,
     isTyping,
@@ -247,6 +271,7 @@ export default function DriftPanel({
     sourceMessageId,
     parentChatId,
     driftChatId,
+    templateType,
     onPushToMain,
     onSaveAsChat,
     onUpdatePushedDriftSaveStatus,
@@ -475,13 +500,24 @@ export default function DriftPanel({
   }, [isOpen, highlightMessageId, driftOnlyMessages])
 
   return (
-    <div className={`
+    <div
+      className={`
       fixed inset-0 z-30
       lg:inset-auto lg:top-0 lg:right-0 lg:h-full lg:z-20
-      ${isExpanded ? 'lg:w-[70vw] lg:max-w-[920px]' : 'lg:w-[450px]'}
       transition-all duration-300 ease-in-out
       ${isOpen ? 'translate-x-0' : 'translate-x-full'}
-    `}>
+    `}
+      style={{ width, transition: resizing ? 'none' : undefined }}
+    >
+      {/* Drag to resize (desktop) */}
+      {onResize && (
+        <ResizeHandle
+          edge="left"
+          onResize={onResize}
+          onResizeStart={onResizeStart}
+          onResizeEnd={onResizeEnd}
+        />
+      )}
       {/* Glow blooming behind the panel as it unfolds — keyed to retrigger on
           open and on branching into a new topic. */}
       <div
@@ -611,18 +647,6 @@ export default function DriftPanel({
                       {pushedToMain ? <Undo2 className="w-[17px] h-[17px]" /> : <Upload className="w-[17px] h-[17px]" />}
                     </button>
 
-                    {selectedTargets && selectedTargets.length > 1 && (
-                      <button
-                        onClick={handleCompareAcrossModels}
-                        disabled={isTyping || isComparing || ((message.trim().length === 0) && !driftOnlyMessages.some(m => m.isUser))}
-                        className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-90 shrink-0
-                          ${isComparing ? 'text-accent-violet bg-accent-violet/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
-                        title="Compare across models"
-                      >
-                        <Megaphone className="w-[17px] h-[17px]" />
-                      </button>
-                    )}
-
                     <button
                       onClick={handleSaveAsChat}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 active:scale-90 shrink-0
@@ -647,6 +671,27 @@ export default function DriftPanel({
           })()}
         </header>
 
+        {/* Push confirmation — on mobile the panel covers the whole screen, so a
+            corner toast is easy to miss. This makes "it landed in main" explicit
+            and gives a one-tap "View" that closes the panel and reveals where the
+            content was added. */}
+        {pushedToMain && !isPushing && (
+          <button
+            onClick={() => onClose(driftOnlyMessages)}
+            className="flex items-center gap-2 px-3 py-2 w-full text-left shrink-0
+                       border-b border-accent-violet/20 bg-accent-violet/[0.07]
+                       hover:bg-accent-violet/[0.11] transition-colors group animate-fade-in"
+          >
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent-violet/20 shrink-0">
+              <Check className="w-3 h-3 text-accent-violet" />
+            </span>
+            <span className="text-[12.5px] text-text-secondary flex-1 leading-snug">Added to the main thread</span>
+            <span className="text-[12px] font-semibold text-accent-violet group-hover:text-accent-pink inline-flex items-center gap-0.5 shrink-0 transition-colors">
+              View <ArrowUpRight className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        )}
+
         {/* "View as" lens switcher — re-view the same term through a different lens
             without returning to the chat. Each lens keeps its own thread. Hidden in
             Connect's bridge sub-mode (you're inside an answer there). */}
@@ -654,22 +699,46 @@ export default function DriftPanel({
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
             {([
-              { tpl: undefined, label: 'Drift' },
-              { tpl: 'simplify', label: 'Simplify' },
-              { tpl: 'research', label: 'Deep dive' },
-              { tpl: 'connect', label: 'Connect' },
-              { tpl: 'challenge', label: 'Challenge' },
+              { tpl: undefined, label: 'Drift', key: 'drift' },
+              { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
+              { tpl: 'research', label: 'Deep dive', key: 'research' },
+              { tpl: 'connect', label: 'Connect', key: 'connect' },
+              { tpl: 'challenge', label: 'Challenge', key: 'challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
+              // Already-explored lenses (content exists → instant, no API call). The
+              // active lens is obviously explored; mark the OTHERS so the user knows
+              // which taps are free vs. which would fire a fresh generation.
+              const explored = !active && !!exploredLenses?.has(l.key)
+              // Each lens's signature hue — used filled when active, as a small dot
+              // when explored-but-inactive. Connect cyan matches the Connections page.
+              const activeTint: Record<string, string> = {
+                drift:     'bg-accent-violet/20 text-accent-violet border-accent-violet/40',
+                simplify:  'bg-amber-500/15 text-amber-500 border-amber-500/40',
+                research:  'bg-blue-500/15 text-blue-500 border-blue-500/40',
+                connect:   'bg-accent-discovery/15 text-accent-discovery border-accent-discovery/45',
+                challenge: 'bg-rose-500/15 text-rose-500 border-rose-500/40',
+              }
+              const dotTint: Record<string, string> = {
+                drift:     'bg-accent-violet',
+                simplify:  'bg-amber-500',
+                research:  'bg-blue-500',
+                connect:   'bg-accent-discovery',
+                challenge: 'bg-rose-500',
+              }
               return (
                 <button
                   key={l.label}
                   onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
-                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none transition-colors
+                  title={explored ? `${l.label} — already explored` : undefined}
+                  className={`shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
                     ${active
-                      ? 'bg-accent-violet/20 text-accent-violet border border-accent-violet/40'
-                      : 'text-text-muted border border-dark-border hover:text-text-primary hover:border-dark-border'}`}
+                      ? activeTint[l.key]
+                      : explored
+                        ? 'text-text-secondary border-dark-border/80 hover:text-text-primary'
+                        : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
                 >
+                  {explored && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotTint[l.key]}`} />}
                   {l.label}
                 </button>
               )
@@ -696,15 +765,33 @@ export default function DriftPanel({
               <button
                 onClick={() => prev && onNavigateToSibling(prev)}
                 disabled={!prev}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
+                className="p-1.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={prev ? `Previous: "${prev.selectedText}"` : 'No previous term'}
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <div
                 ref={siblingStripRef}
-                className="flex-1 flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+                className="flex-1 flex items-center gap-1 overflow-x-auto cursor-grab active:cursor-grabbing select-none [&::-webkit-scrollbar]:hidden"
                 style={{ scrollbarWidth: 'none' }}
+                onPointerDown={(e) => {
+                  const el = siblingStripRef.current
+                  if (!el) return
+                  stripDrag.current = { active: true, startX: e.clientX, startScroll: el.scrollLeft, dragged: false }
+                }}
+                onPointerMove={(e) => {
+                  const el = siblingStripRef.current
+                  const d = stripDrag.current
+                  if (!el || !d.active) return
+                  const dx = e.clientX - d.startX
+                  if (Math.abs(dx) > 4) {
+                    d.dragged = true
+                    el.setPointerCapture?.(e.pointerId)
+                  }
+                  el.scrollLeft = d.startScroll - dx
+                }}
+                onPointerUp={() => { stripDrag.current.active = false }}
+                onPointerCancel={() => { stripDrag.current.active = false }}
               >
                 {siblingDrifts.map((sib) => {
                   const isCurrent = sib.driftChatId === currentDriftChatId
@@ -712,7 +799,7 @@ export default function DriftPanel({
                     <button
                       key={sib.driftChatId}
                       data-sibling-active={isCurrent}
-                      onClick={() => !isCurrent && onNavigateToSibling(sib)}
+                      onClick={() => { if (stripDrag.current.dragged) { stripDrag.current.dragged = false; return } if (!isCurrent) onNavigateToSibling(sib) }}
                       className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium leading-none truncate max-w-[140px] transition-colors
                         ${isCurrent
                           ? 'bg-accent-violet/[0.18] text-accent-violet border border-accent-violet/40'
@@ -727,7 +814,7 @@ export default function DriftPanel({
               <button
                 onClick={() => next && onNavigateToSibling(next)}
                 disabled={!next}
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
+                className="p-1.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-text-muted hover:text-accent-violet hover:bg-accent-violet/[0.1] disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors shrink-0"
                 title={next ? `Next: "${next.selectedText}"` : 'No next term'}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -738,7 +825,7 @@ export default function DriftPanel({
 
         {/* Connect view — chips list or inline chat */}
         {templateType === 'connect' && !connectQuestion && (
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto px-4 pt-4 custom-scrollbar" style={{ paddingBottom: 'calc(8rem + var(--kb-h, 0px))' }}>
             {/* Relationship map: the term is a hub with labeled edges to related
                 concepts. Tap an edge → the AI draws the bridge between the two,
                 which becomes its own thread. "Connect to anything" adds an edge. */}
@@ -763,13 +850,21 @@ export default function DriftPanel({
                 return { typeKey: '', relationship: '', concept: parts[0] ?? '' }
               }).filter(e => e.concept)
               void connectVisitedVersion // consumed to trigger re-render on cache changes
-              if (edges.length === 0) {
+              // Your own prior explorations near this term — the most meaningful
+              // connections are the ones you already made. Rendered as violet
+              // "You explored" edges on the same rail; tapping one reopens that
+              // drift directly (no API call). Same-term lens siblings are
+              // excluded — the sibling strip above already covers those.
+              const curTerm = normalizeTerm(selectedText)
+              const personal = (relatedDrifts ?? [])
+                .filter(o => normalizeTerm(o.term) !== curTerm)
+                .slice(0, 3)
+              if (edges.length === 0 && personal.length === 0) {
                 return <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
               }
               const dir = getTextDirection(selectedText)
               const Arrow = dir === 'rtl' ? ArrowUpLeft : ArrowUpRight
               const anyVisited = edges.some(e => connectAnswersRef.current.has(bridgeQuestion(e.concept)))
-              const presentKinds = [...new Set(edges.map(e => e.typeKey).filter(k => k in CONNECT_TYPES))]
               return (
                 <div dir={dir}>
                   <div className="flex items-center gap-1.5 mb-3">
@@ -788,6 +883,44 @@ export default function DriftPanel({
                       -start) mirror automatically for RTL languages like Hebrew. */}
                   <div className="ms-[6px] border-s ps-5" style={{ borderColor: 'rgba(34,211,238,0.18)' }}>
                     <Stagger className="flex flex-col gap-2 pt-1" step={0.04}>
+                      {/* Personal edges first — connections to the user's own
+                          prior drifts. Violet (the drift brand hue) marks
+                          "yours" against the AI edges' per-kind colors. */}
+                      {personal.map((occ) => (
+                        <motion.button
+                          key={`personal-${occ.driftChatId}`}
+                          variants={staggerChild}
+                          onClick={() => onOpenRelatedDrift?.(occ)}
+                          className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
+                          style={{
+                            borderColor: 'rgba(168,85,247,0.40)',
+                            background: 'rgba(168,85,247,0.08)',
+                          }}
+                          title={`Reopen your drift: "${occ.chatTitle}"`}
+                        >
+                          <span
+                            className="absolute top-1/2 -translate-y-1/2 -start-5 w-5 h-px"
+                            style={{ background: 'rgba(168,85,247,0.45)' }}
+                            aria-hidden
+                          />
+                          <span
+                            className="absolute top-1/2 -translate-y-1/2 -start-[23px] w-1.5 h-1.5 rounded-full transition-transform duration-200 group-hover:scale-150"
+                            style={{ background: '#a855f7', boxShadow: '0 0 8px rgba(168,85,247,0.6)' }}
+                            aria-hidden
+                          />
+                          <span
+                            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                            style={{ background: 'rgba(168,85,247,0.10)', color: '#a855f7' }}
+                          >
+                            <GitBranch className="w-[18px] h-[18px]" strokeWidth={2} />
+                          </span>
+                          <div className="flex-1 min-w-0" dir={getTextDirection(occ.term)}>
+                            <span className="block text-[10px] tracking-wider leading-none mb-1 truncate" style={{ color: 'rgba(168,85,247,0.85)' }}>You explored</span>
+                            <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug transition-colors">{occ.term}</span>
+                          </div>
+                          <Arrow className="w-4 h-4 text-text-muted/40 group-hover:text-text-secondary shrink-0 transition-colors" />
+                        </motion.button>
+                      ))}
                       {edges.map((e, i) => {
                         const q = bridgeQuestion(e.concept)
                         const visited = connectAnswersRef.current.has(q)
@@ -840,22 +973,10 @@ export default function DriftPanel({
                       })}
                     </Stagger>
                   </div>
-                  {/* Footer: first-visit hint, then a legend of the kinds present */}
+                  {/* Footer: first-visit hint. (Color legend removed — each card
+                      already names its relationship in words + shows a tinted icon.) */}
                   {!anyVisited && (
-                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">Tap a connection to explore the bridge between them.</p>
-                  )}
-                  {presentKinds.length > 0 && (
-                    <div className="mt-4 ps-5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      {presentKinds.map(key => {
-                        const k = CONNECT_TYPES[key]
-                        return (
-                          <span key={key} className="inline-flex items-center gap-1.5 text-[10px] text-text-muted/70">
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: k.color, boxShadow: `0 0 5px ${k.glow}` }} aria-hidden />
-                            {k.label}
-                          </span>
-                        )
-                      })}
-                    </div>
+                    <p className="mt-4 ps-5 text-[11px] text-text-muted/50 leading-snug">{driftLabels.connectHint}</p>
                   )}
                 </div>
               )

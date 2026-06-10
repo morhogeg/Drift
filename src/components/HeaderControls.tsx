@@ -78,8 +78,8 @@ export default function HeaderControls(props: Props) {
           className="px-3 py-1 rounded-full bg-dark-elevated/60 border border-dark-border/40 hover:bg-dark-elevated hover:border-accent-violet/30 transition-all duration-100 text-xs font-medium text-text-primary cursor-pointer flex items-center gap-1"
           title="Choose model"
         >
-          <span>{summaryLabel}</span>
-          <ChevronDown className={`w-3.5 h-3.5 text-text-muted ${menuOpen ? 'rotate-180' : ''}`} />
+          <span className="truncate max-w-[150px]">{summaryLabel}</span>
+          <ChevronDown className={`w-3.5 h-3.5 text-text-muted shrink-0 ${menuOpen ? 'rotate-180' : ''}`} />
         </button>
         {menuOpen && (
           <div className="absolute right-0 mt-2 w-64 bg-dark-surface/95 backdrop-blur-sm border border-dark-border/60 rounded-lg shadow-xl overflow-hidden z-50">

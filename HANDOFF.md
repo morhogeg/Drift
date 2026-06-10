@@ -1,9 +1,9 @@
 # Drift — Session Handoff
 
-**Date:** June 7, 2026
+**Date:** June 9, 2026
 **Branch:** `feature/apple-level-overhaul`
-**Build:** 53 (iOS Xcode) / web
-**Status:** This session (Jun 7, entries 166–167): **Map + panel UX polish pass** — filter live-search (fade-away animation), chip-tap pulse highlight, RTL arrow fixes (Hebrew), Connect card light-mode colors (token-based), detail card coverage fix (reduced height), zoom button subtlety (transparent bg at rest), chips tone-down (removed glows, muted inactive). Added keyboard shortcuts overlay + honest Login screen. tsc + vite build + Capacitor sync clean (build bumped 52→53). **Ready for TestFlight.** Prior session (Jun 7 morning, entry 165): Drift Map redesigned to "luminous cards" (native-HTML glass cards, Hebrew/RTL fix, collision-free layout, docked inspector). Prior (Jun 6, entries 162–164): Tier B refactor; ⚠️ two Gemini keys still exposed — user must rotate + raise spend cap (429 RESOURCE_EXHAUSTED).
+**Build:** 58 (iOS Xcode) / web
+**Status:** This session (Jun 9 continued, entry 173): **Model-name label removed** — (1) Removed the redundant `Gemini 3.1 Flash Lite` label that appeared above each AI message in the chat (line 2287–2289 in `App.tsx`); the model name still lives in the header's model picker, so nothing's lost — visual clutter gone, no info loss; (2) Verified via Playwright: AI reply renders cleanly without any standalone model-name label or the exact removed element class combo; (3) Bundle size stable at 294.06 kB JS / 124.41 kB CSS (gzip 85.42 / 18.38 kB), tsc + vite + cap sync clean, build 57→58. **Ready for TestFlight.** Prior session (Jun 9 continued, entry 172): **Language fix + highlights polish + map lens colors** — (1) Fixed the Hebrew-output bug by replacing soft language-matching prompts with explicit `languageDirective()` that detects script (Hebrew/Arabic/Cyrillic/Greek/etc.) and Latin-script languages (English/Spanish/French/German/Portuguese/Italian via stopword matching), then returns an imperative instruction naming the detected language with neutral examples (Gemini 3 Flash Lite now honors it); (2) Rewrote `getSuggestedHighlights` prompt to two-tier: always include KEY SUBJECTS (the central entities in the answer, esp. any proper nouns) first, THEN DOORWAYS (other rich connective phrases) — previous prompt only asked for doorways, missing brand names; raised cap from 4→7 terms; (3) Fixed highlights dedup bug (render-pure): switched from shared mutable `seen` Set (broke underlines in StrictMode) to `priorText` calculated from `node.position.start.offset` (message source before current block); blanked heading lines to prevent headings from suppressing first body mentions; applied to both factories (drift links + suggestions); (4) Added `LENS_COLORS` Record to DriftKnowledgeGraph, mapping each lens type (simplify: amber, research: blue, connect: cyan, challenge: rose) to hex codes matching DriftPanel chips; updated card eyebrows + orbs + DetailCard to use lens colors; (5) Verified: English→English, Hebrew→Hebrew; all terms underlined exactly once; key brands now always highlighted; lens colors visible on map. TypeScript clean, production build 294.16 kB JS / 124.41 kB CSS (gzip 85.44 / 18.38 kB), `npx cap sync ios` synced, build 56→57. Prior session (Jun 9 early, entry 171): **Synthesis made honest + navigable**. Prior (Jun 8, entry 170): **Mobile UX overhaul + audit fixes + footer redesign**.
 
 ## ⚠️ Provider architecture (important context for next session)
 - **Why OpenAI & Grok route through OpenRouter, not native keys:** they block direct browser/webview calls (no CORS). `CapacitorHttp` can't rescue this — it doesn't support SSE streaming (falls back to webview → CORS again). So a pure client app **cannot** stream from OpenAI/Grok with native keys. Anthropic & Gemini *can* go native (they allow CORS; Anthropic needs header `anthropic-dangerous-direct-browser-access: true`). Current choice: **all four presented as brands, OpenAI/Anthropic/Grok routed via OpenRouter (one `sk-or-…` key), Gemini native.** Open future options: hybrid (native Anthropic+Gemini) or +proxy backend (native all 4). User chose to leave as-is for now.
@@ -12,6 +12,124 @@
 ---
 
 ## What Was Done This Session
+
+### 171. Synthesis made honest + navigable (QUALITY/FEATURE, Jun 9)
+
+**Goal:** make synthesis genuinely useful, not a gimmick — never force a connection that isn't there — and let the user jump back into the source drifts it was woven from.
+
+**Adaptive synthesis prompt (`src/services/gemini.ts` `synthesizeDrifts`):**
+- Reframed from "the synthesizing intelligence … weave into ONE cohesive synthesis" (which forced a unifying thesis) to "the reflecting intelligence … NEVER manufacture a unifying idea that isn't really there — a forced connection is worse than no connection."
+- The model now **assesses relatedness first**, then picks a mode:
+  - **SYNTHESIS** (real through-line exists): bold takeaway naming the through-line + connective tissue between branches.
+  - **TRAIL** (mostly independent tangents): bold sentence describing the SHAPE of the exploration + one honest line per branch on what it gave you + genuine links ONLY if they exist (else says so plainly).
+  - **Partial** allowed: synthesize the branches that connect, list the rest standalone.
+- Added "Don't pad. If there's little to say, say little — usefulness over length." (kills the ~350-word filler floor). Kept the "**Next:**" parsed open question + `LANGUAGE_DIRECTIVE`.
+- Temperature **0.8 → 0.55** — high temp nudges toward flowery, manufactured connections.
+
+**Wording cleanup — "Bring it home" → "Synthesize" (app-wide):**
+- `src/App.tsx`: resume-card button "✦ Bring it home" → "✦ Synthesize N drifts" (now shows `t.driftCount`, matching the map bar). Comments updated.
+- `src/components/DriftKnowledgeGraph.tsx`, `src/components/SidebarChatRow.tsx`, `src/index.css`, `src/services/gemini.ts`: stray "bring it home" in comments/docstrings/CSS replaced with "synthesis". No "bring it home" remains.
+
+**Synthesis source chips → open the existing drift in the side panel (no API call):**
+- Extracted the Drift Map's inline `onOpenDrift` handler (~85 lines) into a reusable **`openExistingDrift(driftChat: ChatSession)`** in `src/App.tsx`. Restores already-generated content with zero new LLM call — handles regular drifts (replays messages), Connect lists (rebuilds chips from cached cards), and Connect bridges (reopens the Q&A thread). The map now just passes `onOpenDrift={openExistingDrift}`.
+- The synthesis chips (`isSynthesis` block) now look the drift up by `chatId` in `chatHistory` and call `openExistingDrift` — tapping a chip slides open the panel showing what was already explored (was `switchChat`, which opened it as a full chat). Falls back to `switchChat` only if not found.
+
+**Chips deduped by term:** applying several lenses (Simplify/Deep dive/Connect/Challenge) to one term spawns separate drift chats, which repeated the chip. `synthSources` now dedupes by `term.toLowerCase()` (one chip per concept); the user switches lenses inside the panel. The "woven from N drifts" count still reflects all N explorations.
+
+**"View as" lens bar marks already-explored lenses (`src/App.tsx` + `src/components/DriftPanel.tsx`):**
+- **Problem:** opening a chip lands on one lens, but the user had no way to see which OTHER lenses already had content (explored pre-synthesis) vs. which were empty — forcing blind taps that waste time and AI tokens.
+- New `exploredLenses` memo in App.tsx computes, for the open term+source, the set of lens keys that have **actual content** — content-verified (a registry entry alone can be a navigated-but-empty thread), so each candidate `driftChatId` is checked for a non-empty conversation (temp store / chatHistory) or cached Connect cards/answers. Survives reload: scans persisted drift chats by `(sourceMessageId, selectedText)` and infers each one's lens from its `__lens` id suffix (the first lens is recorded on the source message's driftInfo); plus marks Connect from `driftInfo.connectCards/Answers`.
+- DriftPanel takes a new `exploredLenses?: Set<string>` prop; the bar renders a small signature-hue dot + brighter label on each explored-but-inactive lens (the active lens is already filled). Title tooltip "{lens} — already explored".
+
+### 170. Mobile UX overhaul: model picker relocation + lens-drift push + header/footer fixes + audit (MAJOR MOBILE, Jun 8)
+
+**Goal:** fix four core mobile UX issues + deploy 12 audit fixes + optimize bundle size.
+
+**Core Task 1 — Model picker moved to sidebar:**
+- **src/components/ModelPillRow.tsx** — deleted (no longer used on mobile)
+- **src/App.tsx** sidebar footer (lines 1503–1542) — redesigned from 4 stacked rows into compact icon toolbar: Model pill stays labeled (flex-grows for readability), Gallery/Help/Settings are 40px icon-only buttons. Gallery + Help hidden on desktop (`lg:hidden`). Kept Settings visible everywhere.
+- **Result:** mobile sidebar footer compact, desktop sidebar still clean.
+
+**Core Task 2 — Lens-drift push fixed:**
+- **Problem:** Push button didn't work for drifts opened via lens templates (Simplify/Connect/etc.). Pushed text had no clear indication it succeeded, and users couldn't see where it landed on return to main chat.
+- **Solution (full pipeline threading):**
+  - **useDriftPanelActions.ts**: added `templateType` param to `onPushToMain` callback + filter change `isDriftOpenerText` → `isDriftScaffoldText` to strip both opener AND template scaffold.
+  - **useDriftActions.ts** (lines 475, 532–598): `handlePushDriftToMain` now accepts + threads `templateType` into driftPushMetadata (separator + each message). Removed 1.2s auto-clear timer; `justPromotedChatId` now persists until reveal effect clears it.
+  - **src/types/chat.ts** (lines 38–47): added `templateType?: 'simplify'|'research'|'connect'|'challenge'` to Message['driftPushMetadata'].
+  - **src/App.tsx** (lines 48–59, 2039, 2043–2044, 2060, 2178, 2181, 2235): added `PUSHED_LENS_TAG` mapping (templateType → label/colors/arrow), replaced hardcoded "Drift" tags with lens-aware rendering, passed `templateType` to three `handleStartDrift` reopen calls so reopening restores the same lens.
+  - **Push indication (new):** DriftPanel (lines 677–698) shows in-panel "✓ Added to the main thread — View" confirmation bar with button that closes panel and scrolls to content.
+  - **Reveal effect (new):** App.tsx (lines 318–337) — when main chat becomes visible (panel + map closed), auto-scrolls to promoted message, applies `.drift-landing` glow animation (2.6s sustained), clears `justPromotedChatId`. Added to index.css (lines 199–209) `@keyframes driftLandingGlow` with prefers-reduced-motion guard.
+
+**Core Task 3 — Header crowding fixed:**
+- **src/App.tsx** header (lines 1537): left-group `gap-4` → `gap-2` to give breadcrumb more room.
+- **src/App.tsx** (lines 1537): right-group container `shrink-0` → `min-w-0` so reopen-drift pill can compress.
+- **src/App.tsx** (lines 1696–1703): reopen-drift pill now `min-w-0`, `max-w-[28vw]`, added `shrink-0` to Map and + buttons.
+- **Result:** search icon no longer overlaps breadcrumb/reopen-pill on narrow phones.
+
+**Mobile Audit Fixes (Wave 1 — Agent A/B/C):**
+1. **Keyboard lift fallback (visualViewport)** — src/hooks/useKeyboardVisibility.ts (lines 17–90): added `capacitorActive` guard flag, extracted scroll helper, implemented `setupVisualViewportFallback()` for PWA/web fallback when Capacitor unavailable. Handles web version + simulator without native Capacitor.
+2. **Selection bar clipping** — src/components/SelectionTooltip.tsx (lines 551–578): split single pill into outer wrapper + inner scrollable row; changed template buttons from `flex-1` to `flex-shrink-0` so all buttons reachable via horizontal scroll on narrow phones (90+ template buttons now accessible).
+3. **Selection bar overlapping composer** — src/App.tsx (lines 140, 1048–1058, 2641): added ResizeObserver to measure composer height, write to `--composer-h` CSS var. SelectionTooltip (line 543) changed fixed `bottom: 76px` to `calc(...+ var(--composer-h) + 16px)` so bar dynamically floats above multi-line input.
+
+**Mobile Audit Fixes (Wave 2 — Agent D/E):**
+4. **Sidebar safe-area** — src/App.tsx (line 1411): added `pt-safe` to sidebar header row, clearing status bar on notch phones.
+5. **RTL truncation** — src/utils/rtl.ts (lines 15–20): new export `getRTLTruncateClassName` that returns only `'dir-rtl'` (drops forced `text-right`) so Hebrew truncated spans rely on `dir="rtl"` attribute for correct ellipsis placement. src/App.tsx (lines 20, 1710, 1756) switched header title + breadcrumb to use new function.
+6. **Composer button touch targets** — src/App.tsx (lines 2713, 2724, 2735, 2748): added `min-w-[44px] min-h-[44px]` to mic/stop/send buttons (was ~36px).
+7. **Lens chip touch targets** — src/components/DriftPanel.tsx (line 726): lens chips now `min-h-[44px]`.
+8. **Sibling switcher touch targets** — src/components/DriftPanel.tsx (lines 757, 806): changed arrows to `min-w-[44px] min-h-[44px]`.
+9. **Connect chips keyboard lift** — src/components/DriftPanel.tsx (line 817): changed `pb-32` to `style={{ paddingBottom: 'calc(8rem + var(--kb-h, 0px))' }}` so last chips clear lifted keyboard.
+10. **Selection bar – unused Compare variable** — src/components/DriftPanel.tsx (line 185): changed `const [isComparing, setIsComparing]` → `const [, setIsComparing]` (setter still needed by hook, but unused state var).
+11. **Selection bar scrollable template buttons** — src/components/SelectionTooltip.tsx (lines 551–557): added `flex-nowrap overflow-x-auto [&::-webkit-scrollbar]:hidden` to inner row, `scrollbarWidth: 'none'` for CSS.
+12. **Mobile Gallery/Help in sidebar** — handled by footer redesign (above).
+
+**Bundle optimization (Vite manualChunks):**
+- **vite.config.ts**: added `build.rollupOptions.output.manualChunks` (function form):
+  - `react-vendor` (React, ReactDOM, scheduler)
+  - `markdown` (react-markdown, remark-*, rehype-*, react-syntax-highlighter)
+  - `framer-motion` (Framer Motion)
+  - `icons` (Lucide)
+  - `state-vendor` (Zustand, idb)
+- **Result:** main chunk 763 kB → 289 kB (gzip 233 kB → 83 kB), >500 kB warning eliminated. Vendor chunks are large but cacheable on repeat visits.
+
+**TypeScript + Build:**
+- Fixed one TS error post-build (unused `isComparing` var in DriftPanel).
+- `npm run build` passes clean, `npx cap sync ios` synced web assets + plugins, build number incremented 54→55.
+
+### 169. Highlight-menu redesign + unified color system + side-chat fixes (POLISH/BUG FIX, Jun 8)
+
+**Goal:** make the selection highlight-menu coherent, fix two long-standing side-chat selection bugs, and unify the template colors across the tooltip, the lens bar, and the Connect page.
+
+**Highlight menu / tooltip (`src/components/SelectionTooltip.tsx`):**
+- **Unified icon set** — replaced the mismatched glyphs with a consistent Lucide set: Simplify `Lightbulb`, Deep dive `Telescope`, Connect `Waypoints`, Challenge `Scale` (was `Swords` — too aggressive). Dropped `BookOpen`/`Link2`/`Swords` imports.
+- **Per-action signature colors** via an `ACTION_TINT` map (icon rest+hover, card hover border): Simplify=amber, Deep dive=blue, **Connect=`accent-discovery` cyan** (matches the Connections page), Challenge=rose. Replaced the earlier amber/sky two-group tint. A hairline divider still splits the menu into the understand (Simplify/Deep dive) and extend (Connect/Challenge) pairs.
+- **Primary button relabeled** "Drift" → **"Drift into"** (desktop + mobile) to disambiguate for new users.
+- **Save** tinted **violet** (moved off cyan to avoid clashing with Connect's cyan).
+
+**Bug — pushed-drift text now selectable (`src/App.tsx`):** the pushed-drift bubble's `onClick` (jump-to-drift) fired on the click that ends a drag-selection, hijacking the selection so the tooltip never persisted. Guarded the handler to bail when `window.getSelection()` is non-collapsed — the same drift/save tooltip now works on pushed text.
+
+**Bug — tooltip flicker in side chat (`SelectionTooltip.tsx`):** `handleMouseMove` dismissed purely on cursor geometry, so drifting a few px off the selection box scheduled a close ("needed 3–4 tries"). Now it keeps the tooltip open while a non-collapsed selection exists; it only closes on actual deselect / click-elsewhere.
+
+**Sibling term strip — drag to scroll (`src/components/DriftPanel.tsx`):** the chips strip had `overflow-x-auto` but no drag affordance. Added pointer-based click-and-drag horizontal scrolling (`cursor-grab`→`grabbing`, pointer capture) with a `dragged` guard so a drag never accidentally switches drifts. The ‹ › chevrons still work.
+
+**Connect page — legend removed (`DriftPanel.tsx`):** deleted the bottom color legend (History/Tension/Influence/Identity/Origin); each card already names its relationship in words + shows a tinted icon. Removed the now-unused `presentKinds` and `CONNECT_TYPES` import.
+
+**Lens bar consistency (`DriftPanel.tsx`):** the "View as" bar hard-coded violet for every active lens. Now each active lens wears its signature color (`activeTint` map) — active Connect is cyan, mirroring the page below and the tooltip. Drift stays violet; warm hues use `-500` shades for light-mode legibility.
+
+**Localization (`src/lib/driftPanel.ts` + `DriftPanel.tsx`):** the Connect "Tap a connection to explore the bridge between them." hint was hardcoded English. Added a language-aware `connectHint` to `DriftLabels` (EN + HE) and rendered it via the existing `driftLabels` memo.
+
+### 168. Drag-to-resize columns + full-screen map (FEATURE, Jun 8)
+
+**Goal:** let the user drag the sidebar, sidechat, and Drift Map narrower/wider (others adjust dynamically), and make the map able to fill the whole screen.
+
+**Key insight (kept it small):** the main chat is already `flex-1` and reserves exactly the side-panel widths via `marginLeft`/`marginRight`, so it reflows for free. We only had to (1) drive those widths from state and (2) add drag handles that mutate the state. **No conversion to a flex/grid column model.** Sidechat and map still share the right slot (mutually exclusive), as before.
+
+**Files:**
+- **`src/components/ResizeHandle.tsx`** (new) — thin (`w-2.5`) vertical drag bar, `hidden lg:block`. Uses pointer capture; reports the pointer's viewport X via `onResize(clientX)` and lets the parent map that to a clamped width. Sets `body.userSelect='none'` + `cursor:col-resize` during drag. Violet hairline on hover/active. Props: `edge` ('left'|'right'), `onResize`, `onResizeStart/End`.
+- **`src/App.tsx`** — owns in-session widths `sidebarWidth` (340), `driftWidth` (450), `mapWidth` (680) + a `resizing` flag that suppresses the main column / sidebar / panel width transitions mid-drag (otherwise they ease ~300ms behind the pointer). `mapExpanded` → `mapFullscreen`. Margins switched from hardcoded (`lg:ml-[340px]`, `min(450px,56vw)`, `mapPanelWidth`) to the live widths via `mainLeftMargin` / `mainRightMargin`. Sidebar `<aside>` gets inline width on `lg` (kept `w-[85vw]` for mobile, added `lg:max-w-none`) + a right-edge handle. Passes `width`/`onResize`/`onResizeStart`/`onResizeEnd` down to DriftPanel and DriftKnowledgeGraph.
+- **`src/components/DriftPanel.tsx`** — new props `width`, `onResize`, `onResizeStart/End`, `resizing`. Outer wrapper drops the `lg:w-[450px]`/`70vw` classes for inline `style={{ width }}` (mobile passes `undefined` so `inset-0` still governs the full-screen sheet). Left-edge handle. Existing expand/collapse button now doubles as a width preset (collapse 450 ↔ expand ~62vw) via the existing `onExpandedChange`.
+- **`src/components/DriftKnowledgeGraph.tsx`** — props renamed `expanded`→`fullscreen`, `onToggleExpand`→`onToggleFullscreen`; added `width`, `onResize`, `onResizeStart/End`. Desktop panel: `width: fullscreen ? '100vw' : width`, `left:0` when fullscreen (covers sidebar+chat; map `z-40` > sidebar `z-20`). Width CSS transition disabled while a local `isResizing` flag is set (drag). Expand button retitled "Full screen"/"Exit full screen". Left-edge handle, hidden in fullscreen. (Mobile `isMobile` sheet branch untouched.)
+
+**MIN_MAIN floor (overlap fix):** the desktop header's right cluster is wide and `shrink-0` — Map pill (~93px) + New-chat (44px) + `HeaderControls` model picker + "Connected" chip (~260px) — plus the left icon cluster (~210px). Below ~650px chat width the right cluster overlaps the left icons. So a right panel may only grow until the chat would drop below **`MIN_MAIN = 660`** (`App.tsx`); this protection wins over the panel's own min (on a narrow window the panel yields, not the chat). It accounts for the open sidebar (`maxRightWidth()`). Also added `truncate max-w-[150px]` to the model-name label in **`HeaderControls.tsx`** so a long model name can't blow out the header. Tradeoff: with sidebar open on a 1280 screen the map drag tops out ~280px — close the sidebar (~620px) or use the fullscreen button for a large map. `MIN_MAIN` is a single constant, easy to tune.
 
 ### 167. Keyboard shortcuts + honest Login (FEATURE, Jun 7)
 - **ShortcutsHelp.tsx** (new) — overlay modal on `?` key or header button. Shows keyboard shortcuts (⌘K search, ⌘⌥N new, ⌘⌥G map, ?) and feature tips (Drift, Lenses, Snippets, Map, Synthesize). Escape/click-outside closes, scrollable content, 460px width.
@@ -475,9 +593,10 @@ VITE_GEMINI_API_KEY=your_key_here
 ## What's Pending / Next Ideas
 
 - [ ] **🔴 ACTION REQUIRED (security)** — rotate both exposed Gemini API keys in Google AI Studio (https://ai.studio); raise/reset spend cap at https://ai.studio/spend (currently 429 RESOURCE_EXHAUSTED). Details in entry 164.
-- [ ] **TestFlight submission (build 52)** — archive in Xcode → upload to App Store Connect. Build number incremented 51→52, Capacitor synced, web assets ready.
-- [ ] **On-device pass — this session (Jun 6)** — verify: refactored hooks work on-device (drift → send message → reply → push/undo → save-as-chat); Connect mode (tap bridge → stream answer → cache hit on re-tap); no regressions from slices 4–5.
-- [ ] **On-device pass — prior sessions (Jun 4, Jun 3 PM)** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall.
+- [ ] **TestFlight submission (build 56)** — archive in Xcode GUI → upload to App Store Connect. Build number incremented 55→56, Capacitor synced, web assets ready. Requires: Xcode `ios/App/App.xcworkspace` → Product > Archive → Distribute App → TestFlight → Upload.
+- [ ] **On-device pass — synthesis (this session, build 56)** — verify: synthesis reads honest (no forced links; produces a "trail" for unrelated tangents); source chips open the source drift in the panel with NO new API call; chips show one per term; "View as" lens bar dots correctly mark already-explored lenses (instant) vs. empty ones.
+- [ ] **On-device pass — mobile UX (build 55)** — verify: model picker moved to sidebar (no composer clutter); lens-drift push works + shows in-panel confirmation + glow on return to main; header no longer crowded (breadcrumb/pill flex correctly); mobile audit fixes (keyboard lift, selection bar scroll, touch targets, safe-area, RTL, footer compact); no regressions.
+- [ ] **On-device pass — prior sessions** — verify: map "Open drift" bug (shows full conversation + persists reload); synthesis "Next" clickable; lens labels localized (Hebrew); sidebar row types (Chat/Drift/Synthesis) + nesting; Drift Map opens on single tap; map node `↳ parent` labels + breadcrumb; clickable AI terms on map; Connect shows selected term's cards (no cross-bleed); per-term/lens persists across switches; resume cards in empty state; coachmarks (drift gesture, lens bar); "Related by meaning" search + "explored before" recall; Drift + map redesign stability.
 - [ ] **TODO(semantic) follow-ups** — seed the Connect lens from semantic neighbors (`DriftPanel.tsx`); draw semantic edges on the Drift Map (`DriftKnowledgeGraph.tsx`). Persist composite `{id}__connect` lens-thread connect-state to `driftInfos` (currently in-memory only).
 - [ ] **On-device pass — providers/settings wave** — verify: (1) Add a model → OpenAI/Anthropic/Grok with an OpenRouter `sk-or-…` key actually streams; (2) Settings redesign reads well (branded glyphs, cards); (3) Ollama/Qwen3 gone from the Models list; (4) selecting text in chat no longer opens the sidebar.
 - [ ] **On-device pass — content wave (Hebrew)** — Connect concepts in Hebrew script (no Latin); meaningful map labels (no "Barcelona 1/2/3"); bridge "Open this drift" opens the conversation; filter field; overall Connect/Simplify/Deep-dive quality.

@@ -44,6 +44,10 @@ export interface Message {
     driftChatId?: string
     originSide?: 'left' | 'right'
     originModelTag?: string
+    /** The lens the drift was explored through, so the pushed tag reads
+     *  "connect" / "simplify" / "deep dive" / "challenge" instead of "drift",
+     *  and re-opening restores the same lens. */
+    templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
   }
   /** For single message pushes, hides context messages. */
   isHiddenContext?: boolean

@@ -17,12 +17,83 @@ export const GEMINI_MODELS = {
 export type GeminiModel = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]
 
 /**
- * Appended to every prompt so AI output matches the user's language. Auto-generated
- * artifacts (suggestions, connections, synthesis, drift answers) otherwise drift to
- * English because the system prompts themselves are English.
+ * Detect the language the user is actually writing in so we can give the model
+ * an explicit, named target language. A soft "match the user's language"
+ * instruction is NOT reliable on small models (gemini-3.1-flash-lite in
+ * particular would default to Hebrew even for English input), so we detect the
+ * dominant script — and, within the Latin script, the language via stopwords —
+ * and name it outright in the directive.
  */
-export const LANGUAGE_DIRECTIVE =
-  'LANGUAGE: Write ALL output in the same language as the user\'s text / the source content provided (e.g. Hebrew→Hebrew, English→English, Arabic→Arabic). This applies to every string you produce — responses, suggestions, questions, labels, and JSON string values alike. Names too: write people, places, teams, works and every other proper noun in that language\'s OWN script, transliterating foreign names into it (for a Hebrew chat: "Johan Cruyff"→"יוהאן קרויף", "Real Madrid"→"ריאל מדריד", "Catalan nationalism"→"לאומיות קטלאנית"). Do NOT leave Latin-script words sitting inside otherwise Hebrew/Arabic/Cyrillic/etc. text. Only code, file paths, URLs, math symbols and units keep their original form.'
+function detectLatinLanguage(text: string): string {
+  const words = (text.toLowerCase().match(/[a-zà-ÿ]+/g) ?? [])
+  if (!words.length) return 'English'
+  const set = new Set(words)
+  const profiles: [string, string[]][] = [
+    ['English', ['the', 'and', 'is', 'are', 'you', 'what', 'how', 'why', 'of', 'to', 'in', 'do', 'does', 'that', 'this', 'with']],
+    ['Spanish', ['el', 'la', 'los', 'las', 'que', 'de', 'y', 'es', 'por', 'para', 'cómo', 'qué', 'un', 'una', 'con', 'no']],
+    ['French', ['le', 'la', 'les', 'que', 'de', 'et', 'est', 'pour', 'comment', 'vous', 'un', 'une', 'des', 'dans', 'pas', 'je']],
+    ['German', ['der', 'die', 'das', 'und', 'ist', 'nicht', 'wie', 'was', 'für', 'ein', 'eine', 'mit', 'ich', 'sie', 'den']],
+    ['Portuguese', ['que', 'de', 'e', 'é', 'por', 'para', 'como', 'não', 'um', 'uma', 'com', 'os', 'as', 'do', 'da', 'em']],
+    ['Italian', ['il', 'la', 'che', 'di', 'e', 'è', 'per', 'come', 'non', 'un', 'una', 'con', 'gli', 'le', 'sono', 'questo']],
+  ]
+  let best = 'English'
+  let bestHits = -1
+  for (const [name, stop] of profiles) {
+    const hits = stop.reduce((acc, w) => acc + (set.has(w) ? 1 : 0), 0)
+    if (hits > bestHits) { bestHits = hits; best = name }
+  }
+  return best
+}
+
+/** Returns a human-readable language name (with native form) for a sample of text. */
+function detectLanguage(text: string): string {
+  const sample = (text ?? '').slice(0, 2000)
+  const scripts: [RegExp, string][] = [
+    [/[֐-׿]/g, 'Hebrew'],
+    [/[؀-ۿݐ-ݿ]/g, 'Arabic'],
+    [/[Ѐ-ӿ]/g, 'Cyrillic'],
+    [/[Ͱ-Ͽ]/g, 'Greek'],
+    [/[぀-ヿ]/g, 'Japanese'],
+    [/[가-힯]/g, 'Korean'],
+    [/[一-鿿]/g, 'Han'],
+    [/[ऀ-ॿ]/g, 'Devanagari'],
+    [/[฀-๿]/g, 'Thai'],
+    [/[A-Za-z]/g, 'Latin'],
+  ]
+  let best = ''
+  let bestN = 0
+  for (const [re, name] of scripts) {
+    const n = (sample.match(re) ?? []).length
+    if (n > bestN) { bestN = n; best = name }
+  }
+  switch (best) {
+    case 'Hebrew': return 'Hebrew (עברית)'
+    case 'Arabic': return 'Arabic (العربية)'
+    case 'Cyrillic': return 'Russian (Русский)'
+    case 'Greek': return 'Greek (Ελληνικά)'
+    case 'Japanese': return 'Japanese (日本語)'
+    case 'Korean': return 'Korean (한국어)'
+    case 'Han': return 'Chinese (中文)'
+    case 'Devanagari': return 'Hindi (हिन्दी)'
+    case 'Thai': return 'Thai (ไทย)'
+    case 'Latin': return detectLatinLanguage(sample)
+    default: return 'English'
+  }
+}
+
+/**
+ * Build the language directive for a given sample of the user's text. Auto-generated
+ * artifacts (suggestions, connections, synthesis, drift answers) otherwise drift to
+ * the model's default language because the system prompts themselves are English.
+ * Naming the target language explicitly is what makes this stick.
+ */
+export function languageDirective(sampleText: string): string {
+  const lang = detectLanguage(sampleText)
+  return `LANGUAGE — HIGHEST PRIORITY, OVERRIDES ANY DEFAULT: Write your ENTIRE response in ${lang}. ` +
+    `Every string you produce — prose, suggestions, questions, labels, and JSON string values alike — must be in ${lang}, and you must not switch to any other language mid-response. ` +
+    `Write proper nouns (people, places, organizations, works) in ${lang}'s own script, transliterating foreign names into it; do not leave foreign-script words embedded in the text. ` +
+    `Only code, file paths, URLs, math symbols and units keep their original form.`
+}
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -110,8 +181,10 @@ export async function checkGeminiConnection(
 // ── Suggested highlights ──────────────────────────────────────────────────────
 
 /**
- * Ask Gemini to identify 2–4 short phrases from a response that are worth
- * exploring deeper. Returns an empty array on any error — this is non-critical.
+ * Ask Gemini to identify the short phrases from a response that are worth
+ * exploring deeper — the answer's key subject entities first (always included),
+ * then additional rich "doorway" phrases. Returns an empty array on any error —
+ * this is non-critical.
  */
 export async function getSuggestedHighlights(
   responseText: string,
@@ -129,17 +202,20 @@ export async function getSuggestedHighlights(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are a reading guide for a curious thinker. Given a passage, pick the 2-4 phrases that are the richest DOORWAYS — a named entity, a specific concept, a term of art, a surprising claim — each of which could open a whole new line of inquiry if the reader pulled on it.
+          text: `You are a reading guide for a curious thinker. From the passage, pick the phrases most worth exploring, in two tiers — KEY SUBJECTS first, then DOORWAYS:
+
+1. KEY SUBJECTS (always include every one of these): the central named things the passage is actually ABOUT — the specific people, products, brands, companies, organizations, works, places, or named theories/models that anchor the answer or head its main sections. If the passage is built around a short set of entities (e.g. three watch brands, two authors), you MUST include ALL of them, not just one.
+2. DOORWAYS: additional rich phrases — a term of art, a specific concept, a surprising claim — each of which could open a new line of inquiry.
 
 Hard rules:
-- Each phrase MUST be a verbatim substring copied EXACTLY from the text (same language, same script, same wording, including casing). If it isn't an exact substring, do not return it.
-- Prefer the specific and the proper-named over the generic: choose "the Antikythera mechanism" over "ancient technology", "wave function collapse" over "physics". Pick proper nouns, technical terms, and load-bearing concepts — NOT ordinary verbs, connective phrases, or whole clauses.
+- Each phrase MUST be a verbatim substring copied EXACTLY from the text (same language, same script, same wording, including casing). If it isn't an exact substring, do not return it. (A section heading like "1. Patek Philippe" is not a verbatim phrase — return "Patek Philippe".)
+- Prefer the specific and the proper-named over the generic: choose "the Antikythera mechanism" over "ancient technology", "wave function collapse" over "physics". Pick proper nouns, technical terms, and load-bearing concepts — NOT ordinary verbs, connective phrases, generic section labels ("Summary", "Why they matter"), or whole clauses.
 - 1-5 words each. Never a full sentence. No duplicates and no phrases that nest inside each other.
-- If the text is too thin to offer good doorways, return fewer (even just 1) rather than padding with generic phrases.
+- Return 3-7 phrases total, ordered KEY SUBJECTS first. If the passage genuinely centers on fewer, return fewer rather than padding.
 
-Return ONLY a JSON array of strings, no explanation. Example: ["quantum entanglement", "Copenhagen interpretation", "wave function collapse"]
+Return ONLY a JSON array of strings, no explanation. Example: ["Patek Philippe", "Rolex", "Audemars Piguet", "Holy Trinity", "perpetual calendars"]
 
-${LANGUAGE_DIRECTIVE}`,
+${languageDirective(responseText)}`,
         }],
       },
       contents: [{
@@ -169,8 +245,8 @@ ${LANGUAGE_DIRECTIVE}`,
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
 
-    // Filter to strings only, cap at 4
-    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 4)
+    // Filter to strings only, cap at 7 (key subjects + doorways)
+    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 7)
   } catch {
     return []
   }
@@ -209,7 +285,7 @@ Rules:
 
 Return ONLY a JSON array of 2 strings. No explanations.
 
-${LANGUAGE_DIRECTIVE}`,
+${languageDirective(`${selectedText} ${contextSnippet}`)}`,
         }],
       },
       contents: [{
@@ -291,7 +367,7 @@ Return ONLY a raw JSON array of 4-5 objects. Each object: {"label": string, "kin
 - Aim for ~2 "back" and ~2-3 "forward". If the context is thin or absent, return all "forward".
 - No prose, no markdown, no code fences. Any other text breaks the app.
 
-${LANGUAGE_DIRECTIVE}`,
+${languageDirective(`${contextSnippet} ${term}`)}`,
         }],
       },
       contents: [{
@@ -332,7 +408,7 @@ ${LANGUAGE_DIRECTIVE}`,
 }
 
 // ── Synthesis ────────────────────────────────────────────────────────────────
-// "Bring it home" — weave the insights from several drift branches into one
+// Weave the insights from several drift branches into one
 // cohesive synthesis posted back on the parent conversation.
 
 export async function synthesizeDrifts(
@@ -353,17 +429,20 @@ export async function synthesizeDrifts(
     const body = {
       systemInstruction: {
         parts: [{
-          text: `You are the synthesizing intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts") — these branches ARE the shape of their curiosity. Weave the key insights into ONE cohesive, illuminating synthesis that tells them something they could not see from any single branch.
+          text: `You are the reflecting intelligence of a thinking app called Drift. The user explored a topic by branching into several focused side-threads ("drifts") — these branches ARE the shape of their curiosity. Your job is to give them something genuinely useful about where they went. NEVER manufacture a unifying idea that isn't really there — a forced connection is worse than no connection.
 
-Write engaging markdown:
-- Open with a single bold takeaway sentence — the one idea that ties the exploration together.
-- Then 3-6 tight paragraphs or bullets that find the CONNECTIVE TISSUE between branches — how they reinforce, complicate, or stand in tension with each other. Reference branch topics by name, naturally.
-- Do NOT summarize each branch in isolation; surface the through-line and the surprising links the user may have missed.
-- Be honest: if two branches don't genuinely connect, say what each contributes rather than forcing a false link. Never invent facts not present in the branches.
-- End with one open question worth exploring next, prefixed "**Next:**".
-- Keep it under ~350 words. No preamble like "Here is the synthesis".
+FIRST, silently assess how much the branches actually relate:
+- If a real through-line exists (the branches reinforce, complicate, or stand in tension with each other in a way the user might have missed) → write a SYNTHESIS: open with a single bold takeaway sentence naming that through-line, then 3-5 tight paragraphs or bullets tracing the connective tissue. Reference branches by name, naturally. Surface the surprising links, not a per-branch recap.
+- If the branches are mostly independent tangents with no honest unifying thread → write a TRAIL instead: open with one bold sentence describing the SHAPE of the exploration (e.g. "You started at X and followed your curiosity into three loosely-related corners."). Then one tight line per branch naming what each one actually gave you. Call out ONLY the genuine links between branches, if any — and if there are none, say so plainly rather than inventing one.
+- It's fine to be partial: synthesize the branches that connect, list the rest as standalone threads.
 
-${LANGUAGE_DIRECTIVE}`,
+Rules for both modes:
+- Never invent facts not present in the branches. Never overstate a connection.
+- Don't pad. If there's little to say, say little — usefulness over length.
+- End with one open question genuinely worth exploring next, prefixed "**Next:**".
+- Keep it under ~350 words. No preamble like "Here is the synthesis". Write engaging markdown.
+
+${languageDirective(`${rootTopic} ${branches.map((b) => b.content).join(' ').slice(0, 1200)}`)}`,
         }],
       },
       contents: [{
@@ -372,7 +451,9 @@ ${LANGUAGE_DIRECTIVE}`,
       }],
       // gemini-3.5-flash is a thinking model: reasoning tokens count against this
       // budget, so a low cap truncates the answer mid-sentence. Give it headroom.
-      generationConfig: { temperature: 0.8, maxOutputTokens: 4096 },
+      // Lower temperature keeps it grounded — high temp nudges toward flowery,
+      // manufactured connections, which is exactly what we want to avoid here.
+      generationConfig: { temperature: 0.55, maxOutputTokens: 4096 },
     }
 
     const response = await fetch(url, {
@@ -419,8 +500,11 @@ export async function sendMessageToGemini(
     },
   }
   // Always steer the reply to the user's language (covers main chat + every drift).
+  // Detect from the most recent user turn so a single conversation can switch
+  // languages and the reply follows the latest message.
+  const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
   body.systemInstruction = {
-    parts: [...(systemInstruction?.parts ?? []), { text: LANGUAGE_DIRECTIVE }],
+    parts: [...(systemInstruction?.parts ?? []), { text: languageDirective(lastUserText) }],
   }
 
   const doFetch = (b: Record<string, unknown>) =>
