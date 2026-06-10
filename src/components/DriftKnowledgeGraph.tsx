@@ -16,6 +16,10 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
 import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
+import { getCachedVectors } from '@/lib/embeddingBackfill'
+import { cosineSimilarity } from '@/services/embeddings'
+import { SEMANTIC_THRESHOLD } from '@/lib/semanticRecall'
+import { normalizeTerm } from '@/lib/termIndex'
 import ResizeHandle from './ResizeHandle'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -653,6 +657,29 @@ function ribbonPath(
   )
 }
 
+/**
+ * Path for a resonance edge — a semantic (meaning) link between two drifts that
+ * have no lineage connection. Same-column pairs bow out to the right of both
+ * cards; cross-column pairs flow like a river but render dashed-cyan so lineage
+ * (solid, violet ramp) and resonance (dashed, discovery cyan) never read alike.
+ */
+function resonancePath(a: Laid, b: Laid): string {
+  const [L, R] = a.x <= b.x ? [a, b] : [b, a]
+  if (R.x - L.x < 1) {
+    const x1 = L.x + L.cardW / 2, x2 = R.x + R.cardW / 2
+    const bow = 56 + Math.min(90, Math.abs(R.y - L.y) * 0.12)
+    return `M ${x1} ${L.y} C ${x1 + bow} ${L.y}, ${x2 + bow} ${R.y}, ${x2} ${R.y}`
+  }
+  return flowPath(L.x + L.cardW / 2, L.y, R.x - R.cardW / 2, R.y)
+}
+
+/** A meaning-link between two laid-out drifts (ids + cosine score). */
+interface ResonancePair { a: string; b: string; score: number }
+
+// Keep the map calm: only the strongest few resonance edges are drawn.
+const RESONANCE_MAX_EDGES = 8
+const RESONANCE_MAX_PER_NODE = 2
+
 // ── The living graph (SVG) ───────────────────────────────────────────────────────
 
 function GraphCanvas({
@@ -793,6 +820,64 @@ function GraphCanvas({
   }
 
   const byId = useMemo(() => new Map(nodes.map(n => [n.node.chat.id, n])), [nodes])
+
+  // ── Resonance edges (semantic) ────────────────────────────────────────────────
+  // Lineage rivers show where a thought CAME FROM; resonance edges show which
+  // branches landed in the same conceptual water by different paths. Computed
+  // from the IDB vector cache (filled by the embedding backfill) — pairs above
+  // SEMANTIC_THRESHOLD that aren't already related by lineage or by being lens
+  // views of the same term. Graceful: no key / no vectors ⇒ no edges, map as before.
+  const [resonance, setResonance] = useState<ResonancePair[]>([])
+  useEffect(() => {
+    const drifts = nodes.filter(n => n.node.chat.metadata?.isDrift)
+    if (drifts.length < 2) { setResonance([]); return }
+
+    let cancelled = false
+    ;(async () => {
+      const vecs = await getCachedVectors(drifts.map(d => d.node.chat.id))
+      if (cancelled) return
+      if (vecs.length < 2) { setResonance([]); return }
+      const vecById = new Map(vecs.map(v => [v.driftChatId, v.vec]))
+
+      // Lineage already has a river — resonance is only for the UNrelated-by-tree.
+      const isAncestorOf = (anc: Laid, desc: Laid): boolean => {
+        for (let p = desc.parent; p; p = p.parent) if (p.node.chat.id === anc.node.chat.id) return true
+        return false
+      }
+      // Lens threads on one term are near-identical embeddings — linking
+      // "Simplify: X" to "Deep dive: X" is noise, not insight.
+      const termOf = (l: Laid) => normalizeTerm(l.node.chat.metadata?.selectedText || l.node.chat.title || '')
+
+      const pairs: ResonancePair[] = []
+      for (let i = 0; i < drifts.length; i++) {
+        for (let j = i + 1; j < drifts.length; j++) {
+          const A = drifts[i], B = drifts[j]
+          const va = vecById.get(A.node.chat.id), vb = vecById.get(B.node.chat.id)
+          if (!va || !vb) continue
+          const ta = termOf(A)
+          if (ta && ta === termOf(B)) continue
+          if (isAncestorOf(A, B) || isAncestorOf(B, A)) continue
+          const score = cosineSimilarity(va, vb)
+          if (score >= SEMANTIC_THRESHOLD) pairs.push({ a: A.node.chat.id, b: B.node.chat.id, score })
+        }
+      }
+      pairs.sort((x, y) => y.score - x.score)
+
+      const perNode = new Map<string, number>()
+      const kept: ResonancePair[] = []
+      for (const p of pairs) {
+        if (kept.length >= RESONANCE_MAX_EDGES) break
+        if ((perNode.get(p.a) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
+        if ((perNode.get(p.b) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
+        kept.push(p)
+        perNode.set(p.a, (perNode.get(p.a) ?? 0) + 1)
+        perNode.set(p.b, (perNode.get(p.b) ?? 0) + 1)
+      }
+      setResonance(kept)
+    })()
+
+    return () => { cancelled = true }
+  }, [nodes])
 
   // Tapping a node only previews it — selects + centers so the detail card shows.
   // Users glance between nodes; opening fully is a deliberate second tap.
@@ -1050,6 +1135,23 @@ function GraphCanvas({
         </button>
       </div>
 
+      {/* Legend for the resonance threads — only when at least one is on screen,
+          so the new mark explains itself the first time it appears. */}
+      {resonance.length > 0 && (
+        <div
+          className="absolute z-20 flex items-center gap-1.5 pointer-events-none"
+          style={{ bottom: 10, left: 10 }}
+          aria-hidden
+        >
+          <svg width="22" height="6" className="flex-shrink-0">
+            <line x1="1" y1="3" x2="21" y2="3" stroke="#22d3ee" strokeWidth="1.4" strokeDasharray="3 4" strokeLinecap="round" opacity="0.75" />
+          </svg>
+          <span className="text-[10px] leading-none" style={{ color: 'rgba(34,211,238,0.65)' }}>
+            related by meaning
+          </span>
+        </div>
+      )}
+
       <svg
         className="absolute top-0 left-0"
         width={width}
@@ -1122,6 +1224,37 @@ function GraphCanvas({
             )
           })}
         </g>
+
+        {/* Resonance edges — dashed cyan threads between drifts related by MEANING
+            (no lineage link). Selecting either endpoint brightens the thread. */}
+        {resonance.length > 0 && (
+          <g>
+            {resonance.map(r => {
+              const A = byId.get(r.a), B = byId.get(r.b)
+              if (!A || !B) return null
+              const dim = !!q && (!isMatch(A) || !isMatch(B))
+              const lit = selectedId === r.a || selectedId === r.b
+              const termA = A.node.chat.metadata?.selectedText || A.trigger
+              const termB = B.node.chat.metadata?.selectedText || B.trigger
+              return (
+                <path
+                  key={`res-${r.a}-${r.b}`}
+                  d={resonancePath(A, B)}
+                  fill="none"
+                  stroke="#22d3ee"
+                  strokeWidth={lit ? 1.8 : 1.1}
+                  strokeDasharray="3 7"
+                  strokeLinecap="round"
+                  className={reduce ? undefined : 'dkg-resonance'}
+                  opacity={dim ? 0 : lit ? 0.85 : 0.4}
+                  style={{ transition: 'opacity 0.3s ease' }}
+                >
+                  <title>{`Related by meaning: “${termA}” ↔ “${termB}”`}</title>
+                </path>
+              )
+            })}
+          </g>
+        )}
 
       </svg>
 
@@ -2043,9 +2176,17 @@ function StyleBlock() {
         from { stroke-dashoffset: 246; }
         to   { stroke-dashoffset: 0; }
       }
+      .dkg-resonance {
+        animation: dkgResonance 16s linear infinite;
+        filter: drop-shadow(0 0 3px rgba(34,211,238,0.3));
+      }
+      @keyframes dkgResonance {
+        from { stroke-dashoffset: 100; }
+        to   { stroke-dashoffset: 0; }
+      }
 
       @media (prefers-reduced-motion: reduce) {
-        .dkg-flow, .dkg-card, .dkg-card.is-alive::after, .dkg-empty-orb,
+        .dkg-flow, .dkg-resonance, .dkg-card, .dkg-card.is-alive::after, .dkg-empty-orb,
         .dkg-ghost-orb, .dkg-detail-inner { animation: none !important; }
       }
     `}</style>
