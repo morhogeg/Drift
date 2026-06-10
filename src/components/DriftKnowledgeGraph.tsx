@@ -828,6 +828,9 @@ function GraphCanvas({
   // SEMANTIC_THRESHOLD that aren't already related by lineage or by being lens
   // views of the same term. Graceful: no key / no vectors ⇒ no edges, map as before.
   const [resonance, setResonance] = useState<ResonancePair[]>([])
+  // Custom resonance-edge tooltip (replaces the native <title>): glass + cyan,
+  // positioned in container space at the cursor. null = hidden.
+  const [resTip, setResTip] = useState<{ x: number; y: number; cw: number; ch: number; a: string; b: string } | null>(null)
   useEffect(() => {
     const drifts = nodes.filter(n => n.node.chat.metadata?.isDrift)
     if (drifts.length < 2) { setResonance([]); return }
@@ -1152,6 +1155,33 @@ function GraphCanvas({
         </div>
       )}
 
+      {/* Resonance tooltip — small, quiet glass chip. Anchored to whichever
+          side keeps it on-screen: grows left when the cursor is past the
+          mid-line, sits below only when near the top edge. Never crosses the
+          cursor, so it can't be clipped. Each term is dir="auto" for EN/HE. */}
+      {resTip && (() => {
+        // Anchor against the visible CONTAINER (resTip.cw/ch), not the virtual
+        // graph canvas. Tooltip hugs the cursor: grows left when the cursor is
+        // past the container mid-line, drops below only when near the top edge.
+        const onRight = resTip.x > resTip.cw / 2
+        const nearTop = resTip.y < 90
+        const pos: React.CSSProperties = onRight
+          ? { right: Math.max(8, resTip.cw - resTip.x + 12) }
+          : { left: Math.max(8, resTip.x + 12) }
+        if (nearTop) pos.top = resTip.y + 16
+        else pos.bottom = Math.max(8, resTip.ch - resTip.y + 12)
+        return (
+          <div className={'dkg-restip' + (onRight ? ' is-right' : '')} style={pos} aria-hidden>
+            <span className="dkg-restip-label">related by meaning</span>
+            <span className="dkg-restip-terms">
+              <span className="dkg-restip-term" dir="auto">{resTip.a}</span>
+              <span className="dkg-restip-arrow" aria-hidden>↔</span>
+              <span className="dkg-restip-term" dir="auto">{resTip.b}</span>
+            </span>
+          </div>
+        )
+      })()}
+
       <svg
         className="absolute top-0 left-0"
         width={width}
@@ -1236,21 +1266,41 @@ function GraphCanvas({
               const lit = selectedId === r.a || selectedId === r.b
               const termA = A.node.chat.metadata?.selectedText || A.trigger
               const termB = B.node.chat.metadata?.selectedText || B.trigger
+              const arcPath = resonancePath(A, B)
               return (
-                <path
-                  key={`res-${r.a}-${r.b}`}
-                  d={resonancePath(A, B)}
-                  fill="none"
-                  stroke="#22d3ee"
-                  strokeWidth={lit ? 1.8 : 1.1}
-                  strokeDasharray="3 7"
-                  strokeLinecap="round"
-                  className={reduce ? undefined : 'dkg-resonance'}
-                  opacity={dim ? 0 : lit ? 0.85 : 0.4}
-                  style={{ transition: 'opacity 0.3s ease' }}
-                >
-                  <title>{`Related by meaning: “${termA}” ↔ “${termB}”`}</title>
-                </path>
+                <g key={`res-${r.a}-${r.b}`}>
+                  {/* Visible dashed arc — pointer-events off so the wide hit zone handles hover */}
+                  <path
+                    d={arcPath}
+                    fill="none"
+                    stroke="#22d3ee"
+                    strokeWidth={lit ? 1.8 : 1.1}
+                    strokeDasharray="3 7"
+                    strokeLinecap="round"
+                    className={reduce ? undefined : 'dkg-resonance'}
+                    opacity={dim ? 0 : lit ? 0.85 : 0.4}
+                    style={{ transition: 'opacity 0.3s ease', pointerEvents: 'none' }}
+                  />
+                  {/* Wide transparent hit zone — 16px stroke makes the thin arc reliably hoverable.
+                      Drives a custom glass tooltip (no native <title>) positioned at the cursor. */}
+                  <path
+                    d={arcPath}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    opacity={dim ? 0 : 1}
+                    style={{ pointerEvents: dim ? 'none' : 'stroke', cursor: 'help' }}
+                    onMouseEnter={(e) => {
+                      const box = wrapRef.current?.getBoundingClientRect()
+                      if (box) setResTip({ x: e.clientX - box.left, y: e.clientY - box.top, cw: box.width, ch: box.height, a: termA, b: termB })
+                    }}
+                    onMouseMove={(e) => {
+                      const box = wrapRef.current?.getBoundingClientRect()
+                      if (box) setResTip({ x: e.clientX - box.left, y: e.clientY - box.top, cw: box.width, ch: box.height, a: termA, b: termB })
+                    }}
+                    onMouseLeave={() => setResTip(null)}
+                  />
+                </g>
               )
             })}
           </g>
@@ -2185,9 +2235,52 @@ function StyleBlock() {
         to   { stroke-dashoffset: 0; }
       }
 
+      /* Resonance tooltip — glass card with a discovery-cyan edge, echoing the
+         dashed arc it describes. Pointer-events off so it never eats hover. */
+      /* Resonance tooltip — a small, quiet glass chip. Stacked label + terms so
+         it stays narrow; wraps rather than overflowing. Bottom/top anchored in
+         JS so it never crosses the cursor or the canvas edge. */
+      .dkg-restip {
+        position: absolute; z-index: 30; pointer-events: none;
+        display: flex; flex-direction: column; gap: 3px;
+        max-width: 220px;
+        padding: 6px 9px; border-radius: 9px;
+        font-family: Inter, system-ui, sans-serif;
+        background: rgba(14,18,22,0.86);
+        border: 1px solid rgba(34,211,238,0.22);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+        backdrop-filter: blur(10px) saturate(1.1);
+        -webkit-backdrop-filter: blur(10px) saturate(1.1);
+        animation: dkgRestipIn 0.12s ease-out;
+      }
+      .dkg-restip.is-right { text-align: right; }
+      .dkg-restip-label {
+        font-size: 8.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+        color: rgba(34,211,238,0.65);
+        line-height: 1;
+      }
+      .dkg-restip-terms {
+        font-size: 11.5px; font-weight: 500; line-height: 1.35;
+        color: rgba(241,247,248,0.92);
+        word-break: break-word;
+      }
+      .dkg-restip-term { unicode-bidi: plaintext; }
+      .dkg-restip-arrow { color: rgba(34,211,238,0.6); font-weight: 400; margin: 0 3px; }
+      @keyframes dkgRestipIn {
+        from { opacity: 0; transform: translateY(2px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      :root:not(.dark) .dkg-restip {
+        background: rgba(255,255,255,0.92);
+        border-color: rgba(6,138,160,0.28);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      }
+      :root:not(.dark) .dkg-restip-terms { color: #0c2a30; }
+      :root:not(.dark) .dkg-restip-label { color: rgba(6,138,160,0.85); }
+
       @media (prefers-reduced-motion: reduce) {
         .dkg-flow, .dkg-resonance, .dkg-card, .dkg-card.is-alive::after, .dkg-empty-orb,
-        .dkg-ghost-orb, .dkg-detail-inner { animation: none !important; }
+        .dkg-ghost-orb, .dkg-detail-inner, .dkg-restip { animation: none !important; }
       }
     `}</style>
   )
