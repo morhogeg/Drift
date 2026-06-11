@@ -396,13 +396,14 @@ export default function DriftPanel({
     // Only fire when the panel has exactly the system message (fresh drift, not restored)
     if (messages.length !== 1 || !messages[0]?.id?.startsWith('drift-system-')) return
 
-    // Cross-model Challenge gate: the first time, let the user pick the challenger
-    // model before the critique streams. Only when there's actually a second model
-    // to choose — with just one model, fall straight through to a same-model
-    // challenge (graceful, no dead-end). Cancelling does the same.
+    // Cross-model Challenge gate: the first time, open the picker before the
+    // critique streams — even when no second model exists yet. With one model the
+    // picker shows its empty state, whose "Add a model" button routes to Settings,
+    // so the Challenge tap itself is the entry point for setting up a challenger.
+    // Cancelling falls through to a same-model challenge (graceful, no dead-end).
     if (templateType === 'challenge') {
       if (challengerPickerOpen) return
-      if (!challenger && challengerChoices.length > 0 && !challengerPromptedRef.current) {
+      if (!challenger && !challengerPromptedRef.current) {
         challengerPromptedRef.current = true
         setChallengerPickerOpen(true)
         return
@@ -1394,7 +1395,14 @@ export default function DriftPanel({
       current={challenger}
       onPick={(t) => { onSetChallenger?.(t); setChallengerPickerOpen(false) }}
       onClose={() => setChallengerPickerOpen(false)}
-      onAddModel={onOpenModelSettings ? () => { setChallengerPickerOpen(false); onOpenModelSettings() } : undefined}
+      onAddModel={onOpenModelSettings ? () => {
+        // The user chose to set up a challenger — don't fire a throwaway same-model
+        // challenge behind their back. Suppress this open's auto-send; re-tapping
+        // Challenge after adding a model reopens the picker with the new option.
+        autoSentRef.current = true
+        setChallengerPickerOpen(false)
+        onOpenModelSettings()
+      } : undefined}
     />
     </>
   )
