@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch, Scale } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
   driftLabelsFor,
 } from '../lib/driftPanel'
-import type { AncestryEntry } from '../types/chat'
+import type { AncestryEntry, Target } from '../types/chat'
 import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
+import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
+import ChallengerPicker from './ChallengerPicker'
 import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
 import { useDriftPanelActions } from '../hooks/useDriftPanelActions'
 import { useConnectThreads } from '../hooks/useConnectThreads'
@@ -97,6 +99,10 @@ interface DriftPanelProps {
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
   onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
+  /** Persist the user's chosen Challenge challenger model (first-tap picker). */
+  onSetChallenger?: (target: Target) => void
+  /** Open model settings so the user can add a second model for cross-model Challenge. */
+  onOpenModelSettings?: () => void
   /** Lens keys ('drift'|'simplify'|'research'|'connect'|'challenge') that already have
    *  generated content for this term — marked in the "View as" bar so the user can tell
    *  which lenses are instant (already explored) vs. which would fire a fresh API call. */
@@ -152,6 +158,8 @@ export default function DriftPanel({
   onNavigateToSibling,
   onSwitchLens,
   exploredLenses,
+  onSetChallenger,
+  onOpenModelSettings,
 }: DriftPanelProps) {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -193,6 +201,10 @@ export default function DriftPanel({
   const [, setIsComparing] = useState(false)
   /** Tracks whether the auto-send for the current template drift has already fired. */
   const autoSentRef = useRef(false)
+  /** Cross-model Challenge: whether we've already shown the challenger picker for
+   *  this drift (so cancelling falls through to a same-model challenge, no nagging). */
+  const challengerPromptedRef = useRef(false)
+  const [challengerPickerOpen, setChallengerPickerOpen] = useState(false)
   const [driftSuggestions, setDriftSuggestions] = useState<string[]>([])
   /** Per-message AI-suggested highlight phrases (dotted underline, click to ask) */
   const [msgHighlights, setMsgHighlights] = useState<Map<string, string[]>>(new Map())
@@ -202,6 +214,19 @@ export default function DriftPanel({
   const driftLabels = useMemo(
     () => driftLabelsFor(`${selectedText} ${(contextMessages ?? []).slice(-3).map(m => m.text).join(' ')}`.slice(0, 400)),
     [selectedText, contextMessages]
+  )
+
+  // Cross-model Challenge: the challenger is the *main* model's counterpart — a
+  // different model the user picks once (and edits in Settings). resolveChallengerTarget
+  // returns null when none is set / it collapsed onto main / its preset is gone.
+  const mainKey = selectedTargets?.[0]?.key
+  const challenger = useMemo(
+    () => resolveChallengerTarget(aiSettings.challengerModel, aiSettings.modelPresets, mainKey),
+    [aiSettings.challengerModel, aiSettings.modelPresets, mainKey],
+  )
+  const challengerChoices = useMemo(
+    () => challengerOptions(aiSettings.modelPresets, mainKey),
+    [aiSettings.modelPresets, mainKey],
   )
 
   // Connect-mode logic (chips, bridge questions, visited-answer cache).
@@ -292,6 +317,7 @@ export default function DriftPanel({
 
       // Reset auto-send guard for each new open
       autoSentRef.current = false
+      challengerPromptedRef.current = false
 
       // Check if we have existing messages for this drift
       if (existingMessages && existingMessages.length > 0) {
@@ -370,6 +396,19 @@ export default function DriftPanel({
     // Only fire when the panel has exactly the system message (fresh drift, not restored)
     if (messages.length !== 1 || !messages[0]?.id?.startsWith('drift-system-')) return
 
+    // Cross-model Challenge gate: the first time, let the user pick the challenger
+    // model before the critique streams. Only when there's actually a second model
+    // to choose — with just one model, fall straight through to a same-model
+    // challenge (graceful, no dead-end). Cancelling does the same.
+    if (templateType === 'challenge') {
+      if (challengerPickerOpen) return
+      if (!challenger && challengerChoices.length > 0 && !challengerPromptedRef.current) {
+        challengerPromptedRef.current = true
+        setChallengerPickerOpen(true)
+        return
+      }
+    }
+
     // In connect chip-chat mode, send the chosen question directly
     const autoText = (templateType === 'connect' && connectQuestion)
       ? connectQuestion
@@ -384,7 +423,7 @@ export default function DriftPanel({
 
     return () => window.clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, templateType, messages.length, connectQuestion])
+  }, [isOpen, templateType, messages.length, connectQuestion, challenger?.key, challengerChoices.length, challengerPickerOpen])
 
   // connectAnswersRef is cleared in the init effect on each new open;
   // this separate effect was removed because it fired after init and wiped restored Connect state.
@@ -500,6 +539,7 @@ export default function DriftPanel({
   }, [isOpen, highlightMessageId, driftOnlyMessages])
 
   return (
+    <>
     <div
       className={`
       fixed inset-0 z-30
@@ -1139,7 +1179,10 @@ export default function DriftPanel({
                       data-drift-message-id={msg.id}
                     >
                       {msg.modelTag && (
-                        <span className="block mb-1 text-[10px] text-text-muted/60 pl-1">{msg.modelTag}</span>
+                        <span className="flex items-center gap-1 mb-1 text-[10px] text-text-muted/60 pl-1">
+                          {templateType === 'challenge' && <Scale className="w-2.5 h-2.5 text-rose-400/70" />}
+                          {templateType === 'challenge' ? `Challenged by ${msg.modelTag}` : msg.modelTag}
+                        </span>
                       )}
                       <div className="px-1 pb-1">
                         <div className={`text-sm text-text-secondary leading-relaxed ${getRTLClassName(msg.text)} ${streamingMsgId === msg.id ? 'drift-text-shimmer' : ''}`} dir={getTextDirection(msg.text)}>
@@ -1345,5 +1388,14 @@ export default function DriftPanel({
         </div>
       </div>
     </div>
+    <ChallengerPicker
+      open={challengerPickerOpen}
+      options={challengerChoices}
+      current={challenger}
+      onPick={(t) => { onSetChallenger?.(t); setChallengerPickerOpen(false) }}
+      onClose={() => setChallengerPickerOpen(false)}
+      onAddModel={onOpenModelSettings ? () => { setChallengerPickerOpen(false); onOpenModelSettings() } : undefined}
+    />
+    </>
   )
 }

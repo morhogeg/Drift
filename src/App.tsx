@@ -3240,6 +3240,8 @@ function App() {
         onNavigateToSibling={navigateToSiblingDrift}
         onSwitchLens={handleSwitchLens}
         exploredLenses={exploredLenses}
+        onSetChallenger={(target) => handleSaveSettings({ ...aiSettings, challengerModel: target })}
+        onOpenModelSettings={() => uiStore.setSettingsOpen(true)}
       />
 
       {/* Settings Modal */}
