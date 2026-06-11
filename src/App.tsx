@@ -2163,10 +2163,10 @@ function App() {
                         title: 'Branch without losing your place',
                         body: 'Pull any phrase into a thread of its own:',
                         points: [
-                          { name: 'Select', gloss: 'highlight a phrase in any reply' },
-                          { name: 'Branch', gloss: 'it opens as a focused side-thread' },
-                          { name: 'Push', gloss: 'optionally fold a finding back into the chat' },
-                          { name: 'Return', gloss: 'your place in the conversation is never lost' },
+                          { name: 'Select', gloss: 'highlight a phrase in any reply', dot: 'bg-accent-violet', text: 'text-accent-violet' },
+                          { name: 'Branch', gloss: 'it opens as a focused side-thread', dot: 'bg-accent-violet', text: 'text-accent-violet' },
+                          { name: 'Push', gloss: 'optionally fold a finding back into the chat', dot: 'bg-accent-violet', text: 'text-accent-violet' },
+                          { name: 'Return', gloss: 'your place in the conversation is never lost', dot: 'bg-accent-violet', text: 'text-accent-violet' },
                         ],
                       },
                       {
@@ -2185,9 +2185,9 @@ function App() {
                         title: 'Many threads, one insight',
                         body: 'Pull a whole exploration back together:',
                         points: [
-                          { name: 'Gather', gloss: 'every drift from the conversation' },
-                          { name: 'Weave', gloss: 'the AI threads them into one' },
-                          { name: 'Distill', gloss: 'a single, clear takeaway' },
+                          { name: 'Gather', gloss: 'every drift from the conversation', dot: 'bg-accent-violet', text: 'text-accent-violet' },
+                          { name: 'Weave', gloss: 'the AI threads them into one', dot: 'bg-accent-violet', text: 'text-accent-violet' },
+                          { name: 'Distill', gloss: 'a single, clear takeaway', dot: 'bg-accent-violet', text: 'text-accent-violet' },
                         ],
                       },
                     ].map(({ icon: Icon, lead, accent, width, title, body, points, stepped }) => (

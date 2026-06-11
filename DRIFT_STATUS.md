@@ -1,34 +1,34 @@
 # Drift — Quick Status
 
-**Date:** June 11, 2026 | **Branch:** `main` | **Build:** 59 (iOS + web)
+**Date:** June 11, 2026 | **Branch:** `main` | **Build:** 60 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-## Last Session (Jun 11) — Launch prep (i18n/RTL, key-leak fix, App Store assets)
+## Last Session (Jun 11) — Welcome-screen polish
 
-- **Arabic RTL + lang detection:** broadened `src/utils/rtl.ts` to Hebrew+Arabic; new `src/lib/lang.ts` central detector; `gemini.ts` delegates to it (directive unchanged). es/ru/ar/it/ja translation bundles were considered but **reverted** — EN/HE only (AI content already localizes).
-- **Prod API-key-leak fix:** dev key moved to `.env.development.local` (gitignored); `.env` emptied; `.env.production` pins keys empty. Verified prod bundle has no key, dev still does. Production = BYOK.
-- **App Store assets:** `APP_STORE_METADATA.md`, `PRIVACY_POLICY.md`, baseline `ios/App/App/PrivacyInfo.xcprivacy` (⚠️ add to Xcode target), and a screenshot pipeline (`scripts/shots.mjs` + `scripts/frame.mjs`) → 5 dark shots in `screenshots/final/`. All pushed to `main`.
-- **Open screenshot decisions (next session):** merge shots 2&3? render 6.9" (1320×2868)? (theme = dark, decided.)
+- **No scroll:** empty state now vertically centered (dropped the `22vh` push) and reclaims the input's reserved padding when `messages.length === 0`; compacted hero + "Pick up where you left off" cards (inline `✦ Synthesize N`, no standalone button row).
+- **Three capability tooltips** replace the single drift hint: **Highlight to drift** · **Shift lenses** · **Synthesize drifts**, with custom glass popovers that open downward (no header clipping).
+- **Definition-style copy** (no em dashes): bold name + quiet gloss subline. Drift & Synthesize as numbered steps; drift covers the full loop **Select → Branch → Push → Return**.
+- **Lenses color-coded** to each lens's real signature hue (Simplify amber · Deep dive blue · Connect cyan · Challenge rose), matching the in-panel "View as" bar; Challenge notes the rival-model second opinion.
+- Build 59→60, committed + pushed to `main`.
 
-## Previously (Jun 10) — Cloud accounts + UI polish
+## Previously (Jun 11) — Launch prep
 
-- Cloud accounts Phase 1–3 (Apple Sign-In, backup/restore, key-stripping + 6 vitest tests). Three branches ready for PR. UI polish (arc label, removed reopen chip, sidebar dedup). See HANDOFF.md §174.
+- Arabic RTL + centralized `src/lib/lang.ts` detection; prod API-key-leak fix (BYOK in prod); App Store metadata + privacy policy + 5 dark screenshots (`scripts/shots.mjs` + `frame.mjs`). EN/HE only (extra translation bundles reverted).
 
 ## Pending (priority order)
 
 - [ ] **☁️ Owner setup — Cloud accounts** — Firebase project + .env vars + Apple provider + Services ID + Xcode capability + plist + firestore.rules. Checklist in CLOUD_ACCOUNTS_HANDOFF.md.
 - [ ] **Open 3 cloud PRs** (code ready, awaiting `gh auth login`)
+- [ ] **TestFlight build 60:** archive in Xcode → App Store Connect
 - [ ] **App Store:** add `PrivacyInfo.xcprivacy` to Xcode target · age rating · confirm/create ASC app record · finalize metadata + screenshots
-- [ ] **TestFlight build 59:** archive in Xcode → App Store Connect
-- [ ] On-device pass: cloud accounts (sign-in flow, backup/restore, no Account UI when disabled, API keys not leaked)
-- [ ] On-device pass: UI polish (arc label, sidebar blanks, no reopen chip)
+- [ ] On-device pass: welcome screen (no scroll, tooltips, lens hues) · cloud accounts · UI polish
 - [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 
 ## Stack snapshot
 
-React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Cloud:** Firebase 12.x (JS SDK) + @capacitor-firebase/authentication 8.3 (Apple Sign-In native sheet iOS, popup web). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache. **Primary LLM:** Gemini REST+SSE. **Routed labs:** OpenRouter. **Single-model only**. **State:** Zustand 5 (chat/drift/model/ui/auth) · **DB:** IndexedDB via idb (v2 schema + users backup). Drift Map = pure SVG + HTML. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3k lines · DriftPanel.tsx ~1.3k.
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Cloud:** Firebase 12.x (JS SDK) + @capacitor-firebase/authentication 8.3 (Apple Sign-In native sheet iOS, popup web). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache. **Primary LLM:** Gemini REST+SSE. **Routed labs:** OpenRouter. **Single-model only**. **State:** Zustand 5 (chat/drift/model/ui/auth) · **DB:** IndexedDB via idb (v2 schema + users backup). Drift Map = pure SVG + HTML. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3.5k lines · DriftPanel.tsx ~1.3k.
 
 ## Key files
 
-`src/lib/cloudConfig.ts` (gate) · `src/services/firebase.ts` (lazy init) · `src/services/auth.ts` (Apple sign-in) · `src/services/cloudSync.ts` (backup/restore) · `src/services/cloudKeyStrip.ts` (key removal + tests) · `src/components/account/SignInSheet.tsx` · `src/components/account/AccountSection.tsx` · `src/App.tsx` (main integration) · `src/services/gemini.ts` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`
+`src/App.tsx` (welcome/empty state + main integration) · `src/lib/cloudConfig.ts` (gate) · `src/services/firebase.ts` (lazy init) · `src/services/auth.ts` (Apple sign-in) · `src/services/cloudSync.ts` (backup/restore) · `src/services/cloudKeyStrip.ts` (key removal + tests) · `src/components/account/SignInSheet.tsx` · `src/components/account/AccountSection.tsx` · `src/services/gemini.ts` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`
