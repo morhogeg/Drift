@@ -17,9 +17,7 @@ import type { ChatSession, Message } from '@/types/chat'
 import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 import { getCachedVectors } from '@/lib/embeddingBackfill'
-import { cosineSimilarity } from '@/services/embeddings'
-import { SEMANTIC_THRESHOLD } from '@/lib/semanticRecall'
-import { normalizeTerm } from '@/lib/termIndex'
+import { computeResonance, type ResonancePair } from '@/lib/driftResonance'
 import ResizeHandle from './ResizeHandle'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -674,11 +672,8 @@ function resonancePath(a: Laid, b: Laid): string {
 }
 
 /** A meaning-link between two laid-out drifts (ids + cosine score). */
-interface ResonancePair { a: string; b: string; score: number }
-
-// Keep the map calm: only the strongest few resonance edges are drawn.
-const RESONANCE_MAX_EDGES = 8
-const RESONANCE_MAX_PER_NODE = 2
+// (Type + thresholds + the pairing algorithm now live in @/lib/driftResonance,
+// shared with the Outline view so both render identical resonance links.)
 
 // ── The living graph (SVG) ───────────────────────────────────────────────────────
 
@@ -841,42 +836,19 @@ function GraphCanvas({
       if (cancelled) return
       if (vecs.length < 2) { setResonance([]); return }
       const vecById = new Map(vecs.map(v => [v.driftChatId, v.vec]))
-
-      // Lineage already has a river — resonance is only for the UNrelated-by-tree.
-      const isAncestorOf = (anc: Laid, desc: Laid): boolean => {
-        for (let p = desc.parent; p; p = p.parent) if (p.node.chat.id === anc.node.chat.id) return true
-        return false
-      }
-      // Lens threads on one term are near-identical embeddings — linking
-      // "Simplify: X" to "Deep dive: X" is noise, not insight.
-      const termOf = (l: Laid) => normalizeTerm(l.node.chat.metadata?.selectedText || l.node.chat.title || '')
-
-      const pairs: ResonancePair[] = []
-      for (let i = 0; i < drifts.length; i++) {
-        for (let j = i + 1; j < drifts.length; j++) {
-          const A = drifts[i], B = drifts[j]
-          const va = vecById.get(A.node.chat.id), vb = vecById.get(B.node.chat.id)
-          if (!va || !vb) continue
-          const ta = termOf(A)
-          if (ta && ta === termOf(B)) continue
-          if (isAncestorOf(A, B) || isAncestorOf(B, A)) continue
-          const score = cosineSimilarity(va, vb)
-          if (score >= SEMANTIC_THRESHOLD) pairs.push({ a: A.node.chat.id, b: B.node.chat.id, score })
+      // Reduce each drift to {id, term, ancestorIds} and hand off to the shared
+      // pairing core — the same logic the Outline view uses for its "also relates
+      // to" chips, so map arcs and outline chips never disagree.
+      const resoNodes = drifts.map(d => {
+        const ancestorIds: string[] = []
+        for (let p = d.parent; p; p = p.parent) ancestorIds.push(p.node.chat.id)
+        return {
+          id: d.node.chat.id,
+          term: d.node.chat.metadata?.selectedText || d.node.chat.title || '',
+          ancestorIds,
         }
-      }
-      pairs.sort((x, y) => y.score - x.score)
-
-      const perNode = new Map<string, number>()
-      const kept: ResonancePair[] = []
-      for (const p of pairs) {
-        if (kept.length >= RESONANCE_MAX_EDGES) break
-        if ((perNode.get(p.a) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
-        if ((perNode.get(p.b) ?? 0) >= RESONANCE_MAX_PER_NODE) continue
-        kept.push(p)
-        perNode.set(p.a, (perNode.get(p.a) ?? 0) + 1)
-        perNode.set(p.b, (perNode.get(p.b) ?? 0) + 1)
-      }
-      setResonance(kept)
+      })
+      setResonance(computeResonance(resoNodes, vecById))
     })()
 
     return () => { cancelled = true }
