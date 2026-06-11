@@ -56,6 +56,14 @@ const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
+// The Challenge lens routes to a *different* model and uses the adversarial prompt
+// ONLY for the explicit "Challenge this: X" turn. Follow-ups inside a challenge
+// thread (a typed question, or tapping a dotted suggestion) are ordinary
+// exploration on the main model — so we detect the challenge trigger by prefix.
+const CHALLENGE_TRIGGER_PREFIXES = ['Challenge this', 'ערער על זה']
+export const isChallengeTriggerText = (t: string): boolean =>
+  CHALLENGE_TRIGGER_PREFIXES.some(p => (t ?? '').startsWith(p))
+
 /** Turn a raw provider/network error into a clean, human sentence — never dump
  *  a raw API JSON body into the conversation. Returns '' for user aborts (Stop),
  *  which the caller treats as "don't show anything". */
