@@ -14,7 +14,7 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search } from 'lucide-react'
+import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search, ChevronRight, List, Waypoints } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 import { getCachedVectors } from '@/lib/embeddingBackfill'
 import { computeResonance, type ResonancePair } from '@/lib/driftResonance'
@@ -1621,6 +1621,218 @@ function useDragClose(onClose: () => void, enabled: boolean) {
   return { panelRef, onTouchStart, onTouchMove, onTouchEnd }
 }
 
+// ── View toggle (Map ⇄ Outline) ─────────────────────────────────────────────────
+// The map is the hero for active exploration; the outline is the hero for
+// *revisiting* — a scannable, readable digest of the same tree. Same data, two lenses.
+function ViewToggle({ mode, onChange }: { mode: 'map' | 'outline'; onChange: (m: 'map' | 'outline') => void }) {
+  const seg = (m: 'map' | 'outline', Icon: typeof GitBranch, label: string) => {
+    const active = mode === m
+    return (
+      <button
+        onClick={() => { if (!active) { haptics.selection(); onChange(m) } }}
+        className="inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors active:scale-95"
+        style={{
+          minHeight: 32, padding: '5px 12px', fontSize: 12,
+          background: active ? 'rgba(168,85,247,0.16)' : 'transparent',
+          color: active ? '#d8b4fe' : 'rgb(var(--color-text-muted))',
+          border: active ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+        }}
+        aria-pressed={active}
+        title={`${label} view`}
+      >
+        <Icon className="w-3.5 h-3.5" />
+        {label}
+      </button>
+    )
+  }
+  return (
+    <div
+      className="inline-flex items-center gap-0.5 rounded-full p-0.5"
+      style={{ background: 'rgb(var(--color-elevated))', border: '1px solid rgb(var(--color-border))' }}
+    >
+      {seg('map', GitBranch, 'Map')}
+      {seg('outline', List, 'Outline')}
+    </div>
+  )
+}
+
+// ── Outline view ─────────────────────────────────────────────────────────────────
+// The same TreeNode the map draws, rendered as a collapsible, readable outline.
+// Reuses the map's node helpers (nodeOwnLabel / nodeAnswerGist / lastAiPreview /
+// lensLabel / lensColor) and the shared computeResonance, so the two views never
+// disagree. Resonance — which the map can only draw as dashed arcs — reads here as
+// plain "also relates to" chips, the one thing an outline does better than a canvas.
+function OutlineView({
+  root, onSwitchChat, onOpenDrift, onSelect, selectedId,
+}: {
+  root: TreeNode
+  onSwitchChat: (id: string) => void
+  onOpenDrift?: (chat: ChatSession) => void
+  onSelect: (id: string) => void
+  selectedId: string | null
+}) {
+  // The synthetic "all explorations" root isn't a real chat — promote its children.
+  const roots = root.chat.id === ALL_ROOT_ID ? root.children : [root]
+
+  // One walk: index every node by id AND collect drifts (with ancestry) for resonance.
+  const { byId, driftNodes } = useMemo(() => {
+    const byId = new Map<string, TreeNode>()
+    const driftNodes: { id: string; term: string; ancestorIds: string[] }[] = []
+    const walk = (n: TreeNode, ancestors: string[]) => {
+      byId.set(n.chat.id, n)
+      if (n.chat.metadata?.isDrift) {
+        driftNodes.push({
+          id: n.chat.id,
+          term: n.chat.metadata?.selectedText || n.chat.title || '',
+          ancestorIds: ancestors,
+        })
+      }
+      const next = n.chat.id === ALL_ROOT_ID ? ancestors : [...ancestors, n.chat.id]
+      n.children.forEach(c => walk(c, next))
+    }
+    roots.forEach(r => walk(r, []))
+    return { byId, driftNodes }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root])
+
+  // Resonance, computed exactly like the map (shared core), surfaced as chips.
+  const [resonance, setResonance] = useState<ResonancePair[]>([])
+  useEffect(() => {
+    if (driftNodes.length < 2) { setResonance([]); return }
+    let cancelled = false
+    ;(async () => {
+      const vecs = await getCachedVectors(driftNodes.map(d => d.id))
+      if (cancelled) return
+      if (vecs.length < 2) { setResonance([]); return }
+      const vecById = new Map(vecs.map(v => [v.driftChatId, v.vec]))
+      setResonance(computeResonance(driftNodes, vecById))
+    })()
+    return () => { cancelled = true }
+  }, [driftNodes])
+
+  const relatedById = useMemo(() => {
+    const m = new Map<string, { id: string; label: string }[]>()
+    const add = (a: string, b: string) => {
+      const node = byId.get(b)
+      if (!node) return
+      const list = m.get(a) ?? []
+      list.push({ id: b, label: nodeTopic(node.chat, 24) })
+      m.set(a, list)
+    }
+    for (const p of resonance) { add(p.a, p.b); add(p.b, p.a) }
+    return m
+  }, [resonance, byId])
+
+  // Auto-expand the top two levels so the shape is legible on open without burying
+  // the user in a deep accordion; deeper branches start collapsed.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const s = new Set<string>()
+    const walk = (n: TreeNode, depth: number) => {
+      if (depth < 2 && n.children.length) s.add(n.chat.id)
+      n.children.forEach(c => walk(c, depth + 1))
+    }
+    roots.forEach(r => walk(r, 0))
+    return s
+  })
+  const toggle = (id: string) => setExpanded(prev => {
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    return n
+  })
+
+  // Open: a drift opens in the focused panel; the origin conversation switches chat.
+  const open = (node: TreeNode) => {
+    const id = node.chat.id
+    if (id === ALL_ROOT_ID) return
+    haptics.selection()
+    onSelect(id)
+    if (node.chat.metadata?.isDrift) onOpenDrift?.(node.chat)
+    else onSwitchChat(id)
+  }
+
+  const renderNode = (node: TreeNode, depth: number) => {
+    const id = node.chat.id
+    const hasKids = node.children.length > 0
+    const isOpen = expanded.has(id)
+    const selected = selectedId === id
+    const color = lensColor(node)
+    const isDrift = !!node.chat.metadata?.isDrift
+    const gist = isDrift ? nodeAnswerGist(node.chat) : ''
+    const preview = selected ? lastAiPreview(node.chat) : undefined
+    const related = relatedById.get(id) ?? []
+    return (
+      <div key={id}>
+        <div
+          className="dkg-outline-row flex items-start gap-2 rounded-lg cursor-pointer transition-colors hover:bg-white/[0.03]"
+          style={{
+            paddingLeft: 8 + depth * 16, paddingRight: 8, paddingTop: 7, paddingBottom: 7,
+            ...(selected ? { background: 'rgba(168,85,247,0.08)' } : {}),
+          }}
+          onClick={() => open(node)}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); if (hasKids) toggle(id) }}
+            className="flex items-center justify-center shrink-0 rounded"
+            style={{ width: 20, height: 20, marginTop: 1, color: 'rgb(var(--color-text-muted))', visibility: hasKids ? 'visible' : 'hidden' }}
+            aria-label={isOpen ? 'Collapse' : 'Expand'}
+          >
+            <ChevronRight className="w-3.5 h-3.5 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
+          </button>
+          <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: color, boxShadow: `0 0 6px ${color}88` }} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span dir="auto" className="text-[13px] font-medium leading-snug truncate" style={{ color: 'rgb(var(--color-text-primary))' }}>
+                {nodeOwnLabel(node)}
+              </span>
+              {isDrift && (
+                <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a` }}>
+                  {lensLabel(node)}
+                </span>
+              )}
+            </div>
+            {gist && (
+              <div dir="auto" className="text-[11.5px] leading-snug mt-0.5 truncate" style={{ color: 'rgb(var(--color-text-secondary))' }}>{gist}</div>
+            )}
+            {preview && (
+              <div
+                dir="auto"
+                className="text-[11.5px] leading-relaxed mt-1"
+                style={{ color: 'rgb(var(--color-text-muted))', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+              >
+                {preview}
+              </div>
+            )}
+            {related.length > 0 && (
+              <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                <Waypoints className="w-3 h-3 shrink-0" style={{ color: '#22d3ee' }} />
+                <span className="text-[10px] shrink-0" style={{ color: 'rgba(34,211,238,0.7)' }}>also relates to</span>
+                {related.map(r => (
+                  <button
+                    key={r.id}
+                    dir="auto"
+                    onClick={(e) => { e.stopPropagation(); const n = byId.get(r.id); if (n) open(n) }}
+                    className="text-[10px] rounded-full px-1.5 py-0.5 transition-colors hover:brightness-125"
+                    style={{ color: '#67e8f9', background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)' }}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        {hasKids && isOpen && <div>{node.children.map(c => renderNode(c, depth + 1))}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full overflow-y-auto px-2 py-2" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+      {roots.map(r => renderNode(r, 0))}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DriftKnowledgeGraph({
@@ -1664,6 +1876,9 @@ export default function DriftKnowledgeGraph({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
 
+  // Map = active exploration; Outline = revisiting. Same tree, two representations.
+  const [viewMode, setViewMode] = useState<'map' | 'outline'>('map')
+
   // Synthesize the current conversation's drifts. Chat scope only.
   const synthBar = scope === 'chat' && rootId && driftCount >= 2 && onSynthesize ? (
     <div className="px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid rgb(var(--color-border))' }}>
@@ -1691,20 +1906,42 @@ export default function DriftKnowledgeGraph({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const graph = tree ? (
+  const switchAndClose = (id: string) => { onSwitchChat(id); onClose() }
+  const openDriftAndClose = onOpenDrift ? (chat: ChatSession) => { onOpenDrift(chat); onClose() } : undefined
+
+  const graph = !tree ? (
+    <EmptyState isMobile={isMobile} />
+  ) : viewMode === 'map' ? (
     <GraphCanvas
       root={tree}
       activeChatId={activeChatId}
-      onSwitchChat={(id) => { onSwitchChat(id); onClose() }}
-      onOpenDrift={onOpenDrift ? (chat => { onOpenDrift(chat); onClose() }) : undefined}
+      onSwitchChat={switchAndClose}
+      onOpenDrift={openDriftAndClose}
       isMobile={isMobile}
       onSelect={onSelect}
       selectedId={selectedId}
       expanded={fullscreen}
     />
   ) : (
-    <EmptyState isMobile={isMobile} />
+    <OutlineView
+      root={tree}
+      onSwitchChat={switchAndClose}
+      onOpenDrift={openDriftAndClose}
+      onSelect={onSelect}
+      selectedId={selectedId}
+    />
   )
+
+  // A thin row hosting the Map/Outline toggle. The "Explored" strip below stays
+  // map-only (the outline is itself a topic list, so the chips are redundant there).
+  const controlRow = tree ? (
+    <div
+      className="px-4 py-2 flex items-center flex-shrink-0"
+      style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
+    >
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
+    </div>
+  ) : null
 
   // ── Mobile: full-screen view ──
   if (isMobile) {
@@ -1760,7 +1997,8 @@ export default function DriftKnowledgeGraph({
             </div>
           </div>
 
-          {tree && <TopicsStrip topics={topics} onJump={onSelect} isMobile activeId={selectedId} />}
+          {controlRow}
+          {tree && viewMode === 'map' && <TopicsStrip topics={topics} onJump={onSelect} isMobile activeId={selectedId} />}
           {synthBar}
 
           <div className="flex-1 relative overflow-hidden">{graph}</div>
@@ -1847,7 +2085,8 @@ export default function DriftKnowledgeGraph({
           </div>
         </div>
 
-        {tree && <TopicsStrip topics={topics} onJump={onSelect} isMobile={false} activeId={selectedId} />}
+        {controlRow}
+        {tree && viewMode === 'map' && <TopicsStrip topics={topics} onJump={onSelect} isMobile={false} activeId={selectedId} />}
         {synthBar}
 
         <div className="flex-1 relative overflow-hidden">{graph}</div>
