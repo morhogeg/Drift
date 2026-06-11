@@ -1366,7 +1366,9 @@ function GraphCanvas({
         exploring. */}
     {selectedId && byId.has(selectedId) && (
       <DetailCard
-        laid={byId.get(selectedId)!}
+        node={byId.get(selectedId)!.node}
+        depth={byId.get(selectedId)!.depth}
+        lineage={lineageChain(byId.get(selectedId)!)}
         isMobile={isMobile}
         onOpen={() => handleOpen(byId.get(selectedId)!)}
         onDismiss={() => onSelect('')}
@@ -1378,20 +1380,22 @@ function GraphCanvas({
 
 // ── Floating detail card for the selected node ───────────────────────────────────
 
+// The bottom snippet preview shown when a node is selected — shared by the Map
+// (fed a laid-out node) and the Outline (fed a TreeNode + its depth/lineage), so
+// both surfaces present a selected node identically.
 function DetailCard({
-  laid, isMobile, onOpen, onDismiss,
-}: { laid: Laid; isMobile: boolean; onOpen: () => void; onDismiss: () => void }) {
-  const h = hueAt(laid.depth)
-  const isDrift = laid.depth > 0
-  const title = isDrift ? nodeTopic(laid.node.chat, null) : (laid.node.chat.title || 'Untitled')
-  // Bug 7: ancestry leading to this node, minus the node itself (shown as title).
-  const lineage = lineageChain(laid)
+  node, depth, lineage, isMobile, onOpen, onDismiss,
+}: { node: TreeNode; depth: number; lineage: string[]; isMobile: boolean; onOpen: () => void; onDismiss: () => void }) {
+  const h = hueAt(depth)
+  const isDrift = depth > 0
+  const title = isDrift ? nodeTopic(node.chat, null) : (node.chat.title || 'Untitled')
+  // Ancestry leading to this node, minus the node itself (shown as the title).
   const trail = lineage.slice(0, -1)
   const trailArrow = dirArrow(trail.join(' '))
-  const preview = lastAiPreview(laid.node.chat)
-  const ts = laid.node.chat.createdAt ? timeAgo(laid.node.chat.createdAt) : null
-  const msgs = laid.node.chat.messages.length
-  const selRaw = laid.node.chat.metadata?.selectedText?.replace(/^["']|["']$/g, '').trim()
+  const preview = lastAiPreview(node.chat)
+  const ts = node.chat.createdAt ? timeAgo(node.chat.createdAt) : null
+  const msgs = node.chat.messages.length
+  const selRaw = node.chat.metadata?.selectedText?.replace(/^["']|["']$/g, '').trim()
   const selTerm = selRaw && isDrift && !title.includes(selRaw) ? selRaw : ''
 
   return (
@@ -1414,9 +1418,9 @@ function DetailCard({
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <span
               className="text-[10px] font-bold uppercase tracking-widest"
-              style={{ color: isDrift ? lensColor(laid.node) : h.core }}
+              style={{ color: isDrift ? lensColor(node) : h.core }}
             >
-              {isDrift ? `↗ ${lensLabel(laid.node)}` : 'Origin'}
+              {isDrift ? `↗ ${lensLabel(node)}` : 'Origin'}
             </span>
             <button
               onClick={onDismiss}
@@ -1663,9 +1667,10 @@ function ViewToggle({ mode, onChange }: { mode: 'map' | 'outline'; onChange: (m:
 // disagree. Resonance — which the map can only draw as dashed arcs — reads here as
 // plain "also relates to" chips, the one thing an outline does better than a canvas.
 function OutlineView({
-  root, onSwitchChat, onOpenDrift, onSelect, selectedId,
+  root, isMobile, onSwitchChat, onOpenDrift, onSelect, selectedId,
 }: {
   root: TreeNode
+  isMobile: boolean
   onSwitchChat: (id: string) => void
   onOpenDrift?: (chat: ChatSession) => void
   onSelect: (id: string) => void
@@ -1674,12 +1679,18 @@ function OutlineView({
   // The synthetic "all explorations" root isn't a real chat — promote its children.
   const roots = root.chat.id === ALL_ROOT_ID ? root.children : [root]
 
-  // One walk: index every node by id AND collect drifts (with ancestry) for resonance.
-  const { byId, driftNodes } = useMemo(() => {
+  // One walk: index every node by id, capture each node's depth + parent (so the
+  // shared DetailCard can show lineage), AND collect drifts (with ancestry) for
+  // resonance — all the per-node lookups the view needs, computed once.
+  const { byId, driftNodes, depthById, parentIdById } = useMemo(() => {
     const byId = new Map<string, TreeNode>()
+    const depthById = new Map<string, number>()
+    const parentIdById = new Map<string, string | null>()
     const driftNodes: { id: string; term: string; ancestorIds: string[] }[] = []
-    const walk = (n: TreeNode, ancestors: string[]) => {
+    const walk = (n: TreeNode, ancestors: string[], depth: number, parentId: string | null) => {
       byId.set(n.chat.id, n)
+      depthById.set(n.chat.id, depth)
+      parentIdById.set(n.chat.id, parentId)
       if (n.chat.metadata?.isDrift) {
         driftNodes.push({
           id: n.chat.id,
@@ -1688,12 +1699,24 @@ function OutlineView({
         })
       }
       const next = n.chat.id === ALL_ROOT_ID ? ancestors : [...ancestors, n.chat.id]
-      n.children.forEach(c => walk(c, next))
+      n.children.forEach(c => walk(c, next, depth + 1, n.chat.id))
     }
-    roots.forEach(r => walk(r, []))
-    return { byId, driftNodes }
+    roots.forEach(r => walk(r, [], 0, null))
+    return { byId, driftNodes, depthById, parentIdById }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [root])
+
+  // Ancestry labels for a node (root→…→self), for the DetailCard's source trail.
+  const lineageFor = (id: string): string[] => {
+    const chain: string[] = []
+    let cur: string | null = id
+    while (cur) {
+      const n = byId.get(cur)
+      if (n) chain.unshift(nodeOwnLabel(n))
+      cur = parentIdById.get(cur) ?? null
+    }
+    return chain
+  }
 
   // Resonance, computed exactly like the map (shared core), surfaced as chips.
   const [resonance, setResonance] = useState<ResonancePair[]>([])
@@ -1740,12 +1763,19 @@ function OutlineView({
     return n
   })
 
-  // Open: a drift opens in the focused panel; the origin conversation switches chat.
-  const open = (node: TreeNode) => {
+  // Tap a row to SELECT it — like tapping a square on the map: it shows the
+  // bottom snippet preview (DetailCard), whose button does the actual navigation.
+  const select = (node: TreeNode) => {
     const id = node.chat.id
     if (id === ALL_ROOT_ID) return
     haptics.selection()
     onSelect(id)
+  }
+  // Navigate (from the DetailCard's "Open this drift" / "Go to chat" button).
+  const openDrift = (node: TreeNode) => {
+    const id = node.chat.id
+    if (id === ALL_ROOT_ID) return
+    haptics.selection()
     if (node.chat.metadata?.isDrift) onOpenDrift?.(node.chat)
     else onSwitchChat(id)
   }
@@ -1758,17 +1788,25 @@ function OutlineView({
     const color = lensColor(node)
     const isDrift = !!node.chat.metadata?.isDrift
     const gist = isDrift ? nodeAnswerGist(node.chat) : ''
-    const preview = selected ? lastAiPreview(node.chat) : undefined
     const related = relatedById.get(id) ?? []
+    // "Mother" question = one that branched into sub-explorations. Give it a subtle
+    // theme-grey backing and let its label wrap fully (no truncation) so the spine
+    // of the exploration stays scannable. Selection still wins visually.
+    const isMother = hasKids
+    const rowBg = selected
+      ? 'rgba(168,85,247,0.14)'
+      : isMother
+      ? 'rgb(var(--color-elevated))'
+      : undefined
     return (
       <div key={id}>
         <div
-          className="dkg-outline-row flex items-start gap-2 rounded-lg cursor-pointer transition-colors hover:bg-white/[0.03]"
+          className={`dkg-outline-row flex items-start gap-2 rounded-lg cursor-pointer transition-colors ${rowBg ? '' : 'hover:bg-white/[0.03]'}`}
           style={{
             paddingLeft: 8 + depth * 16, paddingRight: 8, paddingTop: 7, paddingBottom: 7,
-            ...(selected ? { background: 'rgba(168,85,247,0.08)' } : {}),
+            ...(rowBg ? { background: rowBg } : {}),
           }}
-          onClick={() => open(node)}
+          onClick={() => select(node)}
         >
           <button
             onClick={(e) => { e.stopPropagation(); if (hasKids) toggle(id) }}
@@ -1780,26 +1818,31 @@ function OutlineView({
           </button>
           <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: color, boxShadow: `0 0 6px ${color}88` }} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span dir="auto" className="text-[13px] font-medium leading-snug truncate" style={{ color: 'rgb(var(--color-text-primary))' }}>
+            <div className="flex items-start gap-1.5 flex-wrap">
+              <span
+                dir="auto"
+                className="text-[13px] font-medium leading-snug"
+                style={isMother
+                  // Mother questions wrap fully — no clamp — so they're never cut off.
+                  ? { color: 'rgb(var(--color-text-primary))', overflowWrap: 'anywhere' }
+                  // Leaves use the horizontal room for up to two lines before clamping.
+                  : { color: 'rgb(var(--color-text-primary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+              >
                 {nodeOwnLabel(node)}
               </span>
               {isDrift && (
-                <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a` }}>
+                <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a`, marginTop: 1 }}>
                   {lensLabel(node)}
                 </span>
               )}
             </div>
             {gist && (
-              <div dir="auto" className="text-[11.5px] leading-snug mt-0.5 truncate" style={{ color: 'rgb(var(--color-text-secondary))' }}>{gist}</div>
-            )}
-            {preview && (
               <div
                 dir="auto"
-                className="text-[11.5px] leading-relaxed mt-1"
-                style={{ color: 'rgb(var(--color-text-muted))', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                className="text-[11.5px] leading-snug mt-0.5"
+                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
-                {preview}
+                {gist}
               </div>
             )}
             {related.length > 0 && (
@@ -1810,7 +1853,7 @@ function OutlineView({
                   <button
                     key={r.id}
                     dir="auto"
-                    onClick={(e) => { e.stopPropagation(); const n = byId.get(r.id); if (n) open(n) }}
+                    onClick={(e) => { e.stopPropagation(); const n = byId.get(r.id); if (n) select(n) }}
                     className="text-[10px] rounded-full px-1.5 py-0.5 transition-colors hover:brightness-125"
                     style={{ color: '#67e8f9', background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)' }}
                   >
@@ -1826,9 +1869,23 @@ function OutlineView({
     )
   }
 
+  const selNode = selectedId ? byId.get(selectedId) : null
+
   return (
-    <div className="h-full overflow-y-auto px-2 py-2" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-      {roots.map(r => renderNode(r, 0))}
+    <div className="h-full flex flex-col">
+      <div className="flex-1 overflow-y-auto px-2 py-2" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+        {roots.map(r => renderNode(r, 0))}
+      </div>
+      {selNode && (
+        <DetailCard
+          node={selNode}
+          depth={depthById.get(selNode.chat.id) ?? 0}
+          lineage={lineageFor(selNode.chat.id)}
+          isMobile={isMobile}
+          onOpen={() => openDrift(selNode)}
+          onDismiss={() => onSelect('')}
+        />
+      )}
     </div>
   )
 }
@@ -1925,6 +1982,7 @@ export default function DriftKnowledgeGraph({
   ) : (
     <OutlineView
       root={tree}
+      isMobile={isMobile}
       onSwitchChat={switchAndClose}
       onOpenDrift={openDriftAndClose}
       onSelect={onSelect}
@@ -1932,16 +1990,10 @@ export default function DriftKnowledgeGraph({
     />
   )
 
-  // A thin row hosting the Map/Outline toggle. The "Explored" strip below stays
+  // The Map/Outline toggle now lives in the header action row (next to close /
+  // full-screen) so it costs no vertical space. The "Explored" strip stays
   // map-only (the outline is itself a topic list, so the chips are redundant there).
-  const controlRow = tree ? (
-    <div
-      className="px-4 py-2 flex items-center flex-shrink-0"
-      style={{ borderBottom: '1px solid rgb(var(--color-border))' }}
-    >
-      <ViewToggle mode={viewMode} onChange={setViewMode} />
-    </div>
-  ) : null
+  const viewToggle = tree ? <ViewToggle mode={viewMode} onChange={setViewMode} /> : null
 
   // ── Mobile: full-screen view ──
   if (isMobile) {
@@ -1985,6 +2037,7 @@ export default function DriftKnowledgeGraph({
                 )}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
+                {viewToggle}
                 <button
                   onClick={onClose}
                   className="flex items-center justify-center rounded-full active:scale-90"
@@ -1997,7 +2050,6 @@ export default function DriftKnowledgeGraph({
             </div>
           </div>
 
-          {controlRow}
           {tree && viewMode === 'map' && <TopicsStrip topics={topics} onJump={onSelect} isMobile activeId={selectedId} />}
           {synthBar}
 
@@ -2062,6 +2114,7 @@ export default function DriftKnowledgeGraph({
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              {viewToggle}
               {onToggleFullscreen && (
                 <button
                   onClick={onToggleFullscreen}
@@ -2085,7 +2138,6 @@ export default function DriftKnowledgeGraph({
           </div>
         </div>
 
-        {controlRow}
         {tree && viewMode === 'map' && <TopicsStrip topics={topics} onJump={onSelect} isMobile={false} activeId={selectedId} />}
         {synthBar}
 
