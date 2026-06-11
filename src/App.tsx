@@ -236,6 +236,11 @@ function App() {
   // Drift Map full-screen (desktop): covers the whole viewport. Tracked here so the
   // main column can drop its right-margin reserve while the map is full-screen.
   const [mapFullscreen, setMapFullscreen] = useState(false)
+  // Return-to-outline: when a drift/chat is opened from the outline we remember the
+  // node so we can offer a one-tap "Back to Outline" and re-focus + pulse it there.
+  const [outlineReturn, setOutlineReturn] = useState<{ nodeId: string } | null>(null)
+  // Seeds the graph's view + focus on its next open (consumed on the return trip).
+  const [mapEntry, setMapEntry] = useState<{ viewMode: 'map' | 'outline'; focusNodeId?: string } | null>(null)
   const [isLgUp, setIsLgUp] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -282,7 +287,23 @@ function App() {
     const now = Date.now()
     if (now - graphToggleLockRef.current < 450) return
     graphToggleLockRef.current = now
+    // A manual open is a fresh Map view — drop any pending return-to-outline focus.
+    setMapEntry(null)
     setKnowledgeGraphOpen(!useUIStore.getState().knowledgeGraphOpen)
+  }
+
+  // Drift/chat was opened from the outline — remember it for "Back to Outline".
+  const handleOpenFromOutline = (nodeId: string) => setOutlineReturn({ nodeId })
+
+  // One tap back to the outline: reopen the graph already in outline view, focused
+  // on (and pulsing) the node the user came from, and close the drift panel.
+  const handleReturnToOutline = () => {
+    const nodeId = outlineReturn?.nodeId
+    if (!nodeId) return
+    setMapEntry({ viewMode: 'outline', focusNodeId: nodeId })
+    if (driftStore.driftOpen) driftStore.closeDrift()
+    setOutlineReturn(null)
+    setKnowledgeGraphOpen(true)
   }
 
   // ── Swipe gesture: right → close sidebar only ──────────────────────────────
@@ -3162,7 +3183,7 @@ function App() {
         onResizeStart={startResize}
         onResizeEnd={endResize}
         resizing={resizing}
-        onClose={handleCloseDrift}
+        onClose={() => { setOutlineReturn(null); handleCloseDrift() }}
         selectedText={driftContext?.selectedText || ''}
         contextMessages={driftContext?.contextMessages || []}
         sourceMessageId={driftContext?.sourceMessageId || ''}
@@ -3314,6 +3335,25 @@ function App() {
         onOpenModelSettings={() => uiStore.setSettingsOpen(true)}
       />
 
+      {/* Return-to-Outline pill — shown while a drift opened FROM the outline is in
+          view. One tap reopens the outline, focused on (and pulsing) that node. */}
+      {outlineReturn && driftOpen && !knowledgeGraphOpen && (
+        <button
+          onClick={handleReturnToOutline}
+          className="fixed z-[60] left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[12.5px] font-semibold text-white active:scale-95 transition-transform animate-scale-in"
+          style={{
+            top: 'calc(env(safe-area-inset-top) + 12px)',
+            background: 'linear-gradient(135deg, rgba(168,85,247,0.95), rgba(124,58,237,0.95))',
+            border: '1px solid rgba(216,180,254,0.5)',
+            boxShadow: '0 6px 22px rgba(124,58,237,0.45)',
+          }}
+          title="Back to the outline"
+        >
+          <CornerUpLeft className="w-3.5 h-3.5" />
+          Back to Outline
+        </button>
+      )}
+
       {/* Settings Modal */}
       <Settings
         isOpen={settingsOpen}
@@ -3363,7 +3403,10 @@ function App() {
           onResize={(clientX) => setMapWidth(clampMap(window.innerWidth - clientX))}
           onResizeStart={startResize}
           onResizeEnd={endResize}
-          onClose={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false) }}
+          onClose={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false); setMapEntry(null) }}
+          initialViewMode={mapEntry?.viewMode}
+          focusNodeId={mapEntry?.focusNodeId}
+          onOpenFromOutline={handleOpenFromOutline}
           onSwitchChat={switchChat}
           onScrollToMessage={(msgId) => {
             const el = document.querySelector(`[data-message-id="${msgId}"]`)

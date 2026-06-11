@@ -44,6 +44,13 @@ interface Props {
   onResize?: (clientX: number) => void
   onResizeStart?: () => void
   onResizeEnd?: () => void
+  /** Reopen the graph already on a specific view (used by "return to outline"). */
+  initialViewMode?: 'map' | 'outline'
+  /** A node to select + glow on open — orients the user back to where they were. */
+  focusNodeId?: string
+  /** Fired when a drift/chat is opened from the OUTLINE, so the app can offer a
+   *  one-tap "return to outline" and re-focus this node on the way back. */
+  onOpenFromOutline?: (nodeId: string) => void
 }
 
 interface TreeNode {
@@ -1667,7 +1674,7 @@ function ViewToggle({ mode, onChange }: { mode: 'map' | 'outline'; onChange: (m:
 // disagree. Resonance — which the map can only draw as dashed arcs — reads here as
 // plain "also relates to" chips, the one thing an outline does better than a canvas.
 function OutlineView({
-  root, isMobile, onSwitchChat, onOpenDrift, onSelect, selectedId,
+  root, isMobile, onSwitchChat, onOpenDrift, onSelect, selectedId, focusNodeId,
 }: {
   root: TreeNode
   isMobile: boolean
@@ -1675,6 +1682,8 @@ function OutlineView({
   onOpenDrift?: (chat: ChatSession) => void
   onSelect: (id: string) => void
   selectedId: string | null
+  /** When set (return-to-outline), scroll this node into view and pulse it twice. */
+  focusNodeId?: string
 }) {
   // The synthetic "all explorations" root isn't a real chat — promote its children.
   const roots = root.chat.id === ALL_ROOT_ID ? root.children : [root]
@@ -1747,7 +1756,8 @@ function OutlineView({
   }, [resonance, byId])
 
   // Auto-expand the top two levels so the shape is legible on open without burying
-  // the user in a deep accordion; deeper branches start collapsed.
+  // the user in a deep accordion; deeper branches start collapsed. When returning
+  // to a focused node, also expand its whole ancestor chain so the row is visible.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const s = new Set<string>()
     const walk = (n: TreeNode, depth: number) => {
@@ -1755,6 +1765,10 @@ function OutlineView({
       n.children.forEach(c => walk(c, depth + 1))
     }
     roots.forEach(r => walk(r, 0))
+    if (focusNodeId) {
+      let p = parentIdById.get(focusNodeId) ?? null
+      while (p) { s.add(p); p = parentIdById.get(p) ?? null }
+    }
     return s
   })
   const toggle = (id: string) => setExpanded(prev => {
@@ -1762,6 +1776,18 @@ function OutlineView({
     if (n.has(id)) n.delete(id); else n.add(id)
     return n
   })
+
+  // Return-to-outline: scroll the focused row into view and pulse it twice so the
+  // user re-finds where they were before opening a chat from the outline.
+  const focusRowRef = useRef<HTMLDivElement | null>(null)
+  const [glowId, setGlowId] = useState<string | null>(focusNodeId ?? null)
+  useEffect(() => {
+    if (!focusNodeId) return
+    setGlowId(focusNodeId)
+    const t1 = window.setTimeout(() => focusRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 90)
+    const t2 = window.setTimeout(() => setGlowId(null), 2000)
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2) }
+  }, [focusNodeId])
 
   // Tap a row to SELECT it — like tapping a square on the map: it shows the
   // bottom snippet preview (DetailCard), whose button does the actual navigation.
@@ -1798,10 +1824,12 @@ function OutlineView({
       : isMother
       ? 'rgb(var(--color-elevated))'
       : undefined
+    const glowing = glowId === id
     return (
       <div key={id}>
         <div
-          className={`dkg-outline-row flex items-start gap-2 rounded-lg cursor-pointer transition-colors ${rowBg ? '' : 'hover:bg-white/[0.03]'}`}
+          ref={glowing ? focusRowRef : undefined}
+          className={`dkg-outline-row flex items-start gap-2 rounded-lg cursor-pointer transition-colors ${rowBg ? '' : 'hover:bg-white/[0.03]'} ${glowing ? 'dkg-outline-glow' : ''}`}
           style={{
             paddingLeft: 8 + depth * 16, paddingRight: 8, paddingTop: 7, paddingBottom: 7,
             ...(rowBg ? { background: rowBg } : {}),
@@ -1895,7 +1923,7 @@ function OutlineView({
 export default function DriftKnowledgeGraph({
   chatHistory, activeChatId, onClose, onSwitchChat, onOpenDrift, getTempMessages,
   onSynthesize, synthesizing, fullscreen, onToggleFullscreen, width, onResize,
-  onResizeStart, onResizeEnd,
+  onResizeStart, onResizeEnd, initialViewMode, focusNodeId, onOpenFromOutline,
 }: Props) {
   const isMobile = useIsMobile()
   // True while the user is dragging the resize handle — suppresses the width
@@ -1930,11 +1958,13 @@ export default function DriftKnowledgeGraph({
   // Start with NO selection so the map is the hero on open (the active node still
   // highlights via activeChatId). The docked inspector appears only when a card is
   // tapped — keeping the full canvas free for exploration until then.
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Selection + view can be seeded from props when the app reopens the graph to
+  // "return to the outline" (focus the node the user just came back from).
+  const [selectedId, setSelectedId] = useState<string | null>(focusNodeId ?? null)
   const onSelect = useCallback((id: string) => setSelectedId(id || null), [])
 
   // Map = active exploration; Outline = revisiting. Same tree, two representations.
-  const [viewMode, setViewMode] = useState<'map' | 'outline'>('map')
+  const [viewMode, setViewMode] = useState<'map' | 'outline'>(initialViewMode ?? 'map')
 
   // Synthesize the current conversation's drifts. Chat scope only.
   const synthBar = scope === 'chat' && rootId && driftCount >= 2 && onSynthesize ? (
@@ -1964,7 +1994,9 @@ export default function DriftKnowledgeGraph({
   }, [onClose])
 
   const switchAndClose = (id: string) => { onSwitchChat(id); onClose() }
-  const openDriftAndClose = onOpenDrift ? (chat: ChatSession) => { onOpenDrift(chat); onClose() } : undefined
+  // Opening a DRIFT from the OUTLINE records the node so the app can offer a
+  // one-tap "return to outline" and re-focus + pulse it on the way back.
+  const openDriftAndClose = onOpenDrift ? (chat: ChatSession) => { if (viewMode === 'outline') onOpenFromOutline?.(chat.id); onOpenDrift(chat); onClose() } : undefined
 
   const graph = !tree ? (
     <EmptyState isMobile={isMobile} />
@@ -1987,6 +2019,7 @@ export default function DriftKnowledgeGraph({
       onOpenDrift={openDriftAndClose}
       onSelect={onSelect}
       selectedId={selectedId}
+      focusNodeId={focusNodeId}
     />
   )
 
@@ -2336,6 +2369,13 @@ function StyleBlock() {
         0%   { opacity: 0.95; transform: scale(1); }
         70%  { opacity: 0.5; }
         100% { opacity: 0; transform: scale(1.07); }
+      }
+
+      /* Return-to-outline: pulse the row twice so the user re-finds their place. */
+      .dkg-outline-glow { animation: dkgOutlineGlow 0.8s ease-in-out 2; }
+      @keyframes dkgOutlineGlow {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(168,85,247,0); }
+        50%      { box-shadow: 0 0 13px 2px rgba(168,85,247,0.55); }
       }
 
       /* ── Light theme: the map becomes a bright, airy space — cards turn light with
