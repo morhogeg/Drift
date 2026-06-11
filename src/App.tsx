@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense } from 'react'
-import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle } from 'lucide-react'
+import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle, Layers } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
 import DriftPanel from './components/DriftPanel'
@@ -2041,7 +2041,7 @@ function App() {
         {/* Messages area */}
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0" style={{ touchAction: 'pan-y' }}>
-            <div style={{ paddingBottom: selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))' }} className={`h-full overflow-y-auto pt-6 space-y-2 chat-messages-container`} data-context-links-version={contextLinkVersion}>
+            <div style={{ paddingBottom: messages.length === 0 ? 'calc(6.5rem + var(--kb-h, 0px))' : (selectedTargets.length > 1 ? 'calc(12rem + var(--kb-h, 0px))' : 'calc(9rem + var(--kb-h, 0px))') }} className={`h-full overflow-y-auto ${messages.length === 0 ? 'pt-0' : 'pt-6'} space-y-2 chat-messages-container`} data-context-links-version={contextLinkVersion}>
 
               {/* Scroll to bottom button */}
               {showScrollButton && (
@@ -2135,9 +2135,9 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="flex flex-col items-center text-center px-8 pt-[22vh] pb-16">
-                  <div className="mb-6">
-                    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" className="mx-auto mb-5" strokeLinecap="round" strokeLinejoin="round">
+                <div className="min-h-full flex flex-col items-center justify-center text-center px-8 py-5">
+                  <div className="mb-4">
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
                         <linearGradient id="dg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                           <stop stopColor="#ff006e"/>
@@ -2150,21 +2150,93 @@ function App() {
                       <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8"/>
                       <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
                     </svg>
-                    <h2 className="text-text-primary font-semibold text-[22px] leading-snug mb-2">What's on your mind?</h2>
-                    <p className="text-text-muted text-[14px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
+                    <h2 className="text-text-primary font-semibold text-[20px] leading-snug mb-1.5">What's on your mind?</h2>
+                    <p className="text-text-muted text-[13.5px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
                   </div>
-                  {/* Concept cue — teaches the core gesture without a tutorial wall. */}
-                  <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] mt-1">
-                    <MousePointerClick className="w-4 h-4 text-accent-violet/70 shrink-0" />
-                    <p className="text-text-muted text-[13px] leading-snug">
-                      Highlight any phrase in a reply to <span className="text-accent-violet font-medium">drift</span> into a focused side-thread.
-                    </p>
+                  {/* Capability cues — teach the three core verbs (drift → lenses →
+                      synthesize) without a tutorial wall. Each chip carries a tooltip
+                      so the screen stays uncrowded while the detail is one hover away. */}
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-1 max-w-[460px]">
+                    {[
+                      {
+                        icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', width: 'w-[268px]', stepped: true,
+                        title: 'Branch without losing your place',
+                        body: 'Pull any phrase into a thread of its own:',
+                        points: [
+                          { name: 'Select', gloss: 'highlight a phrase in any reply' },
+                          { name: 'Branch', gloss: 'it opens as a focused side-thread' },
+                          { name: 'Push', gloss: 'optionally fold a finding back into the chat' },
+                          { name: 'Return', gloss: 'your place in the conversation is never lost' },
+                        ],
+                      },
+                      {
+                        icon: Layers, lead: 'Shift', accent: 'lenses', width: 'w-[288px]',
+                        title: 'Four ways to read a term',
+                        body: 'Take any term you drift into and re-read it through a lens:',
+                        points: [
+                          { name: 'Simplify', gloss: 'one vivid analogy that makes it click', dot: 'bg-amber-500', text: 'text-amber-500' },
+                          { name: 'Deep dive', gloss: 'the mechanism, history and live debates', dot: 'bg-blue-500', text: 'text-blue-500' },
+                          { name: 'Connect', gloss: 'the people, ideas and tensions it links to', dot: 'bg-accent-discovery', text: 'text-accent-discovery' },
+                          { name: 'Challenge', gloss: 'a rival AI model argues the case against it', dot: 'bg-rose-500', text: 'text-rose-500' },
+                        ],
+                      },
+                      {
+                        icon: Sparkles, lead: 'Synthesize', accent: 'drifts', width: 'w-[268px]', stepped: true,
+                        title: 'Many threads, one insight',
+                        body: 'Pull a whole exploration back together:',
+                        points: [
+                          { name: 'Gather', gloss: 'every drift from the conversation' },
+                          { name: 'Weave', gloss: 'the AI threads them into one' },
+                          { name: 'Distill', gloss: 'a single, clear takeaway' },
+                        ],
+                      },
+                    ].map(({ icon: Icon, lead, accent, width, title, body, points, stepped }) => (
+                      <div
+                        key={accent}
+                        className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] cursor-default transition-colors hover:bg-accent-violet/[0.09] hover:border-accent-violet/30"
+                      >
+                        <Icon className="w-3.5 h-3.5 text-accent-violet/70 shrink-0" />
+                        <span className="text-text-muted text-[12.5px] leading-none whitespace-nowrap">
+                          {lead} <span className="text-accent-violet font-medium">{accent}</span>
+                        </span>
+                        {/* Custom glass tooltip — opens downward so it never clips against
+                            the header/scroll boundary above the chips row. */}
+                        <div
+                          role="tooltip"
+                          className={`pointer-events-none absolute top-full left-1/2 z-30 mt-2.5 ${width} -translate-x-1/2 -translate-y-1
+                                     rounded-xl border border-dark-border/70 bg-dark-elevated/95 px-3.5 py-3 text-left shadow-xl shadow-black/40 backdrop-blur-md
+                                     opacity-0 transition-all duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100`}
+                        >
+                          <span className="block text-[12.5px] font-semibold leading-snug text-text-primary">{title}</span>
+                          <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{body}</span>
+                          {points && (
+                            <ul className="mt-2.5 space-y-2">
+                              {points.map((l, i) => (
+                                <li key={l.name} className="flex items-baseline gap-2.5">
+                                  {stepped ? (
+                                    <span className="flex h-[17px] w-[17px] shrink-0 translate-y-0.5 items-center justify-center self-start rounded-full bg-accent-violet/15 text-[9px] font-semibold text-accent-violet tabular-nums">{i + 1}</span>
+                                  ) : (
+                                    <span className={`h-1.5 w-1.5 shrink-0 translate-y-[3px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
+                                  )}
+                                  <span className="min-w-0">
+                                    <span className={`block text-[12px] font-semibold leading-snug ${stepped ? 'text-accent-violet' : l.text}`}>{l.name}</span>
+                                    <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {/* upward arrow */}
+                          <span className="absolute left-1/2 bottom-full -translate-x-1/2 translate-y-1/2 h-2 w-2 rotate-45 border-t border-l border-dark-border/70 bg-dark-elevated/95" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
                       so the drift gesture has something to act on. Shown only to genuinely
                       new users (returning users get "pick up where you left off" below). */}
                   {resumableTrees.length === 0 && (
-                    <div className="w-full max-w-[440px] mt-9">
+                    <div className="w-full max-w-[440px] mt-6">
                       <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3">Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {[
@@ -2188,12 +2260,12 @@ function App() {
                     </div>
                   )}
                   {resumableTrees.length > 0 && (
-                    <div className="w-full max-w-[340px] mt-9 text-left">
-                      <div className="flex items-center gap-2 mb-3 px-1">
+                    <div className="w-full max-w-[340px] mt-5 text-left">
+                      <div className="flex items-center gap-2 mb-2 px-1">
                         <CornerUpLeft className="w-3.5 h-3.5 text-accent-violet/60 shrink-0" />
                         <span className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold">Pick up where you left off</span>
                       </div>
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1.5">
                         {resumableTrees.map(t => (
                           <div
                             key={t.rootId}
@@ -2201,25 +2273,23 @@ function App() {
                             tabIndex={0}
                             onClick={() => { haptics.selection(); switchChat(t.rootId) }}
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); haptics.selection(); switchChat(t.rootId) } }}
-                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-2.5"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-text-primary text-[14px] font-medium truncate" dir="auto">{t.title}</span>
+                              <span className="text-text-primary text-[13.5px] font-medium truncate" dir="auto">{t.title}</span>
                               <span className="text-text-muted text-[11px] shrink-0 tabular-nums">{formatDate(new Date(t.sortKey || Date.now()))}</span>
                             </div>
-                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                            <div className="flex items-center justify-between gap-2 mt-1">
                               <span className="text-text-muted text-[12px] truncate" dir="auto">{t.terms}</span>
-                              <span className="flex items-center gap-1 shrink-0 text-accent-violet/80 text-[11px] font-medium">
-                                <GitBranch className="w-3 h-3" /> {t.driftCount}
-                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
+                                disabled={synthesizing}
+                                className="inline-flex items-center gap-1 shrink-0 text-[11.5px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
+                                title={`Synthesize ${t.driftCount} drifts into one insight`}
+                              >
+                                <span className="text-[12px] leading-none">✦</span> Synthesize {t.driftCount}
+                              </button>
                             </div>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
-                              disabled={synthesizing}
-                              className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
-                            >
-                              <span className="text-[13px] leading-none">✦</span> Synthesize {t.driftCount} drifts
-                            </button>
                           </div>
                         ))}
                       </div>
