@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { X, Save, Eye, EyeOff, CheckCircle, AlertCircle, Plus, Trash2, RefreshCw, Copy, ChevronRight, Download, Upload } from 'lucide-react'
+import { X, Save, Eye, EyeOff, CheckCircle, AlertCircle, Plus, Trash2, RefreshCw, Copy, ChevronRight, Download, Upload, Scale } from 'lucide-react'
 import { exportBackup, importBackupFromFile } from '../services/backup'
 import type { OpenRouterModel } from '../services/openrouter'
 import { checkOpenRouterConnection, OPENROUTER_MODELS } from '../services/openrouter'
@@ -8,6 +8,10 @@ import type { GeminiModel } from '../services/gemini'
 import { checkGeminiConnection, GEMINI_MODELS } from '../services/gemini'
 import { useUIStore } from '../store/uiStore'
 import AddModelSheet from './AddModelSheet'
+import ChallengerPicker from './ChallengerPicker'
+import { challengerOptions } from '../lib/challenger'
+import { useModelStore } from '../store/modelStore'
+import type { Target } from '../types/chat'
 
 interface SettingsProps {
   isOpen: boolean
@@ -25,6 +29,9 @@ export interface AISettings {
   ollamaUrl: string
   ollamaModel: string
   modelPresets: ModelPreset[]
+  /** The model used by the Challenge lens — an independent critic, distinct from
+   *  the main chat model. Unset until the user picks one on first Challenge use. */
+  challengerModel?: Target
 }
 
 export type Provider = 'openrouter' | 'ollama' | 'gemini'
@@ -499,6 +506,12 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
 
   const presets = settings.modelPresets || []
 
+  // Cross-model Challenge: the challenger is any configured model that isn't the
+  // current main chat model. Edited here or picked on first Challenge use.
+  const mainKey = useModelStore(s => s.selectedTargets[0]?.key)
+  const challengerChoices = challengerOptions(presets, mainKey)
+  const [challengerPickerOpen, setChallengerPickerOpen] = useState(false)
+
   return (
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
@@ -624,6 +637,29 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
             </button>
           </div>
 
+          {/* ── CHALLENGE section ── */}
+          <SectionHeader label="Challenge" hint="Cross-model critique" />
+          <SettingsGroup>
+            <SettingsRow
+              label="Challenger model"
+              description={
+                settings.challengerModel
+                  ? `Challenge replies come from ${settings.challengerModel.label}`
+                  : 'Pressure-test answers with a different model than the main chat'
+              }
+              right={
+                <button
+                  type="button"
+                  onClick={() => setChallengerPickerOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 transition-colors text-xs"
+                >
+                  <Scale className="w-3 h-3" />
+                  {settings.challengerModel ? 'Change' : 'Choose'}
+                </button>
+              }
+            />
+          </SettingsGroup>
+
           {/* ── APPEARANCE section ── */}
           <SectionHeader label="Appearance" />
           <SettingsGroup>
@@ -744,6 +780,15 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           }
         }}
         maxAdd={10}
+      />
+
+      <ChallengerPicker
+        open={challengerPickerOpen}
+        options={challengerChoices}
+        current={settings.challengerModel ?? null}
+        onPick={(t) => { handleChange('challengerModel', t); setChallengerPickerOpen(false) }}
+        onClose={() => setChallengerPickerOpen(false)}
+        onAddModel={() => { setChallengerPickerOpen(false); setAddModelSheetOpen(true) }}
       />
     </div>
   )

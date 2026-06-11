@@ -1,11 +1,12 @@
 import { useRef, type Dispatch, type SetStateAction } from 'react'
 import { haptics } from '../lib/haptics'
-import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '../services/openrouter'
+import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, type OpenRouterModel, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
 import { sendMessageToGemini, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError } from '../lib/driftPanel'
+import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
 import type { Message } from '../components/DriftPanel'
 
 interface DriftMessageStreamDeps {
@@ -169,8 +170,21 @@ export function useDriftMessageStream({
       const geminiKey = envGeminiKey || aiSettings.geminiApiKey
       const envKey = import.meta.env.VITE_OPENROUTER_API_KEY
       const effectiveApiKey = envKey || aiSettings.openRouterApiKey
+
+      // Cross-model Challenge: route the critique through the user's chosen
+      // challenger model — a genuinely independent voice, not the main model
+      // arguing with itself. Falls back to the inherited model when no valid
+      // challenger is set (the picker hasn't run, or it collapsed onto main).
+      const mainKey = selectedTargets?.[0]?.key
+      const challengerTarget = templateType === 'challenge'
+        ? resolveChallengerTarget(aiSettings.challengerModel, aiSettings.modelPresets, mainKey)
+        : null
+      const challengerCall = challengerTarget ? resolveModelCall(challengerTarget, aiSettings) : null
+
       // If a provider was passed from main chat, honor it. Otherwise, infer.
-      const provider: 'openrouter' | 'ollama' | 'gemini' = selectedProvider
+      const provider: 'openrouter' | 'ollama' | 'gemini' = challengerCall
+        ? challengerCall.provider
+        : selectedProvider
         ? selectedProvider
         : (geminiKey ? 'gemini' : effectiveApiKey ? 'openrouter' : 'ollama')
 
@@ -182,12 +196,14 @@ export function useDriftMessageStream({
         const aiResponseId = 'drift-ai-' + Date.now().toString()
         let accumulatedResponse = ''
 
-        // Add empty AI message
+        // Add empty AI message. Tag cross-model Challenge replies with the
+        // challenger's label so the bubble reads "Challenged by {model}".
         const aiMessage: Message = {
           id: aiResponseId,
           text: '',
           isUser: false,
-          timestamp: new Date()
+          timestamp: new Date(),
+          ...(challengerTarget ? { modelTag: challengerTarget.label } : {}),
         }
         setMessages(prev => [...prev, aiMessage])
         setDriftOnlyMessages(prev => [...prev, aiMessage])
@@ -205,28 +221,32 @@ export function useDriftMessageStream({
           setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: accumulatedResponse } : msg))
         }
 
-        // Stream the response using the chosen provider
+        // Stream the response using the chosen provider. When a challenger is
+        // active, its resolved model/key/url win over the inherited main model.
         if (provider === 'gemini') {
-          const apiKey = geminiKey
+          const apiKey = challengerCall?.apiKey || geminiKey
           if (!apiKey) throw new Error('No Gemini API key found. Please set it in Settings.')
           const sTargets = selectedTargets || []
           const preset = sTargets.length === 1 ? sTargets[0] : null
-          const model = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
+          const inheritedModel = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
+          const model = challengerCall?.model || inheritedModel
           await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
         } else if (provider === 'openrouter') {
-          const apiKey = effectiveApiKey
+          const apiKey = challengerCall?.apiKey || effectiveApiKey
           if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')
           const sTargets = selectedTargets || []
           const useQwen3 = (sTargets.length === 1 && (sTargets[0].key === 'qwen3' || sTargets[0].label === 'Qwen3'))
-          const model = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
+          const inheritedModel = useQwen3 ? OPENROUTER_MODELS.QWEN3 : (aiSettings.openRouterModel || OPENROUTER_MODELS.OSS)
+          // Challenger picks its own model (e.g. anthropic/claude-haiku-4-5).
+          const model = (challengerCall?.model || inheritedModel) as OpenRouterModel
           await sendMessageToOpenRouter(apiMessages as OpenRouterMessage[], onChunk, apiKey, abortController.signal, model)
         } else if (provider === 'ollama') {
           await sendMessageToOllama(
             apiMessages as OllamaMessage[],
             onChunk,
             abortController.signal,
-            aiSettings.ollamaUrl,
-            aiSettings.ollamaModel
+            challengerCall?.serverUrl || aiSettings.ollamaUrl,
+            challengerCall?.model || aiSettings.ollamaModel
           )
         }
       // Fire-and-forget: fetch key-term highlights for this AI response

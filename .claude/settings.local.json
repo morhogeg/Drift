@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /Users/morhogeg/Drift && pgrep -f 'vite' > /dev/null && echo '⚡ Live reload active — skipping build' || (npm run build && npx cap sync ios)"
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && pgrep -f 'vite' > /dev/null && echo '⚡ Live reload active — skipping build' || { command -v xcodebuild > /dev/null 2>&1 && npm run build && npx cap sync ios || echo '↪ Saved (no iOS toolchain here — skipping build/sync)'; }"
           }
         ]
       }
