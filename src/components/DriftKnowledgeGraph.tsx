@@ -1641,18 +1641,18 @@ function ViewToggle({ mode, onChange }: { mode: 'map' | 'outline'; onChange: (m:
     return (
       <button
         onClick={() => { if (!active) { haptics.selection(); onChange(m) } }}
-        className="inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors active:scale-95"
+        className="inline-flex items-center justify-center rounded-full transition-colors active:scale-95"
         style={{
-          minHeight: 32, padding: '5px 12px', fontSize: 12,
+          width: 38, height: 32,
           background: active ? 'rgba(168,85,247,0.16)' : 'transparent',
           color: active ? '#d8b4fe' : 'rgb(var(--color-text-muted))',
           border: active ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
         }}
         aria-pressed={active}
+        aria-label={`${label} view`}
         title={`${label} view`}
       >
-        <Icon className="w-3.5 h-3.5" />
-        {label}
+        <Icon className="w-4 h-4" />
       </button>
     )
   }
@@ -1815,10 +1815,12 @@ function OutlineView({
     const isDrift = !!node.chat.metadata?.isDrift
     const gist = isDrift ? nodeAnswerGist(node.chat) : ''
     const related = relatedById.get(id) ?? []
-    // "Mother" question = one that branched into sub-explorations. Give it a subtle
-    // theme-grey backing and let its label wrap fully (no truncation) so the spine
-    // of the exploration stays scannable. Selection still wins visually.
-    const isMother = hasKids
+    // "Mother" question = a QUESTION that branched into sub-explorations. Give it a
+    // subtle theme-grey backing and let its label wrap fully (no truncation) so the
+    // spine of the exploration stays scannable. Selection still wins visually.
+    // Connect bridges branch too, but their label is a relationship/answer — not a
+    // question — so they're excluded: the grey marks questions, never answers.
+    const isMother = hasKids && node.lens !== 'connect'
     const rowBg = selected
       ? 'rgba(168,85,247,0.14)'
       : isMother
@@ -1861,6 +1863,18 @@ function OutlineView({
               {isDrift && (
                 <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a`, marginTop: 1 }}>
                   {lensLabel(node)}
+                </span>
+              )}
+              {/* Collapsed branch point: show how many sub-explorations are tucked
+                  away, so a big tree stays scannable without expanding everything. */}
+              {hasKids && !isOpen && (
+                <span
+                  className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-semibold rounded-full px-1.5 py-0.5"
+                  style={{ color: 'rgb(var(--color-text-muted))', background: 'rgb(var(--color-elevated))', border: '1px solid rgb(var(--color-border))', marginTop: 1 }}
+                  title={`${node.children.length} sub-exploration${node.children.length === 1 ? '' : 's'} hidden`}
+                >
+                  <GitBranch className="w-2.5 h-2.5" />
+                  {node.children.length}
                 </span>
               )}
             </div>
