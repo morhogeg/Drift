@@ -1192,10 +1192,19 @@ export default function DriftPanel({
                             remarkPlugins={[remarkGfm]}
                             components={(() => {
                               const hl = msgHighlights.get(msg.id) ?? []
-                              const injectHL = (text: string): React.ReactNode => {
+                              // Each suggested term is underlined only on its FIRST occurrence in
+                              // the message — tapping any repeat asks the same thing, so marking
+                              // every mention is noise. Mirrors the main chat: `seen` dedupes within
+                              // a block, `priorText` (the source before this block) dedupes across
+                              // blocks. Render-pure (StrictMode double-invokes), so both read stable
+                              // data — `seen` is fresh per block, `priorText` is sliced from source.
+                              const src = msg.text.replace(/<br>/g, '\n').replace(/<br\/>/g, '\n')
+                                .replace(/^[ \t]{0,3}#{1,6}[^\n]*/gm, (m) => ' '.repeat(m.length))
+                              const injectHL = (text: string, seen: Set<string>, priorText: string): React.ReactNode => {
                                 if (!hl.length) return text
                                 const matches: Array<{ start: number; end: number; phrase: string }> = []
                                 hl.forEach(phrase => {
+                                  if (seen.has(phrase) || priorText.includes(phrase)) return
                                   const pos = text.indexOf(phrase)
                                   if (pos !== -1) matches.push({ start: pos, end: pos + phrase.length, phrase })
                                 })
@@ -1204,7 +1213,7 @@ export default function DriftPanel({
                                 const out: React.ReactNode[] = []
                                 let cursor = 0
                                 for (const m of matches) {
-                                  if (m.start < cursor) continue
+                                  if (m.start < cursor || seen.has(m.phrase) || priorText.includes(m.phrase)) continue
                                   if (m.start > cursor) out.push(text.slice(cursor, m.start))
                                   out.push(
                                     <span
@@ -1216,26 +1225,33 @@ export default function DriftPanel({
                                       {m.phrase}
                                     </span>
                                   )
+                                  seen.add(m.phrase)
                                   cursor = m.end
                                 }
                                 if (cursor < text.length) out.push(text.slice(cursor))
                                 return out
                               }
-                              const walkHL = (node: React.ReactNode): React.ReactNode => {
-                                if (typeof node === 'string') return injectHL(node)
+                              const walkHL = (node: React.ReactNode, seen: Set<string>, priorText: string): React.ReactNode => {
+                                if (typeof node === 'string') return injectHL(node, seen, priorText)
                                 if (typeof node === 'number' || node == null || node === false) return node
-                                if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkHL(n)}</span>)
+                                if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkHL(n, seen, priorText)}</span>)
                                 if (isValidElement(node)) {
                                   const props: any = (node as any).props || {}
-                                  if ('children' in props) return cloneElement(node as any, { ...props, children: walkHL(props.children) })
+                                  if ('children' in props) return cloneElement(node as any, { ...props, children: walkHL(props.children, seen, priorText) })
                                   return node
                                 }
                                 return null
                               }
-                              const proc = (children: any) => hl.length ? walkHL(children) : children
+                              const proc = (children: any, node?: any) => {
+                                if (!hl.length) return children
+                                const priorText = src.slice(0, node?.position?.start?.offset ?? 0)
+                                return walkHL(children, new Set<string>(), priorText)
+                              }
                               return {
-                                p: ({ children }: any) => <p className="mb-2">{proc(children)}</p>,
-                                li: ({ children }: any) => <li>{proc(children)}</li>,
+                                p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
+                                li: ({ node, children }: any) => <li>{proc(children, node)}</li>,
+                                th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
+                                td: ({ node, children }: any) => <td>{proc(children, node)}</td>,
                                 br: () => <br />,
                                 table: ({ children }: any) => <div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>,
                               }

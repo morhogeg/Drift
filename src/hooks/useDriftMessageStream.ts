@@ -5,7 +5,7 @@ import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../servi
 import { sendMessageToGemini, getSuggestedHighlights, type ChatMessage as GeminiMessage } from '../services/gemini'
 import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
-import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError } from '../lib/driftPanel'
+import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
 import type { Message } from '../components/DriftPanel'
 
@@ -138,18 +138,25 @@ export function useDriftMessageStream({
         ? `${TEMPLATE_SYSTEM_PROMPTS['connect']}\n\nThe user has ALREADY explored these related threads — do NOT repeat them, point somewhere genuinely new: ${priorTerms.slice(0, 12).join(', ')}.`
         : TEMPLATE_SYSTEM_PROMPTS['connect']) + connectDisambiguation
 
-      const baseSystemContent = (templateType === 'connect' && connectQuestion)
+      // Challenge is cross-model + adversarial ONLY for the explicit "Challenge
+      // this:" turn. A follow-up inside a challenge thread (typed, or tapping a
+      // dotted suggestion) is ordinary exploration: drop the challenge framing so
+      // it uses the normal context-aware prompt (and, below, the main model).
+      const isChallengeTurn = templateType === 'challenge' && isChallengeTriggerText(textToSend)
+      const effectiveTemplate = (templateType === 'challenge' && !isChallengeTurn) ? undefined : templateType
+
+      const baseSystemContent = (effectiveTemplate === 'connect' && connectQuestion)
         ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
-        : (templateType === 'connect')
+        : (effectiveTemplate === 'connect')
         ? connectChipsPrompt
-        : templateType
-        ? TEMPLATE_SYSTEM_PROMPTS[templateType]
+        : effectiveTemplate
+        ? TEMPLATE_SYSTEM_PROMPTS[effectiveTemplate]
         : (parentContext
             ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
             : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
       // Connect branches already embed their own context above; only the
       // non-connect templates need it appended here.
-      const systemContent = (templateType && templateType !== 'connect' && parentContext)
+      const systemContent = (effectiveTemplate && effectiveTemplate !== 'connect' && parentContext)
         ? `${baseSystemContent}\n\nContext from the conversation:\n${parentContext}`
         : baseSystemContent
 
@@ -176,7 +183,7 @@ export function useDriftMessageStream({
       // arguing with itself. Falls back to the inherited model when no valid
       // challenger is set (the picker hasn't run, or it collapsed onto main).
       const mainKey = selectedTargets?.[0]?.key
-      const challengerTarget = templateType === 'challenge'
+      const challengerTarget = isChallengeTurn
         ? resolveChallengerTarget(aiSettings.challengerModel, aiSettings.modelPresets, mainKey)
         : null
       const challengerCall = challengerTarget ? resolveModelCall(challengerTarget, aiSettings) : null
