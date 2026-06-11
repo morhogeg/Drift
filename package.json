@@ -8,7 +8,8 @@
     "dev:ios": "CAPACITOR_LIVE_RELOAD=1 npx cap sync ios && npx cap open ios && vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
@@ -51,6 +52,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.35.1",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.6"
   }
 }
