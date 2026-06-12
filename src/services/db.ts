@@ -7,6 +7,7 @@
  */
 
 import { openDB as idbOpenDB, type IDBPDatabase } from 'idb'
+import { emitLocalDataChange } from './cloudHooks'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,7 @@ export const chatDB = {
     try {
       const db = await getDB()
       await db.put(CHATS_STORE, chat)
+      emitLocalDataChange() // no-op unless cloud sync is enabled + signed in
     } catch (err) {
       console.error(`[db] chatDB.put(${chat.id}) failed:`, err)
     }
@@ -203,6 +205,7 @@ export const chatDB = {
     try {
       const db = await getDB()
       await db.delete(CHATS_STORE, id)
+      emitLocalDataChange()
     } catch (err) {
       console.error(`[db] chatDB.delete(${id}) failed:`, err)
     }
@@ -213,6 +216,7 @@ export const chatDB = {
     try {
       const db = await getDB()
       await db.clear(CHATS_STORE)
+      emitLocalDataChange()
     } catch (err) {
       console.error('[db] chatDB.clear failed:', err)
     }

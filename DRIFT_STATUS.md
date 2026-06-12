@@ -15,10 +15,13 @@
 
 - Arabic RTL + centralized `src/lib/lang.ts` detection; prod API-key-leak fix (BYOK in prod); App Store metadata + privacy policy + 5 dark screenshots (`scripts/shots.mjs` + `frame.mjs`). EN/HE only (extra translation bundles reverted).
 
+## Cloud accounts (Jun 10) — built, awaiting owner Firebase setup
+
+Optional Apple sign-in + cloud backup/restore (Firestore, `users/{uid}/backup/current`). Stacked branches `feature/cloud-auth` → `feature/cloud-sync` → `feature/cloud-ui`, PRs into `feature/cloud-accounts`. **Inert until `.env` has all `VITE_FIREBASE_*` filled** — verified zero behavior change when blank. API keys never upload (deep-strip + test). Owner checklist in HANDOFF.md "☁️ Cloud accounts" section: Firebase project + Apple provider + Services ID + Xcode capability + `GoogleService-Info.plist` + deploy `firestore.rules`. ⚠️ Don't build iOS from these branches until the plist is in place.
+
 ## Pending (priority order)
 
 - [ ] **☁️ Owner setup — Cloud accounts** — Firebase project + .env vars + Apple provider + Services ID + Xcode capability + plist + firestore.rules. Checklist in CLOUD_ACCOUNTS_HANDOFF.md.
-- [ ] **Open 3 cloud PRs** (code ready, awaiting `gh auth login`)
 - [ ] **TestFlight build 60:** archive in Xcode → App Store Connect
 - [ ] **App Store:** add `PrivacyInfo.xcprivacy` to Xcode target · age rating · confirm/create ASC app record · finalize metadata + screenshots
 - [ ] On-device pass: welcome screen (no scroll, tooltips, lens hues) · cloud accounts · UI polish

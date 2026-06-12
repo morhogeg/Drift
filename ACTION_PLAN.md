@@ -18,7 +18,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
   - Call `navigator.storage.persist()` on launch to request durable storage.
 - **Verify:** Start a drift, send messages, kill the app/tab without saving → reopen → drift restores intact.
 
-### 2. [ ] Ship cloud sync (accounts + cross-device)
+### 2. [~] Ship cloud sync (accounts + cross-device)
+> **Status note (2026-06-12):** All three stacked cloud branches merged into `feature/cloud-accounts-merge` (cloud-ui contained the full stack), conflicts resolved against current main, lockfile regenerated with the firebase deps. tsc + build + 14 tests green; both acceptance scripts pass (`verify-cloud-disabled.mjs`: no Account UI / no Firebase traffic with blank env · `verify-cloud-enabled.mjs`: Account section + Apple sign-in sheet render with dummy env — scripts updated to bypass the new onboarding/login screens). `firestore.rules` audited (per-user subtree isolation, default deny) and syntax-validated via Firebase tooling. **Remaining:** merge the branch to main, then owner setup (Firebase project, `VITE_FIREBASE_*` env, Apple provider, plist, deploy rules) per CLOUD_ACCOUNTS_HANDOFF.md.
 - **Impact:** Very high. Today a user's entire graph is trapped on one device — no retention loop, no recovery from device loss, and the prerequisite for any paid tier. The code is already written and key-strip tested on `feature/cloud-auth`, `feature/cloud-sync`, `feature/cloud-ui`.
 - **Effort:** Medium (code is done; integration + rules audit + owner setup).
 - **Scope:**
