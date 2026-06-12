@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { X, Save, Eye, EyeOff, CheckCircle, AlertCircle, Plus, Trash2, RefreshCw, Copy, ChevronRight, Download, Upload, Scale } from 'lucide-react'
 import { exportBackup, importBackupFromFile } from '../services/backup'
+import { isCloudEnabled } from '../lib/cloudConfig'
 import type { OpenRouterModel } from '../services/openrouter'
 import { checkOpenRouterConnection, OPENROUTER_MODELS } from '../services/openrouter'
 import { checkOllamaConnection } from '../services/ollama'
@@ -12,6 +13,10 @@ import ChallengerPicker from './ChallengerPicker'
 import { challengerOptions } from '../lib/challenger'
 import { useModelStore } from '../store/modelStore'
 import type { Target } from '../types/chat'
+
+// Optional cloud account UI — lazy so its chunk (and everything cloud) is never
+// fetched when VITE_FIREBASE_* env is blank. Gated again at the render site.
+const AccountSection = lazy(() => import('./account/AccountSection'))
 
 interface SettingsProps {
   isOpen: boolean
@@ -555,6 +560,13 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
 
         {/* ── Scrollable body ── */}
         <div className="flex-1 overflow-y-auto overscroll-contain pb-28">
+
+          {/* ── ACCOUNT section (only when cloud is configured) ── */}
+          {isCloudEnabled() && (
+            <Suspense fallback={null}>
+              <AccountSection />
+            </Suspense>
+          )}
 
           {/* ── MODELS section ── */}
           <SectionHeader
