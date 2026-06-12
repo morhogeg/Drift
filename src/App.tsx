@@ -17,6 +17,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
+import { secureKeys } from './services/secureKeys'
+import { startAutoBackup } from './services/autoBackup'
 import { getTextDirection, getRTLClassName, getRTLTruncateClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
 import ModelPickerSheet from './components/ModelPickerSheet'
@@ -954,8 +956,13 @@ function App() {
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
+      // Load API keys from the iOS Keychain (and migrate any out of
+      // localStorage) before settings-derived state is trusted.
+      const hadSecureKeys = await secureKeys.init()
+      if (hadSecureKeys) setAiSettings(settingsStorage.get())
       await chatStore.loadChatsFromDB()
       createNewChat()
+      startAutoBackup()
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

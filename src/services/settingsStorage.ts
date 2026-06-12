@@ -1,6 +1,7 @@
-import type { AISettings } from '../components/Settings'
+import type { AISettings, ModelPreset } from '../components/Settings'
 import { OPENROUTER_MODELS } from './openrouter'
 import { GEMINI_MODELS } from './gemini'
+import { secureKeys, isNativeSecure } from './secureKeys'
 
 const SETTINGS_KEY = 'drift_ai_settings'
 
@@ -78,7 +79,21 @@ export const settingsStorage = {
       }
 
       // Merge with defaults to ensure all fields exist
-      return { ...defaultSettings, ...parsed }
+      const merged = { ...defaultSettings, ...parsed }
+
+      // On native iOS the keys live in the Keychain, not localStorage —
+      // overlay the secure cache (empty until secureKeys.init() resolves).
+      if (isNativeSecure()) {
+        const sk = secureKeys.get()
+        if (sk.geminiApiKey) merged.geminiApiKey = sk.geminiApiKey
+        if (sk.openRouterApiKey) merged.openRouterApiKey = sk.openRouterApiKey
+        if (sk.presetKeys && Array.isArray(merged.modelPresets)) {
+          merged.modelPresets = merged.modelPresets.map((p: ModelPreset) =>
+            sk.presetKeys![p.id] ? { ...p, apiKey: sk.presetKeys![p.id] } : p
+          )
+        }
+      }
+      return merged
     } catch (error) {
       console.error('Error loading settings:', error)
       return defaultSettings
@@ -87,7 +102,24 @@ export const settingsStorage = {
 
   save(settings: AISettings): void {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+      if (isNativeSecure()) {
+        // Route key fields to the Keychain; persist everything else without them.
+        const presetKeys: Record<string, string> = {}
+        const strippedPresets = (settings.modelPresets || []).map((p) => {
+          if (p.apiKey) presetKeys[p.id] = p.apiKey
+          const { apiKey: _omit, ...rest } = p
+          return rest
+        })
+        secureKeys.set({
+          geminiApiKey: settings.geminiApiKey || undefined,
+          openRouterApiKey: settings.openRouterApiKey || undefined,
+          presetKeys,
+        })
+        const stripped = { ...settings, geminiApiKey: '', openRouterApiKey: '', modelPresets: strippedPresets }
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(stripped))
+      } else {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+      }
     } catch (error) {
       console.error('Error saving settings:', error)
     }

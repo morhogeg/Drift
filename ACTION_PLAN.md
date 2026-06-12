@@ -58,7 +58,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
   - Add store-level vitest coverage (chatStore, driftStore mutations) as slices land.
 - **Verify:** tsc + build + Playwright smoke after every slice (existing methodology); lens threads restore after reload.
 
-### 6. [ ] Security hardening round
+### 6. [~] Security hardening round
+> **Status note (2026-06-12):** All three sub-items implemented on `feature/security-hardening`. (1) Keychain: `capacitor-secure-storage-plugin` 0.13 + `src/services/secureKeys.ts` — on native iOS, API keys live in the Keychain behind a sync in-memory cache; one-time migration lifts keys out of localStorage on first launch; `settingsStorage.save()` strips keys from the stored JSON on native; web unchanged. iOS simulator build succeeds with the plugin. (2) CSP: injected at build time via a Vite plugin (dev needs inline preamble/HMR); Playwright run shows zero `securitypolicyviolation` events and the app renders; header variant documented in vite.config.ts for web hosting. (3) Auto-backup: `src/services/autoBackup.ts` — sanitized snapshot 15s after launch then 6-hourly, capped at 4MB; verified the snapshot writes and contains no planted API key. **Remaining:** on-device confirmation that keys are absent from WKWebView localStorage after the migration runs.
 - **Impact:** Medium-high. Baseline is strong (react-markdown only, no telemetry, sanitized backups), but keys sit in plaintext localStorage and there's no CSP.
 - **Effort:** Low-medium.
 - **Scope:**
