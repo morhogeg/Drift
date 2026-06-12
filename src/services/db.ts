@@ -59,9 +59,23 @@ export interface DBChatSession {
 // ── DB schema version ───────────────────────────────────────────────────────
 
 const DB_NAME = 'drift-db'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const CHATS_STORE = 'drift-chats'
 const EMBEDDINGS_STORE = 'drift-embeddings'
+const TEMP_DRIFTS_STORE = 'drift-temp-drifts'
+
+// ── Temp drift record ────────────────────────────────────────────────────────
+// An unsaved (in-flight) drift conversation. Mirrors the in-memory
+// tempDriftConversations Map in driftStore so a killed app can restore drifts
+// the user never explicitly saved.
+
+export interface DBTempDrift {
+  /** driftChatId — same id space as DBChatSession.id. */
+  id: string
+  messages: DBMessage[]
+  /** ISO timestamp of the last write. */
+  updatedAt: string
+}
 
 // ── Embedding record ──────────────────────────────────────────────────────────
 // One cached embedding per drift conversation. `hash` is a cheap stable hash of
@@ -102,6 +116,12 @@ async function getDB(): Promise<IDBPDatabase> {
       if (oldVersion < 2) {
         if (!db.objectStoreNames.contains(EMBEDDINGS_STORE)) {
           db.createObjectStore(EMBEDDINGS_STORE, { keyPath: 'id' })
+        }
+      }
+      // Version 3: additive — add the temp (unsaved) drifts store.
+      if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains(TEMP_DRIFTS_STORE)) {
+          db.createObjectStore(TEMP_DRIFTS_STORE, { keyPath: 'id' })
         }
       }
     },
@@ -236,6 +256,53 @@ export const embeddingDB = {
   },
 }
 
+// ── tempDriftDB CRUD ──────────────────────────────────────────────────────────
+// Durable mirror of driftStore.tempDriftConversations. Failures are swallowed
+// + logged (never thrown) — losing a temp drift write must not break the panel.
+
+export const tempDriftDB = {
+  /** Load every unsaved drift conversation. */
+  async getAll(): Promise<DBTempDrift[]> {
+    try {
+      const db = await getDB()
+      return await db.getAll(TEMP_DRIFTS_STORE)
+    } catch (err) {
+      console.error('[db] tempDriftDB.getAll failed:', err)
+      return []
+    }
+  },
+
+  /** Insert or replace an unsaved drift conversation. */
+  async put(rec: DBTempDrift): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.put(TEMP_DRIFTS_STORE, rec)
+    } catch (err) {
+      console.error(`[db] tempDriftDB.put(${rec.id}) failed:`, err)
+    }
+  },
+
+  /** Delete an unsaved drift conversation by drift id. */
+  async delete(id: string): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.delete(TEMP_DRIFTS_STORE, id)
+    } catch (err) {
+      console.error(`[db] tempDriftDB.delete(${id}) failed:`, err)
+    }
+  },
+
+  /** Remove every unsaved drift conversation. */
+  async clear(): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.clear(TEMP_DRIFTS_STORE)
+    } catch (err) {
+      console.error('[db] tempDriftDB.clear failed:', err)
+    }
+  },
+}
+
 // ── Serialisation helpers ───────────────────────────────────────────────────
 // App-level Message / ChatSession use Date objects; IDB stores plain JSON
 // (ISO strings). These helpers convert between the two shapes.
@@ -258,14 +325,14 @@ export function chatFromDB(raw: DBChatSession): ChatSession {
   }
 }
 
-function msgToDB(msg: Message): DBMessage {
+export function msgToDB(msg: Message): DBMessage {
   return {
     ...msg,
     timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : String(msg.timestamp),
   }
 }
 
-function msgFromDB(raw: DBMessage): Message {
+export function msgFromDB(raw: DBMessage): Message {
   return {
     ...raw,
     timestamp: new Date(raw.timestamp),

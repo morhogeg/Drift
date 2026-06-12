@@ -452,6 +452,16 @@ export function useDriftActions({
       chatHistory: [newChat, ...state.chatHistory.filter(c => c.id !== newChatId)]
     }))
 
+    // The drift is now a durable chat — drop its unsaved temp record(s).
+    driftStore.clearTempConversation(newChatId)
+    messages.forEach(msg => {
+      msg.driftInfos?.forEach(d => {
+        if (d.selectedText === metadata.selectedText && d.driftChatId.startsWith('drift-temp-')) {
+          driftStore.clearTempConversation(d.driftChatId)
+        }
+      })
+    })
+
     const updatedMessages = messages.map(msg => {
       if (msg.id === metadata.sourceMessageId ||
           (msg.driftInfos && msg.driftInfos.some(d =>
@@ -662,6 +672,9 @@ export function useDriftActions({
     useChatStore.setState(state => ({
       chatHistory: [newChat, ...state.chatHistory]
     }))
+
+    // The pushed drift is now a durable chat — drop its unsaved temp record.
+    if (driftChatId) driftStore.clearTempConversation(driftChatId)
 
     const updatedMessages = messages.map(m => {
       if (m.id === sourceMessageId) {

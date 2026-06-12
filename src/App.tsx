@@ -954,7 +954,13 @@ function App() {
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      await chatStore.loadChatsFromDB()
+      // Ask the browser not to evict IndexedDB under storage pressure —
+      // unsaved drifts now live there.
+      navigator.storage?.persist?.().catch(() => {})
+      await Promise.all([
+        chatStore.loadChatsFromDB(),
+        driftStore.hydrateTempConversations(),
+      ])
       createNewChat()
     }
     init()

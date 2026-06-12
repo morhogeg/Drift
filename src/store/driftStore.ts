@@ -2,12 +2,23 @@
  * driftStore — owns the Drift panel state and temporary in-session drift conversations.
  *
  * Temp drift conversations (messages accumulated inside the Drift panel before
- * the user saves/pushes) are keyed by driftChatId and live only in memory for
- * the current session.
+ * the user saves/pushes) are keyed by driftChatId. The in-memory Map is the
+ * source of truth during the session; every write is mirrored to IndexedDB
+ * (tempDriftDB) so an unsaved drift survives an app kill, and hydrated back
+ * on startup via hydrateTempConversations().
  */
 
 import { create } from 'zustand'
 import type { DriftContext, Message } from '@/types/chat'
+import { tempDriftDB, msgToDB, msgFromDB } from '@/services/db'
+
+function persistTempDrift(driftChatId: string, messages: Message[]) {
+  tempDriftDB.put({
+    id: driftChatId,
+    messages: messages.map(msgToDB),
+    updatedAt: new Date().toISOString(),
+  })
+}
 
 interface DriftStore {
   // ── State ──────────────────────────────────────────────────────────────────
@@ -29,6 +40,7 @@ interface DriftStore {
   saveTempConversation: (driftChatId: string, messages: Message[]) => void
   getTempConversation: (driftChatId: string) => Message[] | undefined
   clearTempConversation: (driftChatId: string) => void
+  hydrateTempConversations: () => Promise<void>
 }
 
 const EMPTY_CONTEXT: DriftContext = {
@@ -60,6 +72,7 @@ export const useDriftStore = create<DriftStore>((set, get) => ({
         newMap.set(driftContext.driftChatId!, driftMessages)
         return { driftOpen: false, tempDriftConversations: newMap }
       })
+      persistTempDrift(driftContext.driftChatId, driftMessages)
     } else {
       set({ driftOpen: false })
     }
@@ -77,6 +90,7 @@ export const useDriftStore = create<DriftStore>((set, get) => ({
       newMap.set(driftChatId, messages)
       return { tempDriftConversations: newMap }
     })
+    persistTempDrift(driftChatId, messages)
   },
 
   // ── getTempConversation ────────────────────────────────────────────────────
@@ -89,6 +103,24 @@ export const useDriftStore = create<DriftStore>((set, get) => ({
     set((state) => {
       const newMap = new Map(state.tempDriftConversations)
       newMap.delete(driftChatId)
+      return { tempDriftConversations: newMap }
+    })
+    tempDriftDB.delete(driftChatId)
+  },
+
+  // ── hydrateTempConversations ───────────────────────────────────────────────
+  // Restore unsaved drifts persisted by a previous session. In-memory entries
+  // win over stored ones (hydration normally runs before any drift exists).
+  async hydrateTempConversations() {
+    const stored = await tempDriftDB.getAll()
+    if (stored.length === 0) return
+    set((state) => {
+      const newMap = new Map(state.tempDriftConversations)
+      for (const rec of stored) {
+        if (!newMap.has(rec.id)) {
+          newMap.set(rec.id, rec.messages.map(msgFromDB))
+        }
+      }
       return { tempDriftConversations: newMap }
     })
   },
