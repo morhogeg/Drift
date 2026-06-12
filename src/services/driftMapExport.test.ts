@@ -120,6 +120,22 @@ describe('drift map export', () => {
     expect(html).not.toContain('class="toc"')
   })
 
+  it('flips page direction to RTL for Hebrew-dominant maps', () => {
+    const heHtml = buildShareableMapHtml('root', [
+      { id: 'root', title: 'איך עובד דוד שמש?', createdAt: t, messages: [
+        { id: 'm1', text: 'איך עובד דוד שמש? תהליך פיזיקלי מעניין', isUser: true, timestamp: t },
+      ] },
+    ])!
+    expect(heHtml).toContain('<html lang="en" dir="rtl">')
+
+    const enHtml = buildShareableMapHtml('root', [
+      { id: 'root', title: 'How do solar heaters work?', createdAt: t, messages: [
+        { id: 'm1', text: 'How do solar heaters work?', isUser: true, timestamp: t },
+      ] },
+    ])!
+    expect(enHtml).toContain('<html lang="en" dir="ltr">')
+  })
+
   it('returns null for an unknown root', () => {
     expect(buildShareableMapHtml('missing', chats)).toBeNull()
   })

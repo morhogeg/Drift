@@ -28,7 +28,7 @@ const LENS_LABELS: Record<ExportNode['lens'], string> = {
   simplify: 'Simplify',
   research: 'Deep dive',
   connect: 'Connect',
-  challenge: 'Challenge',
+  challenge: 'Second opinion',
 }
 
 const LENS_COLORS: Record<ExportNode['lens'], string> = {
@@ -145,6 +145,31 @@ function anchorId(id: string): string {
   return 'n-' + id.replace(/[^A-Za-z0-9_-]/g, '-')
 }
 
+/**
+ * Dominant writing direction of the whole map — drives the page layout (the
+ * Contents sidebar sits on the reading-start side, header aligns with it).
+ * Per-message text still uses dir="auto", so mixed-language maps stay correct;
+ * this only decides which side the chrome lives on.
+ */
+const RTL_RANGE = /[֐-׿؀-ۿ܀-߿יִ-﷽ﹰ-ﻼ]/
+function mapDirection(tree: ExportNode): 'rtl' | 'ltr' {
+  let rtl = 0
+  let ltr = 0
+  const scan = (s: string) => {
+    for (const ch of s) {
+      if (RTL_RANGE.test(ch)) rtl++
+      else if (/[A-Za-z]/.test(ch)) ltr++
+    }
+  }
+  const walk = (n: ExportNode) => {
+    scan(n.phrase)
+    n.messages.forEach((m) => scan(m.text))
+    n.children.forEach(walk)
+  }
+  walk(tree)
+  return rtl > ltr ? 'rtl' : 'ltr'
+}
+
 function countNodes(node: ExportNode): number {
   return 1 + node.children.reduce((sum, c) => sum + countNodes(c), 0)
 }
@@ -206,8 +231,9 @@ export function buildShareableMapHtml(
   const tree = buildExportTree(rootId, allChats, getTempMessages)
   if (!tree) return null
   const exportedAt = new Date().toISOString().slice(0, 10)
+  const dir = mapDirection(tree)
   return `<!doctype html>
-<html lang="en">
+<html lang="en" dir="${dir}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
