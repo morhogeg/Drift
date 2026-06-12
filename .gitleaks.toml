@@ -1,0 +1,8 @@
+# Gitleaks config for Drift. Extends the default ruleset.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-leaked key already scheduled for rotation (HANDOFF.md entry 164). Baselined so history scans surface only NEW leaks. Remove this entry once the key is rotated and history is rewritten or the finding is accepted."
+regexes = ['''AIzaSyAAQ4C79flJfL1Ggn2zukbhpMizA6hQ2RU''']
