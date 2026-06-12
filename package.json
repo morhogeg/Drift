@@ -22,6 +22,7 @@
     "@capacitor/status-bar": "^8.0.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@xyflow/react": "^12.10.1",
+    "capacitor-secure-storage-plugin": "^0.13.0",
     "clsx": "^2.1.1",
     "firebase": "^12.14.0",
     "framer-motion": "^11.18.2",
