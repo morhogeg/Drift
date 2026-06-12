@@ -6,6 +6,7 @@ import { sendMessageToGemini, getSuggestedHighlights, type ChatMessage as Gemini
 import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
+import { resolveLensPrompt } from '../lib/customLenses'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
 import type { Message } from '../components/DriftPanel'
 
@@ -150,7 +151,7 @@ export function useDriftMessageStream({
         : (effectiveTemplate === 'connect')
         ? connectChipsPrompt
         : effectiveTemplate
-        ? TEMPLATE_SYSTEM_PROMPTS[effectiveTemplate]
+        ? (resolveLensPrompt(effectiveTemplate) ?? TEMPLATE_SYSTEM_PROMPTS[effectiveTemplate])
         : (parentContext
             ? `The user is reading the conversation below and selected "${selectedText}" to explore it further.\n\nConversation context:\n${parentContext}\n\nInterpret "${selectedText}" ONLY in the sense this conversation implies — use the surrounding text to resolve which specific entity is meant (a club vs. a city, a person vs. a namesake). Do not restate the basic definition they can already see; instead add NEW value: the non-obvious angle, the mechanism, a concrete example, the relevant history or tension. Be concise, specific, and accurate — don't invent facts.`
             : `The user selected "${selectedText}" from a conversation they're already reading. They want to explore this specific term/concept deeper. Don't repeat the basic definition - they can already see that. Instead, provide interesting insights, examples, etymology, cultural context, or related concepts. Be concise, specific, and add NEW value beyond what's already visible. Don't invent facts.`)
