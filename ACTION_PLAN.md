@@ -8,7 +8,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Tier 1 — Existential (protects the product's core value)
 
-### 1. [ ] Persist in-flight drifts + durable storage
+### 1. [~] Persist in-flight drifts + durable storage
+> **Status note (2026-06-12):** Implemented in a separate session (drift-db v3 `drift-temp-drifts` store + `tempDriftDB` in `src/services/db.ts`; write-through + `hydrateTempConversations()` in `src/store/driftStore.ts`; `navigator.storage.persist()` + hydration on mount in `App.tsx`; temp cleanup on save-as-chat in `useDriftActions.ts`; 4 fake-indexeddb tests in `src/store/driftStore.test.ts`, full suite green). **That work has NOT been pushed to any remote branch yet** — push/merge it, do one real on-device kill-and-restore check, then flip this to `[x]`.
 - **Impact:** Highest. Unsaved drift conversations live only in an in-memory `Map` in `src/store/driftStore.ts` — any app kill, tab close, or iOS process eviction silently destroys them. For a product whose value is the accumulated exploration graph, data loss is the worst possible churn event. WKWebView/Safari can also evict IndexedDB under storage pressure.
 - **Effort:** Low (1 session).
 - **Scope:**
