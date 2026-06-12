@@ -3,7 +3,7 @@
 > **Status:** approved plan, not yet implemented. To build it, open a session in this repo and say:
 > _"Implement the plan in `docs/plans/ai-review-crew.md`."_
 >
-> _Revised 2026-06-12 after a verification pass against the codebase: reuse the existing `.fable/` Playwright harness, add the missing `@playwright/test` dep, defer design tokens to `DESIGN_SYSTEM.md`/`tailwind.config.js`, account for the PostToolUse auto-build hook, and standardize on dev-server port 5199._
+> _Revised 2026-06-12 after a verification pass against the codebase: reuse the existing `.fable/` Playwright harness, add the missing `@playwright/test` dep, defer design tokens to `DESIGN_SYSTEM.md`/`tailwind.config.js`, account for the PostToolUse auto-build hook, and standardize on dev-server port 5199. The Verification section is binding on the implementing agent and includes a seeded-bug self-test._
 
 ## Context
 
@@ -73,11 +73,30 @@ Free/open-source (Microsoft, Apache-2.0). One-time `npx playwright install chrom
 Tracked (add `.gitkeep`). Layout: `.claude/reports/<YYYY-MM-DD>-<slug>/qa.md`, `design.md`, `code-review.md`, `summary.md`. `summary.md` uses GitHub-style checkboxes so `/work-the-list` can mark progress in place.
 
 ## Verification
-1. Agents load cleanly (frontmatter parses; all four listed at session start).
-2. `npx playwright test` runs `e2e/smoke.spec.ts` green against the dev server; the Playwright MCP server connects and can navigate to the dev-server URL (port 5199 by default).
-3. End-to-end dry run: make a small UI change → run `/review-feature` → confirm three reports + PM summary land under `.claude/reports/<date>-<slug>/`, summary is echoed in chat, and every finding carries file paths.
-4. `/work-the-list` dry run: reads the latest summary, fixes one low-risk item, checks it off in the file, recaps in chat.
-5. `npm run lint` and `npm run build` remain green.
+> **Binding on the implementing agent.** Implementation is NOT complete until every check below
+> has been **executed** (not reasoned about) and its result reported in the final summary as
+> pass/fail with evidence (command output, report paths, or the relevant diff). If a check can't
+> be run in your environment (e.g. no browser binary, no network for `npx playwright install`),
+> say so explicitly in the final summary instead of skipping silently — do not claim success.
+
+### Goal (what "working" means)
+One command — `/review-feature` — turns a code change into a single prioritized, file-path-annotated
+action list under `.claude/reports/`, and `/work-the-list` can later fix items off that list without
+re-investigation. If a seeded bug flows through to a P0/P1 item with a correct file path, the system works.
+
+### Acceptance checks
+1. **Agents load:** frontmatter parses; all four agents listed/invokable at session start.
+2. **Scripted smoke green:** `npx playwright test` runs `e2e/smoke.spec.ts` green against the dev
+   server; the Playwright MCP server connects and can navigate to the dev-server URL (port 5199 by default).
+3. **Seeded-bug end-to-end test (the real proof):** deliberately introduce a small, *known* defect on a
+   scratch branch — e.g. break the snippet-save button handler or give a button an off-palette color —
+   then run `/review-feature`. Pass means: (a) four files land under `.claude/reports/<date>-<slug>/`,
+   (b) the seeded defect appears in the PM summary at a sensible priority **with the correct file path**,
+   (c) the summary is echoed in chat. Revert the seeded defect afterwards. A run that produces reports
+   but misses the planted bug is a **fail** — tune the agent prompts and retry.
+4. **`/work-the-list` round-trip:** run it against that summary; it fixes the seeded item (or one
+   low-risk real item), checks it off in `summary.md` with a note, and recaps in chat.
+5. **Repo health:** `npm run lint`, `npm run build`, and `npm run test` (vitest) remain green.
 
 ## Out of scope (future)
 - Auto-trigger hook after edits (manual-only for now; could mirror the iOS auto-build PostToolUse hook, which lives in the untracked `.claude/settings.local.json`, later).
