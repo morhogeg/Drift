@@ -76,7 +76,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Tier 3 — Growth & revenue
 
-### 7. [ ] Shareable read-only drift maps
+### 7. [~] Shareable read-only drift maps
+> **Status note (2026-06-12):** Static HTML export shipped on `feature/drift-map-export`. `src/services/driftMapExport.ts` builds a self-contained dark, on-brand HTML page (inline CSS, zero JS/network) from a chat's drift tree — gradient title, lens-colored collapsible nodes, escaped content. Wired to a Share button in the per-chat map header (`DriftKnowledgeGraph.tsx`, shown when the chat has ≥1 drift). 3 tests (tree+lens detection, HTML render + XSS escaping + no external resources, unknown-root null); rendered output screenshot-verified. tsc + build + suite green. **Remaining (deferred):** hosted shareable links — depends on cloud sync (item 2) for storage/serving.
 - **Impact:** High for growth — the missing viral surface. Drift maps are the most screenshot-worthy artifact in the app, and the zero-refetch restoration architecture means a map is already a self-contained, replayable artifact that costs no inference to serve.
 - **Effort:** Medium (export/render path; hosting decision needed).
 - **Scope:** Export a drift tree (nodes, lenses, answers) to a sharable read-only view — start with a static HTML/JSON export, upgrade to hosted links once cloud sync (item 2) exists.

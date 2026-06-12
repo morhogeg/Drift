@@ -14,10 +14,11 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import type { ChatSession, Message } from '@/types/chat'
-import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search, ChevronRight, List, Waypoints } from 'lucide-react'
+import { X, GitBranch, Crosshair, Plus, Minus, Maximize2, Minimize2, Sparkles, Loader2, Search, ChevronRight, List, Waypoints, Share2 } from 'lucide-react'
 import { haptics } from '@/lib/haptics'
 import { getCachedVectors } from '@/lib/embeddingBackfill'
 import { computeResonance, type ResonancePair } from '@/lib/driftResonance'
+import { downloadShareableMap } from '@/services/driftMapExport'
 import ResizeHandle from './ResizeHandle'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -2162,6 +2163,17 @@ export default function DriftKnowledgeGraph({
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {viewToggle}
+              {scope === 'chat' && rootId && driftCount > 0 && (
+                <button
+                  onClick={() => downloadShareableMap(rootId, treeChats, getTempMessages)}
+                  className="p-1.5 rounded-lg hover:bg-white/10"
+                  style={{ color: 'rgb(var(--color-text-secondary))' }}
+                  title="Share map (export as HTML)"
+                  aria-label="Share map"
+                >
+                  <Share2 className="w-4 h-4" />
+                </button>
+              )}
               {onToggleFullscreen && (
                 <button
                   onClick={onToggleFullscreen}
