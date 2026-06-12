@@ -59,10 +59,25 @@ export interface DBChatSession {
 // ── DB schema version ───────────────────────────────────────────────────────
 
 const DB_NAME = 'drift-db'
-const DB_VERSION = 3
+const DB_VERSION = 4
 const CHATS_STORE = 'drift-chats'
 const EMBEDDINGS_STORE = 'drift-embeddings'
 const TEMP_DRIFTS_STORE = 'drift-temp-drifts'
+const LENS_STATE_STORE = 'drift-lens-state'
+
+// ── Lens-state record ────────────────────────────────────────────────────────
+// Connect-lens content (suggestion cards + per-question answer threads) for one
+// drift. Mirrors the caches in driftStore so lens threads survive a reload even
+// before the drift is pushed/saved (after that, driftInfos also carry them).
+
+export interface DBLensState {
+  /** driftChatId — same id space as DBChatSession.id. */
+  id: string
+  cards?: string[]
+  answers?: Record<string, DBMessage[]>
+  /** ISO timestamp of the last write. */
+  updatedAt: string
+}
 
 // ── Temp drift record ────────────────────────────────────────────────────────
 // An unsaved (in-flight) drift conversation. Mirrors the in-memory
@@ -122,6 +137,12 @@ async function getDB(): Promise<IDBPDatabase> {
       if (oldVersion < 3) {
         if (!db.objectStoreNames.contains(TEMP_DRIFTS_STORE)) {
           db.createObjectStore(TEMP_DRIFTS_STORE, { keyPath: 'id' })
+        }
+      }
+      // Version 4: additive — add the Connect lens-state store.
+      if (oldVersion < 4) {
+        if (!db.objectStoreNames.contains(LENS_STATE_STORE)) {
+          db.createObjectStore(LENS_STATE_STORE, { keyPath: 'id' })
         }
       }
     },
@@ -299,6 +320,53 @@ export const tempDriftDB = {
       await db.clear(TEMP_DRIFTS_STORE)
     } catch (err) {
       console.error('[db] tempDriftDB.clear failed:', err)
+    }
+  },
+}
+
+// ── lensStateDB CRUD ──────────────────────────────────────────────────────────
+// Durable mirror of the Connect cards/answers caches in driftStore. Failures
+// are swallowed + logged (never thrown) — lens restore is best-effort.
+
+export const lensStateDB = {
+  /** Load every persisted lens-state record. */
+  async getAll(): Promise<DBLensState[]> {
+    try {
+      const db = await getDB()
+      return await db.getAll(LENS_STATE_STORE)
+    } catch (err) {
+      console.error('[db] lensStateDB.getAll failed:', err)
+      return []
+    }
+  },
+
+  /** Insert or replace a lens-state record. */
+  async put(rec: DBLensState): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.put(LENS_STATE_STORE, rec)
+    } catch (err) {
+      console.error(`[db] lensStateDB.put(${rec.id}) failed:`, err)
+    }
+  },
+
+  /** Delete a lens-state record by drift id. */
+  async delete(id: string): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.delete(LENS_STATE_STORE, id)
+    } catch (err) {
+      console.error(`[db] lensStateDB.delete(${id}) failed:`, err)
+    }
+  },
+
+  /** Remove every lens-state record. */
+  async clear(): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.clear(LENS_STATE_STORE)
+    } catch (err) {
+      console.error('[db] lensStateDB.clear failed:', err)
     }
   },
 }

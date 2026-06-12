@@ -10,7 +10,7 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useDriftStore } from './driftStore'
-import { tempDriftDB } from '@/services/db'
+import { tempDriftDB, lensStateDB } from '@/services/db'
 import type { Message } from '@/types/chat'
 
 const driftMessages: Message[] = [
@@ -20,7 +20,11 @@ const driftMessages: Message[] = [
 
 /** Simulate an app kill: wipe in-memory state, leave IndexedDB intact. */
 function killApp() {
-  useDriftStore.setState({ tempDriftConversations: new Map() })
+  useDriftStore.setState({
+    tempDriftConversations: new Map(),
+    connectCards: new Map(),
+    connectAnswers: new Map(),
+  })
 }
 
 async function flushWrites() {
@@ -31,6 +35,7 @@ async function flushWrites() {
 beforeEach(async () => {
   killApp()
   await tempDriftDB.clear()
+  await lensStateDB.clear()
 })
 
 describe('unsaved drift persistence', () => {
@@ -85,5 +90,50 @@ describe('unsaved drift persistence', () => {
 
     await useDriftStore.getState().hydrateTempConversations()
     expect(useDriftStore.getState().getTempConversation('drift-temp-abc')).toHaveLength(3)
+  })
+})
+
+describe('Connect lens-state persistence', () => {
+  it('restores Connect cards and answers after an app kill', async () => {
+    const s = useDriftStore.getState()
+    s.setConnectCards('drift-temp-c1', ['How does X relate to Y?', 'Where else did this appear?'])
+    s.addConnectAnswer('drift-temp-c1', 'How does X relate to Y?', driftMessages)
+    await flushWrites()
+
+    killApp()
+    expect(useDriftStore.getState().getConnectCards('drift-temp-c1')).toBeUndefined()
+
+    await useDriftStore.getState().hydrateTempConversations()
+    const cards = useDriftStore.getState().getConnectCards('drift-temp-c1')
+    const answers = useDriftStore.getState().getConnectAnswers('drift-temp-c1')
+    expect(cards).toHaveLength(2)
+    expect(answers!['How does X relate to Y?']).toHaveLength(2)
+    expect(answers!['How does X relate to Y?'][0].timestamp).toBeInstanceOf(Date)
+  })
+
+  it('clearTempConversation removes lens state too', async () => {
+    const s = useDriftStore.getState()
+    s.setConnectCards('drift-temp-c2', ['card'])
+    await flushWrites()
+    s.clearTempConversation('drift-temp-c2')
+    await flushWrites()
+
+    killApp()
+    await useDriftStore.getState().hydrateTempConversations()
+    expect(useDriftStore.getState().getConnectCards('drift-temp-c2')).toBeUndefined()
+    expect(await lensStateDB.getAll()).toHaveLength(0)
+  })
+
+  it('accumulates multiple answers per drift', async () => {
+    const s = useDriftStore.getState()
+    s.addConnectAnswer('drift-temp-c3', 'Q1', driftMessages)
+    s.addConnectAnswer('drift-temp-c3', 'Q2', driftMessages.slice(0, 1))
+    await flushWrites()
+
+    killApp()
+    await useDriftStore.getState().hydrateTempConversations()
+    const answers = useDriftStore.getState().getConnectAnswers('drift-temp-c3')
+    expect(Object.keys(answers!)).toEqual(['Q1', 'Q2'])
+    expect(answers!['Q2']).toHaveLength(1)
   })
 })

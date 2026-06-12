@@ -37,8 +37,6 @@ interface DriftActionDeps {
   connectStateRef: MutableRefObject<{ question: string | null; cards: string[] | null }>
   /** Main-thread scroll offset, saved on drift-open and restored on drift-close. */
   mainScrollPosition: MutableRefObject<number>
-  /** Per-driftChatId cache of generated Connect chips (instant restore on reopen). */
-  connectCardsCache: MutableRefObject<Map<string, string[]>>
   /** Record the just-closed drift so the header can offer one-tap reopen. */
   setLastDrift: (drift: LastDrift | null) => void
   /** Arm the one-time "settle-in" arrival animation for a freshly-promoted drift. */
@@ -64,7 +62,6 @@ export function useDriftActions({
   resolveDriftRestore,
   connectStateRef,
   mainScrollPosition,
-  connectCardsCache,
   setLastDrift,
   setJustPromotedChatId,
   justPromotedTimerRef,
@@ -292,7 +289,7 @@ export function useDriftActions({
         ?? (existingDriftChatId ? driftStore.getTempConversation(existingDriftChatId) : undefined)
         ?? []
       const cachedFallbackCards = restoredConnectCards
-        ?? (existingDriftChatId ? connectCardsCache.current.get(existingDriftChatId) : undefined)
+        ?? (existingDriftChatId ? driftStore.getConnectCards(existingDriftChatId) : undefined)
       driftStore.openDrift({
         selectedText,
         sourceMessageId: messageId,
@@ -350,7 +347,7 @@ export function useDriftActions({
     const effectiveTemplateType = templateType ?? existingDrift?.templateType ?? restore.templateType
 
     const cachedConnectCards = restoredConnectCards
-      ?? connectCardsCache.current.get(finalDriftChatId)
+      ?? driftStore.getConnectCards(finalDriftChatId)
       ?? restore.connectCards
     const cachedConnectAnswers = restoredConnectAnswers
       ?? existingDrift?.connectAnswers

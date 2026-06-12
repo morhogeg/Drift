@@ -120,11 +120,8 @@ function App() {
   const mainScrollPosition = useRef<number>(0)
   // Tracks the live Connect state inside DriftPanel so it can be saved into ancestry entries
   const connectStateRef = useRef<{ question: string | null; cards: string[] | null }>({ question: null, cards: null })
-  // Persists generated Connect chips per driftChatId so re-opening a Connect drift shows chips instantly
-  const connectCardsCache = useRef<Map<string, string[]>>(new Map())
-  // Per-driftChatId cache of visited-bridge answers — survives lens switches so
-  // returning to a Connect view keeps its "you tapped this" indicators.
-  const connectAnswersCache = useRef<Map<string, Record<string, Message[]>>>(new Map())
+  // Connect chips + visited-bridge answers per driftChatId live in driftStore
+  // (IndexedDB-backed) so Connect lens threads survive a reload.
   // Per-term lens registry: baseKey ("msgId::term") → (template → driftChatId).
   // Lets the in-panel "View as" switcher keep a separate thread per lens and
   // return to the original one, without touching the inline-link / map model.
@@ -496,8 +493,8 @@ function App() {
     const hasContent = (id: string) =>
       (driftStore.getTempConversation(id)?.length ?? 0) > 0 ||
       ((chatHistory.find(c => c.id === id)?.messages?.length ?? 0) > 0) ||
-      (connectCardsCache.current.get(id)?.length ?? 0) > 0 ||
-      Object.keys(connectAnswersCache.current.get(id) ?? {}).length > 0
+      (driftStore.getConnectCards(id)?.length ?? 0) > 0 ||
+      Object.keys(driftStore.getConnectAnswers(id) ?? {}).length > 0
 
     // The first lens used for a term is recorded on the source message's driftInfo;
     // later lenses get synthetic ids (`<baseId>__research` …) so the suffix names them.
@@ -665,8 +662,8 @@ function App() {
     const di = (chatHistory.find(c => c.id === activeChatId)?.messages ?? messages)
       .flatMap(m => m.driftInfos ?? [])
       .find(d => d.driftChatId === tgtId)
-    const tgtCards = connectCardsCache.current.get(tgtId) ?? di?.connectCards
-    const tgtAnswers = connectAnswersCache.current.get(tgtId) ?? di?.connectAnswers
+    const tgtCards = driftStore.getConnectCards(tgtId) ?? di?.connectCards
+    const tgtAnswers = driftStore.getConnectAnswers(tgtId) ?? di?.connectAnswers
 
     // For a Connect lens the chips view rebuilds from cached cards; passing the
     // (prose) bridge conversation as messages would poison the JSON card parser,
@@ -736,8 +733,8 @@ function App() {
       if (di) break
     }
 
-    const connectCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
-    const connectAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+    const connectCards = driftStore.getConnectCards(driftChatId) ?? di?.connectCards
+    const connectAnswers = driftStore.getConnectAnswers(driftChatId) ?? di?.connectAnswers
 
     // Prefer the persisted templateType; infer Connect when cards/answers exist.
     const templateType: DriftContext['templateType'] =
@@ -897,8 +894,8 @@ function App() {
       .find(d => d.driftChatId === driftChatId)
       ?? messages.flatMap(m => m.driftInfos ?? []).find(d => d.driftChatId === driftChatId)
 
-    const cachedCards = connectCardsCache.current.get(driftChatId) ?? di?.connectCards
-    const cachedAnswers = connectAnswersCache.current.get(driftChatId) ?? di?.connectAnswers
+    const cachedCards = driftStore.getConnectCards(driftChatId) ?? di?.connectCards
+    const cachedAnswers = driftStore.getConnectAnswers(driftChatId) ?? di?.connectAnswers
 
     // A node whose only content is "Finding connections for…" is a Connect drift.
     // Prefer the persisted templateType; otherwise infer Connect from cached cards/answers.
@@ -1416,7 +1413,6 @@ function App() {
     resolveDriftRestore,
     connectStateRef,
     mainScrollPosition,
-    connectCardsCache,
     setLastDrift,
     setJustPromotedChatId,
     justPromotedTimerRef,
@@ -3281,7 +3277,7 @@ function App() {
           // Persist chips into the message's driftInfos so re-opening always gets the original set
           if (cards && cards.length > 0 && driftContext?.driftChatId) {
             const driftId = driftContext.driftChatId
-            connectCardsCache.current.set(driftId, cards)
+            driftStore.setConnectCards(driftId, cards)
             // Update the parent message's driftInfos entry so cards survive component remounts
             const currentChat = chatHistory.find(c => c.id === activeChatId)
             const currentMsgs = currentChat?.messages ?? messages
@@ -3307,8 +3303,7 @@ function App() {
           if (!driftContext?.driftChatId) return
           const driftId = driftContext.driftChatId
           // Cache by id (works for original + composite lens threads alike).
-          const prevCache = connectAnswersCache.current.get(driftId) ?? {}
-          connectAnswersCache.current.set(driftId, { ...prevCache, [question]: answerMessages })
+          driftStore.addConnectAnswer(driftId, question, answerMessages)
           const currentChat = chatHistory.find(c => c.id === activeChatId)
           const currentMsgs = currentChat?.messages ?? messages
           const updated = currentMsgs.map(msg => {
@@ -3426,7 +3421,7 @@ function App() {
             // Connect-lens drifts keep their Q&A in a per-id cache / on the parent's
             // driftInfos — surface it so the map node has real content + a preview.
             const answers =
-              connectAnswersCache.current.get(id) ??
+              driftStore.getConnectAnswers(id) ??
               chatHistory
                 .flatMap(c => c.messages ?? [])
                 .flatMap(m => m.driftInfos ?? [])

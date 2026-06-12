@@ -49,7 +49,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
   - Dependabot config for npm.
 - **Verify:** Workflow green on a test PR; gitleaks catches a planted dummy key in a scratch branch.
 
-### 5. [ ] App.tsx decomposition + lens-state persistence
+### 5. [~] App.tsx decomposition + lens-state persistence
+> **Status note (2026-06-12):** Lens-state persistence done (branch `feature/lens-state-persistence`, stacked on `feature/persist-temp-drifts` — merge in that order, both bump drift-db). Connect cards/answers moved from App.tsx refs into driftStore backed by a new v4 `drift-lens-state` IDB store with write-through + hydration; `clearTempConversation` cleans it up; `useDriftActions` no longer takes the cache ref. 3 new store tests (kill-and-restore for cards/answers, cleanup, multi-answer) — suite 15 green, tsc + build clean. The per-term lens registry already rebuilds from persisted driftInfos, so reload coverage is now complete. **Remaining:** the decomposition slices (MessageList, Sidebar, Composer, Welcome out of App.tsx) — several sessions of Tier B slice work, not started.
 - **Impact:** High. `App.tsx` is 3,553 lines / 35 `useState` / 16 refs; `DriftPanel` takes 25 props. Critical session state (`lensRegistryRef`, Connect caches) lives in refs and is lost on reload — a documented gap (`DRIFT_STATUS.md`). This class of structure produced the "Connect shows the wrong drift" bugs and slows every future feature.
 - **Effort:** Medium-high (several sessions, slice-by-slice with rollback-safe commits).
 - **Scope:**
