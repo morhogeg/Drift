@@ -42,7 +42,6 @@ describe('customLenses', () => {
 
   it('resolveLensPrompt: custom wins, built-ins resolve, unknown is undefined', () => {
     expect(resolveLensPrompt('simplify')).toBe(TEMPLATE_SYSTEM_PROMPTS.simplify)
-    expect(resolveLensPrompt('steelman')).toBe(TEMPLATE_SYSTEM_PROMPTS.steelman)
     expect(resolveLensPrompt('evidence')).toBe(TEMPLATE_SYSTEM_PROMPTS.evidence)
     expect(resolveLensPrompt(undefined)).toBeUndefined()
     expect(resolveLensPrompt('nope')).toBeUndefined()
@@ -52,14 +51,13 @@ describe('customLenses', () => {
   })
 
   it('lensMeta returns built-in, custom, and drift fallback', () => {
-    expect(lensMeta('challenge')).toEqual({ label: 'Challenge', color: '#f43f5e' })
+    expect(lensMeta('challenge')).toEqual({ label: 'Second opinion', color: '#f43f5e' })
     const c = customLensStore.save({ name: 'Skeptic', color: '#abcdef', systemPrompt: 'p' })
     expect(lensMeta(c.id)).toEqual({ label: 'Skeptic', color: '#abcdef' })
     expect(lensMeta('whatever').label).toBe('Drift')
   })
 
-  it('ships Steelman and Evidence as built-in prompts', () => {
-    expect(TEMPLATE_SYSTEM_PROMPTS.steelman).toMatch(/strongest/i)
+  it('ships Evidence as a built-in prompt', () => {
     expect(TEMPLATE_SYSTEM_PROMPTS.evidence).toMatch(/evidence/i)
   })
 })

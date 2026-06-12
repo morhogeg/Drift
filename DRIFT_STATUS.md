@@ -1,50 +1,29 @@
 # Drift — Quick Status
 
-**Date:** June 12, 2026 | **Branch:** `main` | **Build:** 60 (iOS + web)
+**Date:** June 12, 2026 | **Branch:** `main` | **Build:** 61 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-## Last Session (Jun 12) — Action-plan sweep, items 1–10 merged to main
+## Last Session (Jun 12) — Second opinion lens + evidence citations
 
-All ten ACTION_PLAN items advanced to `[~]` and merged into `main` (10 feature branches, conflicts resolved). Integrated tree verified together: **tsc clean · 34 tests across 8 files green · prod build green · cloud-disabled + cloud-enabled acceptance green · live smoke 0 CSP violations · gitleaks clean**.
-
-- **drift-db → v4:** new `drift-temp-drifts` (unsaved drifts survive kill) + `drift-lens-state` (Connect cards/answers survive reload) stores, write-through + startup hydration.
-- **Cloud accounts** stack merged (Apple sign-in + Firestore backup, inert until `VITE_FIREBASE_*` set); `firestore.rules` audited.
-- **App Store:** `PrivacyInfo.xcprivacy` wired into the Xcode target (in built bundle); owner checklist in HANDOFF.
-- **CI + secrets:** `.github/workflows/ci.yml`, gitleaks (`.gitleaks.toml` baselines the known-leaked key), Dependabot.
-- **Security:** iOS Keychain for API keys (`secureKeys.ts` + migration), build-time CSP (Vite plugin), 6-hourly sanitized auto-backup.
-- **Growth:** shareable static-HTML drift map export (Share button on per-chat map); managed-key proxy **contract + reference** only (`server/proxy.mjs`, `proxyClient.ts` — billing is owner work); custom-lens store + Steelman/Evidence built-ins; code-block copy button.
-
-> ⚠️ **Still needs the owner:** rotate the leaked Gemini key (HANDOFF 164); Firebase project + `VITE_FIREBASE_*` + Apple provider + plist; App Store Connect record/age-rating/upload; on-device passes (drift kill-restore, Keychain). Remaining code slices: App.tsx decomposition, lens-editor UI, proxy productionization, list virtualization + message editing.
-
-## Previously (Jun 11) — Welcome-screen polish
-
-- **No scroll:** empty state now vertically centered (dropped the `22vh` push) and reclaims the input's reserved padding when `messages.length === 0`; compacted hero + "Pick up where you left off" cards (inline `✦ Synthesize N`, no standalone button row).
-- **Three capability tooltips** replace the single drift hint: **Highlight to drift** · **Shift lenses** · **Synthesize drifts**, with custom glass popovers that open downward (no header clipping).
-- **Definition-style copy** (no em dashes): bold name + quiet gloss subline. Drift & Synthesize as numbered steps; drift covers the full loop **Select → Branch → Push → Return**.
-- **Lenses color-coded** to each lens's real signature hue (Simplify amber · Deep dive blue · Connect cyan · Challenge rose), matching the in-panel "View as" bar; Challenge notes the rival-model second opinion.
-- Build 59→60, committed + pushed to `main`.
-
-## Previously (Jun 11) — Launch prep
-
-- Arabic RTL + centralized `src/lib/lang.ts` detection; prod API-key-leak fix (BYOK in prod); App Store metadata + privacy policy + 5 dark screenshots (`scripts/shots.mjs` + `frame.mjs`). EN/HE only (extra translation bundles reverted).
-
-## Cloud accounts (Jun 10) — built, awaiting owner Firebase setup
-
-Optional Apple sign-in + cloud backup/restore (Firestore, `users/{uid}/backup/current`). Stacked branches `feature/cloud-auth` → `feature/cloud-sync` → `feature/cloud-ui`, PRs into `feature/cloud-accounts`. **Inert until `.env` has all `VITE_FIREBASE_*` filled** — verified zero behavior change when blank. API keys never upload (deep-strip + test). Owner checklist in HANDOFF.md "☁️ Cloud accounts" section: Firebase project + Apple provider + Services ID + Xcode capability + `GoogleService-Info.plist` + deploy `firestore.rules`. ⚠️ Don't build iOS from these branches until the plist is in place.
+- **Challenge → Second opinion:** renamed the lens to frame feedback as independent (agrees/agrees-with-caveats/disagrees) rather than adversarial. New prompt explicitly forbids manufacturing disagreement.
+- **Steelman removed** — Evidence now the only extra built-in lens.
+- **Evidence upgraded:** prompts for high-quality citations via Google Search grounding, peer-reviewed sources (meta-analyses, Cochrane, RCTs, WHO/NIH/CDC), specific citations with year/journal/sample size, evidence hierarchy (meta-analysis > RCT > observational > anecdote).
+- **UI fixes:** duplicate "Second opinion on this" label removed from sidebar; numbered-list layout bug fixed (orphaned markers from inline span → anchor on `<li>`).
+- Build 60→61, all tests green, tsc clean.
 
 ## Pending (priority order)
 
-- [ ] **☁️ Owner setup — Cloud accounts** — Firebase project + .env vars + Apple provider + Services ID + Xcode capability + plist + firestore.rules. Checklist in CLOUD_ACCOUNTS_HANDOFF.md.
-- [ ] **TestFlight build 60:** archive in Xcode → App Store Connect
+- [ ] **TestFlight build 61:** archive in Xcode → App Store Connect
 - [ ] **App Store:** add `PrivacyInfo.xcprivacy` to Xcode target · age rating · confirm/create ASC app record · finalize metadata + screenshots
-- [ ] On-device pass: welcome screen (no scroll, tooltips, lens hues) · cloud accounts · UI polish
+- [ ] **☁️ Owner setup — Cloud accounts** — Firebase project + .env vars + Apple provider + Services ID + Xcode capability + plist + firestore.rules
+- [ ] On-device pass: welcome screen · second opinion lens · list layout · cloud accounts (if enabled)
 - [ ] **TODO(semantic):** Connect-lens seeding + semantic edges on map; persist composite lens-thread state
 - [ ] Message editing + regeneration · Custom system prompts · Export & Share
 
 ## Stack snapshot
 
-React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Cloud:** Firebase 12.x (JS SDK) + @capacitor-firebase/authentication 8.3 (Apple Sign-In native sheet iOS, popup web). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache. **Primary LLM:** Gemini REST+SSE. **Routed labs:** OpenRouter. **Single-model only**. **State:** Zustand 5 (chat/drift/model/ui/auth) · **DB:** IndexedDB via idb (v2 schema + users backup). Drift Map = pure SVG + HTML. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3.5k lines · DriftPanel.tsx ~1.3k.
+React 19 + TS + Vite 7 + Capacitor 8 + Tailwind (darkMode 'class'). **Cloud:** Firebase 12.x (JS SDK) + @capacitor-firebase/authentication 8.3 (Apple Sign-In native sheet iOS, popup web). **Embeddings:** Gemini `gemini-embedding-001` (768-dim) → IndexedDB vector cache. **Primary LLM:** Gemini REST+SSE with Google Search grounding. **Routed labs:** OpenRouter. **Single-model only**. **State:** Zustand 5 (chat/drift/model/ui/auth) · **DB:** IndexedDB via idb (v2 schema + users backup). Drift Map = pure SVG + HTML. **Bundle:** manualChunks (vendor cacheable). App.tsx ~3.5k lines · DriftPanel.tsx ~1.3k.
 
 ## Key files
 
-`src/App.tsx` (welcome/empty state + main integration) · `src/lib/cloudConfig.ts` (gate) · `src/services/firebase.ts` (lazy init) · `src/services/auth.ts` (Apple sign-in) · `src/services/cloudSync.ts` (backup/restore) · `src/services/cloudKeyStrip.ts` (key removal + tests) · `src/components/account/SignInSheet.tsx` · `src/components/account/AccountSection.tsx` · `src/services/gemini.ts` · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx`
+`src/App.tsx` (main integration) · `src/lib/driftPanel.ts` (drift labels + prompts) · `src/services/gemini.ts` (Gemini stream + grounding) · `src/components/DriftPanel.tsx` · `src/components/DriftKnowledgeGraph.tsx` · `src/components/DriftMessageBubble.tsx`

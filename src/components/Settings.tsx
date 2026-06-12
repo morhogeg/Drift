@@ -650,14 +650,14 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
           </div>
 
           {/* ── CHALLENGE section ── */}
-          <SectionHeader label="Challenge" hint="Cross-model critique" />
+          <SectionHeader label="Second opinion" hint="Cross-model second opinion" />
           <SettingsGroup>
             <SettingsRow
-              label="Challenger model"
+              label="Second-opinion model"
               description={
                 settings.challengerModel
-                  ? `Challenge replies come from ${settings.challengerModel.label}`
-                  : 'Pressure-test answers with a different model than the main chat'
+                  ? `Second opinions come from ${settings.challengerModel.label}`
+                  : 'Get an independent take from a different model than the main chat'
               }
               right={
                 <button

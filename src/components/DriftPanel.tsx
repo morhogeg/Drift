@@ -4,6 +4,8 @@ import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
   driftLabelsFor,
+  isDriftScaffoldText,
+  isDriftOpenerText,
 } from '../lib/driftPanel'
 import type { AncestryEntry, Target } from '../types/chat'
 import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
@@ -612,7 +614,7 @@ export default function DriftPanel({
                   : 'Connect')
               : templateType === 'simplify' ? 'Simplify'
               : templateType === 'research' ? 'Deep dive'
-              : templateType === 'challenge' ? 'Challenge'
+              : templateType === 'challenge' ? 'Second opinion'
               : null
 
             return (
@@ -745,7 +747,7 @@ export default function DriftPanel({
               { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
               { tpl: 'research', label: 'Deep dive', key: 'research' },
               { tpl: 'connect', label: 'Connect', key: 'connect' },
-              { tpl: 'challenge', label: 'Challenge', key: 'challenge' },
+              { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
             ] as const).map((l) => {
               const active = (l.tpl ?? undefined) === (templateType ?? undefined)
               // Already-explored lenses (content exists → instant, no API call). The
@@ -1073,6 +1075,9 @@ export default function DriftPanel({
             const renderedGroups = new Set<string>()
             return messages.map((msg) => {
               if (!msg.text) return null
+              // Template scaffold ("Second opinion on this: …" etc.) is immediately
+              // duplicated by the auto-sent user bubble — render only the bubble.
+              if (msg.id?.startsWith('drift-system-') && isDriftScaffoldText(msg.text) && !isDriftOpenerText(msg.text)) return null
               if (msg.compareGroupId) {
                 const gid = msg.compareGroupId
                 if (renderedGroups.has(gid)) return null
@@ -1183,7 +1188,7 @@ export default function DriftPanel({
                       {msg.modelTag && (
                         <span className="flex items-center gap-1 mb-1 text-[10px] text-text-muted/60 pl-1">
                           {templateType === 'challenge' && <Scale className="w-2.5 h-2.5 text-rose-400/70" />}
-                          {templateType === 'challenge' ? `Challenged by ${msg.modelTag}` : msg.modelTag}
+                          {templateType === 'challenge' ? `Second opinion from ${msg.modelTag}` : msg.modelTag}
                         </span>
                       )}
                       <div className="px-1 pb-1">

@@ -1,8 +1,8 @@
 /**
  * customLenses — user-defined lenses for the Drift panel.
  *
- * The four signature lenses (Simplify / Deep dive / Connect / Challenge) plus
- * the two newer built-ins (Steelman / Evidence) live in TEMPLATE_SYSTEM_PROMPTS.
+ * The four signature lenses (Simplify / Deep dive / Connect / Second opinion)
+ * plus the Evidence built-in live in TEMPLATE_SYSTEM_PROMPTS.
  * This module adds USER-defined lenses on top: a name, an accent color, and a
  * system prompt, persisted to localStorage. `resolveLensPrompt()` is the single
  * place that maps any lens key — built-in or custom — to its system prompt, so
@@ -23,14 +23,13 @@ export interface CustomLens {
 const STORAGE_KEY = 'drift_custom_lenses'
 
 /** Built-in lens keys, in display order. The first four are the signature set. */
-export const BUILTIN_LENS_KEYS = ['simplify', 'research', 'connect', 'challenge', 'steelman', 'evidence'] as const
+export const BUILTIN_LENS_KEYS = ['simplify', 'research', 'connect', 'challenge', 'evidence'] as const
 
 export const BUILTIN_LENS_META: Record<string, { label: string; color: string }> = {
   simplify: { label: 'Simplify', color: '#f59e0b' },
   research: { label: 'Deep dive', color: '#3b82f6' },
   connect: { label: 'Connect', color: '#06b6d4' },
-  challenge: { label: 'Challenge', color: '#f43f5e' },
-  steelman: { label: 'Steelman', color: '#10b981' },
+  challenge: { label: 'Second opinion', color: '#f43f5e' },
   evidence: { label: 'Evidence', color: '#8b5cf6' },
 }
 

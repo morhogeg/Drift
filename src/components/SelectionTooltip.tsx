@@ -499,7 +499,7 @@ export default function SelectionTooltip({
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: Lightbulb },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Waypoints },
-    { type: 'challenge', label: 'Challenge', desc: 'Argue the other side',  Icon: Scale },
+    { type: 'challenge', label: '2nd Opinion', desc: 'Another model weighs in',  Icon: Scale },
   ]
   /** Per-action tint — icon (rest + hover) and the card's hover border. */
   const ACTION_TINT: Record<TemplateType, { icon: string; border: string }> = {

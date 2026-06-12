@@ -69,7 +69,7 @@ const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
   simplify: 'Simplify',
   research: 'Deep dive',
   connect: 'Connect',
-  challenge: 'Challenge',
+  challenge: 'Second opinion',
 }
 function lensLabel(node: TreeNode): string {
   return node.lens ? LENS_LABELS[node.lens] : 'Drift'
@@ -114,7 +114,7 @@ function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens
 const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עבור|Show me what this connects to|הראה למה זה מתחבר)/
 const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
-const CHALLENGE_SCAFFOLD_RE = /^(Challenge this|ערער על זה)/
+const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
 /** Infer the lens from a drift's own messages — used when the parent driftInfos

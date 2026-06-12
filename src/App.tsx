@@ -2208,7 +2208,7 @@ function App() {
                           { name: 'Simplify', gloss: 'one vivid analogy that makes it click', dot: 'bg-amber-500', text: 'text-amber-500' },
                           { name: 'Deep dive', gloss: 'the mechanism, history and live debates', dot: 'bg-blue-500', text: 'text-blue-500' },
                           { name: 'Connect', gloss: 'the people, ideas and tensions it links to', dot: 'bg-accent-discovery', text: 'text-accent-discovery' },
-                          { name: 'Challenge', gloss: 'a rival AI model argues the case against it', dot: 'bg-rose-500', text: 'text-rose-500' },
+                          { name: 'Second opinion', gloss: 'a different AI model weighs in independently', dot: 'bg-rose-500', text: 'text-rose-500' },
                         ],
                       },
                       {
@@ -2765,7 +2765,10 @@ function App() {
                                     li: ({ node, children }: any) => {
                                       const processed = procWithBoth(children, node)
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li><span id={anchorId}>{processed}</span></li>
+                                      // id sits on the <li> itself — an inline <span> wrapper around
+                                      // block children adds an empty first line, leaving the list
+                                      // marker stranded on its own line (worst in RTL).
+                                      return <li id={anchorId}>{processed}</li>
                                     }
                                   }
                                 })()}
@@ -2848,7 +2851,7 @@ function App() {
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li><span id={anchorId}>{proc(children, node)}</span></li>
+                                      return <li id={anchorId}>{proc(children, node)}</li>
                                     },
                                     th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
                                     td: ({ node, children }: any) => <td>{proc(children, node)}</td>,

@@ -109,7 +109,7 @@ export default function ShortcutsHelp({ isOpen, onClose }: Props) {
               Highlight any phrase in a reply, then tap <span className="text-accent-violet font-medium">Drift</span> to open a focused side-thread without losing your place.
             </Tip>
             <Tip Icon={Telescope} tint="#38bdf8" title="Lenses">
-              Re-view the same term as <b className="font-medium text-text-secondary">Simplify</b>, <b className="font-medium text-text-secondary">Deep dive</b>, <b className="font-medium text-text-secondary">Connect</b>, or <b className="font-medium text-text-secondary">Challenge</b> — each keeps its own thread.
+              Re-view the same term as <b className="font-medium text-text-secondary">Simplify</b>, <b className="font-medium text-text-secondary">Deep dive</b>, <b className="font-medium text-text-secondary">Connect</b>, or <b className="font-medium text-text-secondary">Second opinion</b> — each keeps its own thread.
             </Tip>
             <Tip Icon={Bookmark} tint="#06b6d4" title="Snippets">
               Save a reply or a selection to your gallery (the bookmark icon) to keep the moments worth returning to.

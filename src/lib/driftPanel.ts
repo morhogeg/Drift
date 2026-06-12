@@ -37,14 +37,14 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectFinding: (t) => `Finding connections for "${t}"…`,
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Challenge this' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'ערער על זה' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -52,15 +52,16 @@ export const driftLabelsFor = (sample: string): DriftLabels =>
 // Every language variant of the opener / template-trigger prefixes, so the filters
 // that strip scaffolding from the API conversation work regardless of chat language.
 const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding connections for', 'מה תרצה לדעת על', 'מחפש קשרים עבור']
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Challenge this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'ערער על זה']
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
-// The Challenge lens routes to a *different* model and uses the adversarial prompt
-// ONLY for the explicit "Challenge this: X" turn. Follow-ups inside a challenge
+// The Second-opinion lens routes to a *different* model and uses its prompt
+// ONLY for the explicit "Second opinion on this: X" turn. Follow-ups inside the
 // thread (a typed question, or tapping a dotted suggestion) are ordinary
-// exploration on the main model — so we detect the challenge trigger by prefix.
-const CHALLENGE_TRIGGER_PREFIXES = ['Challenge this', 'ערער על זה']
+// exploration on the main model — so we detect the trigger by prefix.
+// Old "Challenge this" prefixes kept so existing chats still classify correctly.
+const CHALLENGE_TRIGGER_PREFIXES = ['Second opinion on this', 'Challenge this', 'חוות דעת שנייה על זה', 'ערער על זה']
 export const isChallengeTriggerText = (t: string): boolean =>
   CHALLENGE_TRIGGER_PREFIXES.some(p => (t ?? '').startsWith(p))
 
@@ -124,33 +125,26 @@ Rules:
 - Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
 - Do not invent facts. If you are not confident the connection is real, choose a different one.
 - Output raw JSON array of strings only. Any other text breaks the app.`,
-  'challenge': `You are a sharp, fair-minded intellectual sparring partner. The user selected a claim or idea while reading and wants it pressure-tested — NOT cheerleading, and NOT lazy contrarianism. Your job is to make the strongest honest case against it.
+  'challenge': `You are a respected colleague giving an independent second opinion. Another model already answered; the user selected a claim or idea from that answer and wants a second qualified view — confirmation, refinement, or disagreement, whichever is honestly warranted. This is NOT a debate: never manufacture disagreement to seem rigorous.
 
 - Interpret the claim in the sense the surrounding conversation implies; disambiguate by context.
-- Lead with the single most serious objection — the one a thoughtful expert who disagrees would open with.
-- Surface the hidden assumptions the claim rests on, and name which are the shakiest.
-- Give the strongest steelman of the opposing view, fairly stated — never a strawman.
-- Say what would have to be true for the claim to be wrong, and whether that plausibly holds.
-- If the claim mostly survives scrutiny, say so honestly and point to where it's genuinely vulnerable, rather than inventing weaknesses.
-- Concede real strengths. Be concrete, specific, and intellectually honest — the goal is sharper thinking, not winning.
+- Form your OWN assessment first, then compare. Open with your verdict in one plain sentence: agree, agree with caveats, or disagree.
+- If you agree, say so plainly — then add real value: the strongest reason it holds, plus any nuance, boundary condition, or sharper framing the first take missed.
+- If you partly agree, be precise about which part holds, which doesn't, and why.
+- If you disagree, give the single best reason, fairly stated — no strawman, no pile-on.
+- Note anything important the original answer left out.
+- Your credibility comes from honesty, not contrarianism: a confident "this is right, and here's what I'd add" is a perfectly good second opinion.
 
 Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
-  'steelman': `You build the strongest, most persuasive version of an idea the user selected while reading. This is the opposite of the Challenge lens: your job is to make the BEST honest case FOR it — the case its smartest advocate would make.
+  'evidence': `You surface the actual evidence base behind an idea the user selected while reading. Not opinion, not vibes — what is the support, how strong is it, and how do we know? Hold yourself to the citation standard of a good review article.
 
 - Interpret the idea in the sense the surrounding conversation implies; disambiguate by context.
-- Lead with the most compelling reason it's right, then add the supporting pillars a thoughtful proponent would stack behind it.
-- Surface the strongest evidence, the best analogy, and the principle that makes it click.
-- Address the obvious objection and show why a proponent isn't worried about it — without strawmanning the critic.
-- Stay honest: steelman, don't oversell. If the idea has a hard limit, name where the strong case stops rather than papering over it.
-
-Keep it tight and high-signal (under ~160 words). No hype, no preamble. Match the conversation's language.`,
-  'evidence': `You surface the actual evidence base behind an idea the user selected while reading. Not opinion, not vibes — what is the support, how strong is it, and how do we know?
-
-- Interpret the idea in the sense the surrounding conversation implies; disambiguate by context.
-- Lay out the key evidence FOR and AGAINST, weighting each by quality (a meta-analysis ≠ a single study ≠ an anecdote). Name specific studies, datasets, figures, or sources where you genuinely know them.
-- Be honest about the strength: say plainly when something is well-established, contested, or thin. Distinguish correlation from causation.
-- Flag what's missing — the evidence that would settle it but doesn't yet exist.
-- Do NOT invent citations or specifics. If you're not confident a source is real, describe the type of evidence instead of fabricating a reference; use Google Search grounding if available.
+- USE Google Search grounding whenever it is available — especially for medical, health, nutrition, psychology, and policy claims — and prefer primary, high-quality sources: peer-reviewed papers, meta-analyses and systematic reviews (Cochrane), RCTs, and major institutional sources (WHO, NIH, CDC, top journals like NEJM/Lancet/Nature). Avoid blogs, content farms, and press releases.
+- Cite specifically: name the study or review (authors/journal/year, e.g. "a 2019 Cochrane review", "Smith et al., NEJM 2021"), the population/sample size, and the headline finding with its number where you know it.
+- Rank by evidence hierarchy and say where each item sits: meta-analysis > RCT > cohort/observational > case report > expert opinion > anecdote. Distinguish correlation from causation.
+- Lay out the evidence FOR and AGAINST, and say plainly when something is well-established, contested, or thin.
+- Flag what's missing — the study that would settle it but doesn't yet exist.
+- NEVER invent a citation. If grounding is unavailable and you're not confident a source is real, describe the type and approximate vintage of the evidence instead of fabricating a reference, and say you couldn't verify it.
 
 Keep it tight and skimmable. Match the conversation's language.`,
 }
