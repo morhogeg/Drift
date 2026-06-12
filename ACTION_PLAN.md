@@ -28,7 +28,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
   - Audit Firestore security rules — users must only read/write their own documents (client-side key stripping is tested; server rules are the real boundary).
 - **Verify:** Sign in on web + iOS sim → chat created on one appears on the other; backup contains zero API keys (existing vitest suite).
 
-### 3. [ ] Clear App Store launch blockers
+### 3. [~] Clear App Store launch blockers
+> **Status note (2026-06-12):** Code side done — `PrivacyInfo.xcprivacy` wired into the App target (PBXBuildFile/FileReference/group/Resources phase in `project.pbxproj`); simulator build succeeds and the manifest is present in the built `.app` bundle. Manifest accuracy confirmed: no tracking, no tracking domains, outbound only to user-chosen AI providers; collected-data entries assume cloud ships (see HANDOFF.md checklist item 3 for the ship-without-cloud variant). Owner-only steps documented in HANDOFF.md "🚀 App Store submission — owner checklist". Flip to `[x]` after the archive uploads clean and the ASC steps are done.
 - **Impact:** Very high. Build 60 is ready, metadata and screenshots are done — the product can't succeed unshipped.
 - **Effort:** Low (code side), plus owner-only ASC steps.
 - **Scope:**
