@@ -11,6 +11,19 @@
 
 ---
 
+## 🚀 App Store submission — owner checklist (as of Jun 12, 2026)
+
+Code-side blockers are clear: `PrivacyInfo.xcprivacy` is wired into the App target's Resources phase (verified present in the built `.app` bundle) and the manifest matches reality — no tracking, no tracking domains, outbound calls only to the user-configured AI providers (`generativelanguage.googleapis.com`, `openrouter.ai`, optional local Ollama). The remaining steps can only be done by the account owner:
+
+1. **App Store Connect app record** — confirm/create the app for the Drift bundle id; attach build.
+2. **Age-rating questionnaire** — fill in ASC (unrestricted web/AI content → expect 17+/18+ tier).
+3. **App Privacy "nutrition label"** — must match the manifest. The manifest currently declares Email/Name/Other-User-Content collection **on the assumption cloud accounts ship** (Apple Sign-In + Firestore backup). If submitting BEFORE the cloud merge/Firebase setup, delete the `NSPrivacyCollectedDataTypes` entries from `ios/App/App/PrivacyInfo.xcprivacy` and declare "Data Not Collected" in ASC; if cloud ships, keep both in sync.
+4. **Metadata + screenshots** — finalize in ASC (text in `APP_STORE_METADATA.md`, 5 dark screenshots from `scripts/shots.mjs`).
+5. **Archive + upload** — Xcode archive (build 60+) → App Store Connect; check the post-upload email for any missing required-reason API categories (third-party SDK manifests ship inside their frameworks and are not redeclared in ours).
+6. **Final on-device pass** — welcome screen, drift kill-and-restore (ACTION_PLAN item 1), cloud accounts if enabled.
+
+---
+
 ## What Was Done This Session
 
 ### 176. Welcome-screen polish — fit-to-viewport + capability tooltips (Jun 11)
