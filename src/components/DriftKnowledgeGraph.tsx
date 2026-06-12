@@ -61,7 +61,7 @@ interface TreeNode {
   /** Which lens opened this drift — drives the card's lens tag. `undefined` = a
    *  plain free-form drift (no template). Lives on the *parent* message's
    *  driftInfos, so it's resolved during tree construction. */
-  lens?: 'simplify' | 'research' | 'connect' | 'challenge'
+  lens?: 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence' | 'example'
 }
 
 // The user-facing name for each lens. Plain drifts (no templateType) read "Drift".
@@ -70,6 +70,8 @@ const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
   research: 'Deep dive',
   connect: 'Connect',
   challenge: 'Second opinion',
+  evidence: 'Evidence',
+  example: 'Example',
 }
 function lensLabel(node: TreeNode): string {
   return node.lens ? LENS_LABELS[node.lens] : 'Drift'
@@ -82,6 +84,8 @@ const LENS_COLORS: Record<NonNullable<TreeNode['lens']>, string> = {
   research: '#3b82f6',  // blue-500
   connect: '#22d3ee',   // accent-discovery (cyan)
   challenge: '#f43f5e', // rose-500
+  evidence: '#8b5cf6',  // violet-500
+  example: '#10b981',   // emerald-500
 }
 const DRIFT_LENS_COLOR = '#a855f7' // accent-violet
 function lensColor(node: TreeNode): string {
@@ -95,7 +99,9 @@ function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens
     for (const m of c.messages ?? []) {
       const info = m.driftInfos?.find(d => d.driftChatId === driftChatId)
       if (!info) continue
-      if (info.templateType) return info.templateType
+      // templateType is a LensKey (may be a custom lens id the graph doesn't render);
+      // only honor it when it's one of the built-in lenses this view knows how to color.
+      if (info.templateType) return (info.templateType in LENS_LABELS) ? (info.templateType as TreeNode['lens']) : undefined
       // A Connect drift may pre-date persisted templateType — infer it from the
       // cached cards/answers (same fallback App.tsx uses when opening the drift).
       if ((info.connectCards?.length ?? 0) > 0 ||
@@ -115,6 +121,7 @@ const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עב�
 const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
 const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
+const EXAMPLE_SCAFFOLD_RE = /^(Show me an example of this|תן דוגמה לזה)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
 /** Infer the lens from a drift's own messages — used when the parent driftInfos
@@ -128,6 +135,7 @@ function detectLensFromChat(chat: ChatSession): TreeNode['lens'] {
     if (SIMPLIFY_SCAFFOLD_RE.test(t)) return 'simplify'
     if (RESEARCH_SCAFFOLD_RE.test(t)) return 'research'
     if (CHALLENGE_SCAFFOLD_RE.test(t)) return 'challenge'
+    if (EXAMPLE_SCAFFOLD_RE.test(t)) return 'example'
   }
   return undefined
 }

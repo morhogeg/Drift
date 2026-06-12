@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react'
-import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale } from 'lucide-react'
+import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale, SquareStack, Aperture } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
+import { customLensStore, type CustomLens } from '../lib/customLenses'
+import type { LensKey } from '../types/chat'
 
-type TemplateType = 'simplify' | 'research' | 'connect' | 'challenge'
+type TemplateType = LensKey
 
 interface SelectionTooltipProps {
   onStartDrift: (text: string, messageId: string, templateType?: TemplateType) => void
@@ -498,16 +500,23 @@ export default function SelectionTooltip({
   const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; Icon: LucideIcon }> = [
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: Lightbulb },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
+    { type: 'example',   label: 'Example',   desc: 'Show me a real one',    Icon: SquareStack },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Waypoints },
     { type: 'challenge', label: '2nd Opinion', desc: 'Another model weighs in',  Icon: Scale },
   ]
+  /** Index where the menu splits "understand this" from "push outward". */
+  const TEMPLATE_DIVIDER_AT = 3
   /** Per-action tint — icon (rest + hover) and the card's hover border. */
-  const ACTION_TINT: Record<TemplateType, { icon: string; border: string }> = {
+  const ACTION_TINT: Record<string, { icon: string; border: string }> = {
     simplify:  { icon: 'text-amber-400/70 group-hover:text-amber-400',                       border: 'hover:border-amber-400/40' },
     research:  { icon: 'text-blue-400/70 group-hover:text-blue-400',                         border: 'hover:border-blue-400/40' },
+    example:   { icon: 'text-emerald-400/70 group-hover:text-emerald-400',                   border: 'hover:border-emerald-400/40' },
     connect:   { icon: 'text-accent-discovery/70 group-hover:text-accent-discovery',          border: 'hover:border-accent-discovery/40' },
     challenge: { icon: 'text-rose-400/70 group-hover:text-rose-400',                         border: 'hover:border-rose-400/40' },
   }
+  // User-defined lenses, appended after the built-ins on both layouts. Read fresh
+  // each render so a lens created in Settings shows up without a remount.
+  const customLenses: CustomLens[] = tooltip && !tooltip.isUserMessage ? customLensStore.getAll() : []
 
   const handleSave = () => {
     const data =
@@ -578,12 +587,27 @@ export default function SelectionTooltip({
                   className={`flex-shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
                              text-text-secondary transition-colors duration-150
                              active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap
-                             ${i === 2 ? 'border-l-2 border-dark-border' : 'border-l border-dark-border'}`}
+                             ${i === TEMPLATE_DIVIDER_AT ? 'border-l-2 border-dark-border' : 'border-l border-dark-border'}`}
                   onTouchEnd={(e) => { e.preventDefault(); handleDrift(t.type) }}
                   onClick={() => handleDrift(t.type)}
                 >
                   <t.Icon className={`w-[17px] h-[17px] ${ACTION_TINT[t.type].icon}`} strokeWidth={1.9} />
                   <span className="text-[11px] font-medium leading-none">{t.label}</span>
+                </button>
+              ))}
+              {customLenses.map((lens, i) => (
+                <button
+                  key={lens.id}
+                  type="button"
+                  className={`flex-shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 py-2 min-w-[64px]
+                             text-text-secondary transition-colors duration-150
+                             active:bg-black/[0.06] dark:active:bg-white/[0.07] active:text-text-primary whitespace-nowrap
+                             ${i === 0 ? 'border-l-2 border-dark-border' : 'border-l border-dark-border'}`}
+                  onTouchEnd={(e) => { e.preventDefault(); handleDrift(lens.id) }}
+                  onClick={() => handleDrift(lens.id)}
+                >
+                  <Aperture className="w-[17px] h-[17px]" strokeWidth={1.9} style={{ color: lens.color }} />
+                  <span className="text-[11px] font-medium leading-none max-w-[72px] truncate">{lens.name}</span>
                 </button>
               ))}
               <button
@@ -669,12 +693,13 @@ export default function SelectionTooltip({
           </button>
         </div>
 
-        {/* Template quick-action row — grouped: [Simplify · Deep dive] | [Connect · Challenge] */}
+        {/* Template quick-action row — grouped: [Simplify · Deep dive · Example] | [Connect · Challenge],
+            then any user-defined custom lenses. Wraps to a new line when it runs out of width. */}
         {!tooltip.isUserMessage && (
-          <div className="flex items-stretch gap-1">
+          <div className="flex flex-wrap items-stretch gap-1 max-w-[280px]">
             {TEMPLATES.map((t, i) => (
               <Fragment key={t.type}>
-                {i === 2 && <div className="self-stretch w-px my-0.5 bg-dark-border/60" aria-hidden />}
+                {i === TEMPLATE_DIVIDER_AT && <div className="self-stretch w-px my-0.5 bg-dark-border/60" aria-hidden />}
                 <button
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -692,6 +717,25 @@ export default function SelectionTooltip({
                   <span className="text-[9px] text-text-muted/60 leading-tight">{t.desc}</span>
                 </button>
               </Fragment>
+            ))}
+            {customLenses.length > 0 && <div className="self-stretch w-px my-0.5 bg-dark-border/60" aria-hidden />}
+            {customLenses.map((lens) => (
+              <button
+                key={lens.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDrift(lens.id) }}
+                title={`Explore through your "${lens.name}" lens`}
+                className="group flex flex-col items-start gap-0 px-2.5 py-1.5 rounded-lg
+                           bg-dark-elevated/60 border border-dark-border/50 hover:border-text-muted/50 active:scale-95
+                           transition-all duration-150 cursor-pointer whitespace-nowrap"
+              >
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-text-muted group-hover:text-text-secondary">
+                  <Aperture className="w-3 h-3" strokeWidth={1.9} style={{ color: lens.color }} />
+                  <span className="max-w-[96px] truncate">{lens.name}</span>
+                </span>
+                <span className="text-[9px] text-text-muted/60 leading-tight">Custom lens</span>
+              </button>
             ))}
           </div>
         )}

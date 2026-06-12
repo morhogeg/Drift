@@ -3,7 +3,7 @@ import { useChatStore } from '@/store/chatStore'
 import { useDriftStore } from '@/store/driftStore'
 import { haptics } from '@/lib/haptics'
 import { toast } from '@/hooks/useToast'
-import type { Message, ChatSession, DriftContext } from '@/types/chat'
+import type { Message, ChatSession, DriftContext, LensKey } from '@/types/chat'
 
 /** The minimal snapshot kept of the most recently closed drift, so it can be reopened. */
 export interface LastDrift {
@@ -479,7 +479,7 @@ export function useDriftActions({
     chatStore.setMessages(updatedMessages)
   }
 
-  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => {
+  const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: LensKey) => {
     const pushCallId = Math.random().toString(36).substring(7)
     console.log(`[PUSH ${pushCallId}] handlePushDriftToMain called`)
 

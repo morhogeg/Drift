@@ -7,7 +7,8 @@ import {
   isDriftScaffoldText,
   isDriftOpenerText,
 } from '../lib/driftPanel'
-import type { AncestryEntry, Target } from '../types/chat'
+import type { AncestryEntry, Target, LensKey } from '../types/chat'
+import { customLensStore } from '../lib/customLenses'
 import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
 import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
@@ -47,7 +48,7 @@ interface DriftPanelProps {
   highlightMessageId?: string
   parentChatId: string
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: LensKey) => void
   onUpdatePushedDriftSaveStatus?: (sourceMessageId: string) => void
   onUndoPushToMain?: (sourceMessageId: string) => void
   onUndoSaveAsChat?: (chatId: string) => void
@@ -75,7 +76,7 @@ interface DriftPanelProps {
   /** Called when the user taps a breadcrumb item to navigate back. Index 0 = main chat. */
   onNavigateToBreadcrumb?: (index: number) => void
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Pre-loaded suggestion chips — bypasses AI fetch when provided. */
   initialSuggestions?: string[]
   /** Restore Connect mode to a previously active question (breadcrumb navigation). */
@@ -101,7 +102,7 @@ interface DriftPanelProps {
   /** Walk sideways to a sibling drift without leaving the panel. */
   onNavigateToSibling?: (sib: SiblingDrift) => void
   /** Re-view the same term through a different lens (Drift / Simplify / Deep dive / Connect). */
-  onSwitchLens?: (template: 'simplify' | 'research' | 'connect' | 'challenge' | undefined) => void
+  onSwitchLens?: (template: LensKey | undefined) => void
   /** Persist the user's chosen Challenge challenger model (first-tap picker). */
   onSetChallenger?: (target: Target) => void
   /** Open model settings so the user can add a second model for cross-model Challenge. */
@@ -116,7 +117,7 @@ export interface SiblingDrift {
   selectedText: string
   driftChatId: string
   sourceMessageId: string
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
 }
 
 export default function DriftPanel({
@@ -335,7 +336,7 @@ export default function DriftPanel({
         const systemMessageText = templateType === 'connect'
           ? driftLabels.connectFinding(selectedText)
           : templateType
-          ? `${driftLabels.prefixes[templateType] ?? 'Exploring'}: "${selectedText}"`
+          ? `${driftLabels.prefixes[templateType] ?? 'Explore this'}: "${selectedText}"`
           : driftLabels.opener(selectedText)
         const systemMessage: Message = {
           id: 'drift-system-' + Date.now(),
@@ -742,24 +743,26 @@ export default function DriftPanel({
         {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
-            {([
-              { tpl: undefined, label: 'Drift', key: 'drift' },
-              { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
-              { tpl: 'research', label: 'Deep dive', key: 'research' },
-              { tpl: 'connect', label: 'Connect', key: 'connect' },
-              { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
-            ] as const).map((l) => {
-              const active = (l.tpl ?? undefined) === (templateType ?? undefined)
-              // Already-explored lenses (content exists → instant, no API call). The
-              // active lens is obviously explored; mark the OTHERS so the user knows
-              // which taps are free vs. which would fire a fresh generation.
-              const explored = !active && !!exploredLenses?.has(l.key)
-              // Each lens's signature hue — used filled when active, as a small dot
-              // when explored-but-inactive. Connect cyan matches the Connections page.
+            {(() => {
+              // Built-in lenses, then any user-defined custom lenses (read fresh so a
+              // lens created in Settings appears here without remounting the panel).
+              const builtins: Array<{ tpl: LensKey | undefined; label: string; key: string; color?: string }> = [
+                { tpl: undefined, label: 'Drift', key: 'drift' },
+                { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
+                { tpl: 'research', label: 'Deep dive', key: 'research' },
+                { tpl: 'example', label: 'Example', key: 'example' },
+                { tpl: 'connect', label: 'Connect', key: 'connect' },
+                { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
+              ]
+              const customs = customLensStore.getAll().map((l) => ({ tpl: l.id as LensKey, label: l.name, key: l.id, color: l.color }))
+              const lenses = [...builtins, ...customs]
+              // Each built-in lens's signature hue — filled when active, a small dot
+              // when explored-but-inactive. Custom lenses tint inline from their color.
               const activeTint: Record<string, string> = {
                 drift:     'bg-accent-violet/20 text-accent-violet border-accent-violet/40',
                 simplify:  'bg-amber-500/15 text-amber-500 border-amber-500/40',
                 research:  'bg-blue-500/15 text-blue-500 border-blue-500/40',
+                example:   'bg-emerald-500/15 text-emerald-500 border-emerald-500/40',
                 connect:   'bg-accent-discovery/15 text-accent-discovery border-accent-discovery/45',
                 challenge: 'bg-rose-500/15 text-rose-500 border-rose-500/40',
               }
@@ -767,26 +770,36 @@ export default function DriftPanel({
                 drift:     'bg-accent-violet',
                 simplify:  'bg-amber-500',
                 research:  'bg-blue-500',
+                example:   'bg-emerald-500',
                 connect:   'bg-accent-discovery',
                 challenge: 'bg-rose-500',
               }
-              return (
-                <button
-                  key={l.label}
-                  onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
-                  title={explored ? `${l.label} — already explored` : undefined}
-                  className={`shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
-                    ${active
-                      ? activeTint[l.key]
-                      : explored
-                        ? 'text-text-secondary border-dark-border/80 hover:text-text-primary'
-                        : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
-                >
-                  {explored && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotTint[l.key]}`} />}
-                  {l.label}
-                </button>
-              )
-            })}
+              return lenses.map((l) => {
+                const active = (l.tpl ?? undefined) === (templateType ?? undefined)
+                // Already-explored lenses (content exists → instant, no API call). The
+                // active lens is obviously explored; mark the OTHERS so the user knows
+                // which taps are free vs. which would fire a fresh generation.
+                const explored = !active && !!exploredLenses?.has(l.key)
+                const isCustom = !!l.color
+                return (
+                  <button
+                    key={l.key}
+                    onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
+                    title={explored ? `${l.label} — already explored` : undefined}
+                    style={active && isCustom ? { backgroundColor: `${l.color}26`, color: l.color, borderColor: `${l.color}66` } : undefined}
+                    className={`shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
+                      ${active
+                        ? (isCustom ? '' : activeTint[l.key])
+                        : explored
+                          ? 'text-text-secondary border-dark-border/80 hover:text-text-primary'
+                          : 'text-text-muted border-dark-border hover:text-text-primary hover:border-dark-border'}`}
+                  >
+                    {explored && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isCustom ? '' : dotTint[l.key]}`} style={isCustom ? { backgroundColor: l.color } : undefined} />}
+                    <span className="max-w-[120px] truncate">{l.label}</span>
+                  </button>
+                )
+              })
+            })()}
           </div>
         )}
         {/* First-run hint: the lens switcher is an invisible affordance — teach it once. */}

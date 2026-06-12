@@ -23,7 +23,7 @@ export interface CustomLens {
 const STORAGE_KEY = 'drift_custom_lenses'
 
 /** Built-in lens keys, in display order. The first four are the signature set. */
-export const BUILTIN_LENS_KEYS = ['simplify', 'research', 'connect', 'challenge', 'evidence'] as const
+export const BUILTIN_LENS_KEYS = ['simplify', 'research', 'connect', 'challenge', 'evidence', 'example'] as const
 
 export const BUILTIN_LENS_META: Record<string, { label: string; color: string }> = {
   simplify: { label: 'Simplify', color: '#f59e0b' },
@@ -31,6 +31,7 @@ export const BUILTIN_LENS_META: Record<string, { label: string; color: string }>
   connect: { label: 'Connect', color: '#06b6d4' },
   challenge: { label: 'Second opinion', color: '#f43f5e' },
   evidence: { label: 'Evidence', color: '#8b5cf6' },
+  example: { label: 'Example', color: '#10b981' },
 }
 
 export const customLensStore = {

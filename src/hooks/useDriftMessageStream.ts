@@ -7,6 +7,7 @@ import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
 import { resolveLensPrompt } from '../lib/customLenses'
+import type { LensKey } from '../types/chat'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
 import type { Message } from '../components/DriftPanel'
 
@@ -22,7 +23,7 @@ interface DriftMessageStreamDeps {
   /** Parent conversation, used to ground/disambiguate the prompt. */
   contextMessages: Message[]
   /** One-tap workflow type, if this is a template drift. */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Active Connect bridge question (null in chips view / non-connect drifts). */
   connectQuestion: string | null
   /** Prior explorations of related terms — fed into the Connect prompt to avoid repeats. */

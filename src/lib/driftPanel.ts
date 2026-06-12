@@ -37,14 +37,14 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectFinding: (t) => `Finding connections for "${t}"…`,
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this', example: 'Show me an example of this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה', example: 'תן דוגמה לזה' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -52,7 +52,10 @@ export const driftLabelsFor = (sample: string): DriftLabels =>
 // Every language variant of the opener / template-trigger prefixes, so the filters
 // that strip scaffolding from the API conversation work regardless of chat language.
 const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding connections for', 'מה תרצה לדעת על', 'מחפש קשרים עבור']
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה']
+// 'Explore this' is the generic opener custom lenses fall back to (they have no
+// built-in prefix), so registering it here lets the same scaffold-stripping/hiding
+// work for any user-defined lens without driftPanel needing to know their names.
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'Show me an example of this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה', 'תן דוגמה לזה']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
@@ -90,7 +93,7 @@ export const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
   'simplify': `You make hard ideas suddenly click. The user selected a term while reading and wants it made simple — but they are a smart adult, so never be condescending or babyish.
 
 - Interpret the term in the sense the surrounding conversation implies (disambiguate by context — don't explain the generic dictionary meaning if the conversation means something specific).
-- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences.
+- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences. BUT if the term is already concrete — a specific person, place, date, organization, or number — skip the analogy and just give the crisp, plain-language fact; never force a simile onto something that is already tangible.
 - Strip the jargon, but if a key technical word matters, name it once and translate it.
 - Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
 - Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
@@ -118,13 +121,13 @@ Example output for "Julius Caesar":
 ["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
 
 Rules:
-- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include at least one "tension" (something it opposes/rivals) wherever one honestly exists.
+- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include a "tension" (something it opposes/rivals) wherever a real opposition honestly exists — but never manufacture a rivalry to fill the quota; if none is genuine, use another type instead.
 - Each <concept> must be a SPECIFIC, real, verifiable thing (a named person, place, event, work, or named idea) — not a vague category ("various philosophers", "modern society") and not a near-synonym of the term itself.
 - Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
 - Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern. Reach for the link a thoughtful reader would NOT immediately predict.
 - Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
 - Do not invent facts. If you are not confident the connection is real, choose a different one.
-- Output raw JSON array of strings only. Any other text breaks the app.`,
+- Output the raw JSON array ONLY — it must start with [ and end with ]. No prose, no commentary, and no markdown code fences of any kind (do not wrap it in triple backticks or a json block). Any character outside the array breaks the app.`,
   'challenge': `You are a respected colleague giving an independent second opinion. Another model already answered; the user selected a claim or idea from that answer and wants a second qualified view — confirmation, refinement, or disagreement, whichever is honestly warranted. This is NOT a debate: never manufacture disagreement to seem rigorous.
 
 - Interpret the claim in the sense the surrounding conversation implies; disambiguate by context.
@@ -134,6 +137,7 @@ Rules:
 - If you disagree, give the single best reason, fairly stated — no strawman, no pile-on.
 - Note anything important the original answer left out.
 - Your credibility comes from honesty, not contrarianism: a confident "this is right, and here's what I'd add" is a perfectly good second opinion.
+- This is a reasoned peer judgment, NOT a literature review — give your own assessment in plain language; don't dump citations, study names, or reference lists (a different lens handles the evidence base).
 
 Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
   'evidence': `You surface the actual evidence base behind an idea the user selected while reading. Not opinion, not vibes — what is the support, how strong is it, and how do we know? Hold yourself to the citation standard of a good review article.
@@ -147,4 +151,12 @@ Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the
 - NEVER invent a citation. If grounding is unavailable and you're not confident a source is real, describe the type and approximate vintage of the evidence instead of fabricating a reference, and say you couldn't verify it.
 
 Keep it tight and skimmable. Match the conversation's language.`,
+  'example': `You make an abstract idea tangible by SHOWING it, not defining it. The user selected a term while reading and wants a concrete, specific instance that makes it real — the kind of example that makes someone say "oh, THAT's what that means."
+
+- Interpret the term in the sense the surrounding conversation implies; disambiguate by context.
+- Lead with the example itself, not a definition. Make it specific and real: a named case, an actual scenario, real numbers, a worked-through instance — never a vague "things like X."
+- Pick the example that best reveals the term's essence AND its boundary (why this counts, and where a near-miss wouldn't). One rich example beats three thin ones; add a second only to sharpen a contrast.
+- For a process or technique, walk one concrete run-through with real specifics. For a category or concept, name a canonical real instance and show what makes it fit.
+- Don't fabricate. Any study, person, product, or event you name must be real; when unsure of a detail, choose an example you're confident about.
+- Keep it tight (~120 words). No preamble, no restating the definition. Match the conversation's language.`,
 }

@@ -11,7 +11,7 @@
  * and query it when a user marks a term to surface where else it lives.
  */
 
-import type { ChatSession } from '../types/chat'
+import type { ChatSession, LensKey } from '../types/chat'
 
 /** One place a term was explored. */
 export interface TermOccurrence {
@@ -21,7 +21,7 @@ export interface TermOccurrence {
   chatTitle: string
   /** The original-cased term as the user selected it. */
   term: string
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Chat the drift descends from, for orientation ("in: <parent>"). */
   parentChatId?: string
 }
