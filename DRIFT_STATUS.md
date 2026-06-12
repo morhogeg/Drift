@@ -1,9 +1,22 @@
 # Drift — Quick Status
 
-**Date:** June 11, 2026 | **Branch:** `main` | **Build:** 60 (iOS + web)
+**Date:** June 12, 2026 | **Branch:** `main` | **Build:** 60 (iOS + web)
 **Repo:** `/Users/morhogeg/Drift` | `npm run dev` · `npm run build && npx cap sync ios`
 
-## Last Session (Jun 11) — Welcome-screen polish
+## Last Session (Jun 12) — Action-plan sweep, items 1–10 merged to main
+
+All ten ACTION_PLAN items advanced to `[~]` and merged into `main` (10 feature branches, conflicts resolved). Integrated tree verified together: **tsc clean · 34 tests across 8 files green · prod build green · cloud-disabled + cloud-enabled acceptance green · live smoke 0 CSP violations · gitleaks clean**.
+
+- **drift-db → v4:** new `drift-temp-drifts` (unsaved drifts survive kill) + `drift-lens-state` (Connect cards/answers survive reload) stores, write-through + startup hydration.
+- **Cloud accounts** stack merged (Apple sign-in + Firestore backup, inert until `VITE_FIREBASE_*` set); `firestore.rules` audited.
+- **App Store:** `PrivacyInfo.xcprivacy` wired into the Xcode target (in built bundle); owner checklist in HANDOFF.
+- **CI + secrets:** `.github/workflows/ci.yml`, gitleaks (`.gitleaks.toml` baselines the known-leaked key), Dependabot.
+- **Security:** iOS Keychain for API keys (`secureKeys.ts` + migration), build-time CSP (Vite plugin), 6-hourly sanitized auto-backup.
+- **Growth:** shareable static-HTML drift map export (Share button on per-chat map); managed-key proxy **contract + reference** only (`server/proxy.mjs`, `proxyClient.ts` — billing is owner work); custom-lens store + Steelman/Evidence built-ins; code-block copy button.
+
+> ⚠️ **Still needs the owner:** rotate the leaked Gemini key (HANDOFF 164); Firebase project + `VITE_FIREBASE_*` + Apple provider + plist; App Store Connect record/age-rating/upload; on-device passes (drift kill-restore, Keychain). Remaining code slices: App.tsx decomposition, lens-editor UI, proxy productionization, list virtualization + message editing.
+
+## Previously (Jun 11) — Welcome-screen polish
 
 - **No scroll:** empty state now vertically centered (dropped the `22vh` push) and reclaims the input's reserved padding when `messages.length === 0`; compacted hero + "Pick up where you left off" cards (inline `✦ Synthesize N`, no standalone button row).
 - **Three capability tooltips** replace the single drift hint: **Highlight to drift** · **Shift lenses** · **Synthesize drifts**, with custom glass popovers that open downward (no header clipping).
