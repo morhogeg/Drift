@@ -14,6 +14,7 @@ import { Login } from './components/Login'
 import { ONBOARDED_FLAG } from './lib/onboardingFlag'
 const Onboarding = lazy(() => import('./components/Onboarding'))
 import ReactMarkdown from 'react-markdown'
+import { CodeBlock } from './components/CodeBlock'
 import remarkGfm from 'remark-gfm'
 import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
@@ -2748,6 +2749,7 @@ function App() {
                                     return unexploredHl.length ? processHighlightsText(withDrifts, msg.id, unexploredHl, prior) : withDrifts
                                   }
                                   return {
+                                    pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
                                     p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
                                     td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
@@ -2833,6 +2835,7 @@ function App() {
                                     return hl.length ? processHighlightsText(base, msg.id, hl, prior) : base
                                   }
                                   return {
+                                    pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)

@@ -9,6 +9,7 @@ import { memo } from 'react'
 import { ArrowLeft, Bookmark } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { CodeBlock } from './CodeBlock'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
 
 interface DriftMessage {
@@ -131,6 +132,7 @@ function DriftMessageBubbleInner({
                   prose-tr:hover:bg-dark-elevated/20"
                 remarkPlugins={[remarkGfm]}
                 components={{
+                  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
                   p: ({ children }) => <p className="mb-2">{children}</p>,
                   br: () => <br />,
                   table: ({ children }) => (

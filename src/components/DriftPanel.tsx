@@ -15,6 +15,7 @@ import { useDriftPanelActions } from '../hooks/useDriftPanelActions'
 import { useConnectThreads } from '../hooks/useConnectThreads'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { CodeBlock } from './CodeBlock'
 import type { AISettings } from './Settings'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
 import { useVoiceInput } from '../hooks/useVoiceInput'
@@ -1248,6 +1249,7 @@ export default function DriftPanel({
                                 return walkHL(children, new Set<string>(), priorText)
                               }
                               return {
+                                pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
                                 p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                 li: ({ node, children }: any) => <li>{proc(children, node)}</li>,
                                 th: ({ node, children }: any) => <th>{proc(children, node)}</th>,

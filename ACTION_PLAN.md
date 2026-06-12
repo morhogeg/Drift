@@ -86,7 +86,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 - **Effort:** Medium.
 - **Scope:** Lens editor (name, color, system prompt) persisted to settings; render custom lenses in the switcher and pushed-tag styling; ship two new built-ins to the same honesty bar (Steelman, Evidence/sources).
 
-### 10. [ ] Polish backlog
+### 10. [~] Polish backlog
+> **Status note (2026-06-12):** Code-block copy button shipped on `feature/polish-codeblock-copy` — `src/components/CodeBlock.tsx` (hover-revealed Copy → "Copied" with haptic), wired as the `pre` override in all four markdown renderers (main chat both branches, DriftPanel, DriftMessageBubble). Render test green; also fixed vitest `include` to pick up `.test.tsx`. tsc + build + suite (9) green. **Remaining (not started):** message-list virtualization + `React.memo`/`useCallback` pass, and message editing/regeneration — larger, separate slices.
 - **Impact:** Medium, cumulative.
 - **Effort:** Low per item.
 - **Scope:**
