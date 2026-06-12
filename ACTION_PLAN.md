@@ -76,7 +76,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 - **Effort:** Medium (export/render path; hosting decision needed).
 - **Scope:** Export a drift tree (nodes, lenses, answers) to a sharable read-only view — start with a static HTML/JSON export, upgrade to hosted links once cloud sync (item 2) exists.
 
-### 8. [ ] Managed-key proxy + Pro tier
+### 8. [~] Managed-key proxy + Pro tier — contract + reference only
+> **Status note (2026-06-12):** This is a high-effort server/billing feature (depends on items 2 + 4); a production service can't and shouldn't be stood up autonomously. What's on `feature/managed-proxy-design`: the full **client/server contract** — `server/proxy.mjs` (reference Node proxy: uniform SSE `{delta}`/`{done}` over Gemini + OpenRouter, in-memory quota, **unverified** token decode) and `src/services/proxyClient.ts` (inert unless `VITE_PROXY_URL` set; `streamViaProxy()` async-gen + `QuotaExceededError` on 402). Verified: 3 client tests (delta stream, 402→QuotaExceeded, disabled-by-default) green; live smoke of the reference proxy returns 401 without auth and flips to 402 after the free daily allowance. `docs/MANAGED_PROXY.md` lists everything productionizing needs. **Remaining (owner/server, the bulk of the effort):** real firebase-admin token verification, durable per-uid quota, StoreKit 2 + Stripe billing, abuse controls, deploy, and wiring `streamViaProxy` into the chat send path. Stays `[~]` — the revenue feature is not shipped.
 - **Impact:** High for revenue — removes the BYOK onboarding cliff (the single biggest funnel killer) and is the long-term fix for client-side key exposure. Depends on items 2 and 4.
 - **Effort:** High (first server-side component: proxy, rate limiting, per-user quotas, subscription billing).
 - **Scope:** Server proxy for Gemini/OpenRouter with per-user quotas; free bundled allowance on a cheap model; Pro subscription (~$8/mo) via App Store + web checkout.
