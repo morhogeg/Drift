@@ -70,6 +70,34 @@ describe('drift map export', () => {
     expect(html).not.toMatch(/src=|href="http/) // no external resources
   })
 
+  it('renders markdown and is RTL-aware', () => {
+    const md = [
+      { id: 'm1', text: 'איך עובד דוד שמש?', isUser: true, timestamp: t },
+      {
+        id: 'm2',
+        text: '## כותרת\n\nטקסט עם **הדגשה** ו-`code`.\n\n* פריט ראשון\n* פריט שני',
+        isUser: false,
+        timestamp: t,
+      },
+    ]
+    const html = buildShareableMapHtml('root', [
+      { id: 'root', title: 'דוד שמש', createdAt: t, messages: md },
+    ])!
+    // Markdown is rendered, not shown raw.
+    expect(html).toContain('<strong>הדגשה</strong>')
+    expect(html).toContain('<code>code</code>')
+    expect(html).toContain('<h3>כותרת</h3>')
+    expect(html).toContain('<li>פריט ראשון</li>')
+    expect(html).not.toContain('**הדגשה**')
+    expect(html).not.toContain('## כותרת')
+    // RTL: messages and phrases carry dir="auto" + plaintext bidi.
+    expect(html).toContain('dir="auto"')
+    expect(html).toContain('unicode-bidi: plaintext')
+    // Role labels divide question vs answer.
+    expect(html).toMatch(/data-role="question"/)
+    expect(html).toMatch(/data-role="answer"/)
+  })
+
   it('returns null for an unknown root', () => {
     expect(buildShareableMapHtml('missing', chats)).toBeNull()
   })

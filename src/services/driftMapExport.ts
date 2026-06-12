@@ -80,21 +80,90 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/**
+ * Minimal, self-contained markdown → safe HTML. Handles the subset the chat
+ * actually produces: headings, bold/italic, inline code, bullet/numbered lists,
+ * and paragraphs. Text is HTML-escaped FIRST — the markdown tokens (* # `) are
+ * unaffected by escaping, so the regex passes stay safe against injection.
+ */
+function mdToHtml(raw: string): string {
+  const inline = (s: string): string =>
+    esc(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  const lines = raw.replace(/\r/g, '').split('\n')
+  const out: string[] = []
+  let list: { type: 'ul' | 'ol'; items: string[] } | null = null
+  const flush = () => {
+    if (list) {
+      out.push(`<${list.type}>${list.items.map((i) => `<li>${i}</li>`).join('')}</${list.type}>`)
+      list = null
+    }
+  }
+
+  for (const line of lines) {
+    const t = line.trim()
+    if (!t) { flush(); continue }
+
+    const heading = t.match(/^(#{1,6})\s+(.*)$/)
+    if (heading) {
+      flush()
+      const level = Math.min(heading[1].length + 1, 6) // scale down: ## → h3 inside a card
+      out.push(`<h${level}>${inline(heading[2])}</h${level}>`)
+      continue
+    }
+
+    const bullet = t.match(/^[-*+]\s+(.*)$/)
+    if (bullet) {
+      if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] } }
+      list.items.push(inline(bullet[1]))
+      continue
+    }
+
+    const numbered = t.match(/^\d+\.\s+(.*)$/)
+    if (numbered) {
+      if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] } }
+      list.items.push(inline(numbered[1]))
+      continue
+    }
+
+    flush()
+    out.push(`<p>${inline(t)}</p>`)
+  }
+  flush()
+  return out.join('\n')
+}
+
 function renderNode(node: ExportNode, depth: number): string {
   const color = LENS_COLORS[node.lens]
   const msgs = node.messages
-    .map(
-      (m) => `<div class="msg ${m.isUser ? 'user' : 'ai'}">${esc(m.text)}</div>`
-    )
+    .map((m) => {
+      const role = m.isUser ? 'question' : 'answer'
+      const label = m.isUser ? 'Question' : 'Answer'
+      return `<div class="msg ${m.isUser ? 'user' : 'ai'}">
+        <span class="role" data-role="${role}">${label}</span>
+        <div class="prose" dir="auto">${mdToHtml(m.text)}</div>
+      </div>`
+    })
     .join('\n')
-  const children = node.children.map((c) => renderNode(c, depth + 1)).join('\n')
+
+  const children = node.children.length
+    ? `<div class="branches">
+         <div class="branches-head">${node.children.length} ${node.children.length === 1 ? 'branch' : 'branches'}</div>
+         ${node.children.map((c) => renderNode(c, depth + 1)).join('\n')}
+       </div>`
+    : ''
+
   const tag =
     depth === 0
       ? `<span class="tag root">Exploration</span>`
       : `<span class="tag" style="color:${color};border-color:${color}55;background:${color}14">${LENS_LABELS[node.lens]}</span>`
+
   return `
-<details class="node" ${depth < 2 ? 'open' : ''} style="--lens:${color}">
-  <summary>${tag}<span class="phrase">${esc(node.phrase)}</span><span class="count">${node.messages.length || ''}</span></summary>
+<details class="node depth-${Math.min(depth, 4)}" ${depth < 2 ? 'open' : ''} style="--lens:${color}">
+  <summary><span class="caret" aria-hidden="true"></span>${tag}<span class="phrase" dir="auto">${esc(node.phrase)}</span></summary>
   <div class="body">
     ${msgs}
     ${children}
@@ -121,28 +190,59 @@ export function buildShareableMapHtml(
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 32px 16px 64px; background: #0a0a0a; color: #fff;
-         font: 15px/1.6 -apple-system, 'Inter', system-ui, sans-serif; }
+         font: 15px/1.65 -apple-system, 'Inter', system-ui, sans-serif; }
   .wrap { max-width: 760px; margin: 0 auto; }
   h1 { font-size: 22px; letter-spacing: -0.02em; margin: 0 0 4px;
        background: linear-gradient(90deg, #ff006e, #a855f7); -webkit-background-clip: text;
        background-clip: text; color: transparent; display: inline-block; }
   .sub { color: #6b7280; font-size: 12.5px; margin-bottom: 28px; }
-  .node { margin: 10px 0; border: 1px solid #27272a; border-radius: 14px;
-          background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
-  .node .node { margin: 10px 0 0; border-left: 2px solid var(--lens); }
-  summary { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer;
+
+  /* ── Node card (one drift) ───────────────────────────────────────────── */
+  .node { margin: 12px 0; border: 1px solid #27272a; border-radius: 14px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012)); }
+  /* Nested drifts get a lens-colored rail on the inline-start edge (RTL-safe). */
+  .branches > .node { margin: 10px 0 0; border-inline-start: 3px solid var(--lens); }
+  summary { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer;
             list-style: none; }
   summary::-webkit-details-marker { display: none; }
+  .caret { width: 7px; height: 7px; border-right: 2px solid #6b7280; border-bottom: 2px solid #6b7280;
+           transform: rotate(-45deg); transition: transform .15s; flex-shrink: 0; opacity: .7; }
+  details[open] > summary .caret { transform: rotate(45deg); }
   .tag { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-         padding: 2px 8px; border-radius: 999px; border: 1px solid; flex-shrink: 0; }
+         padding: 3px 9px; border-radius: 999px; border: 1px solid; flex-shrink: 0; }
   .tag.root { color: #fff; border: none; background: linear-gradient(90deg, #ff006e, #a855f7); }
-  .phrase { font-weight: 550; }
-  .count { margin-left: auto; color: #6b7280; font-size: 12px; }
-  .body { padding: 4px 16px 14px; }
-  .msg { padding: 10px 14px; border-radius: 12px; margin: 8px 0; white-space: pre-wrap;
-         overflow-wrap: anywhere; }
-  .msg.user { background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.25); }
-  .msg.ai { background: #161616; border: 1px solid #222; color: #d4d4d8; }
+  .phrase { font-weight: 600; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+  .body { padding: 2px 16px 16px; }
+
+  /* ── Messages: question vs answer ────────────────────────────────────── */
+  .msg { position: relative; padding: 12px 14px 13px; border-radius: 12px; margin: 10px 0; }
+  .msg.user { background: rgba(168,85,247,0.13); border: 1px solid rgba(168,85,247,0.28); }
+  .msg.ai   { background: #151515; border: 1px solid #222; }
+  .role { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em;
+          text-transform: uppercase; margin-bottom: 6px; }
+  .role[data-role="question"] { color: #c4b5fd; }
+  .role[data-role="answer"]   { color: #6b7280; }
+
+  /* ── Rendered markdown (RTL-aware via dir="auto") ────────────────────── */
+  .prose { unicode-bidi: plaintext; text-align: start; color: #e4e4e7; }
+  .msg.ai .prose { color: #d4d4d8; }
+  .prose > :first-child { margin-top: 0; }
+  .prose > :last-child { margin-bottom: 0; }
+  .prose p { margin: 9px 0; }
+  .prose h2, .prose h3, .prose h4 { margin: 16px 0 6px; line-height: 1.35; color: #fafafa;
+                                    font-weight: 650; }
+  .prose h2 { font-size: 16px; } .prose h3 { font-size: 14.5px; } .prose h4 { font-size: 13.5px; }
+  .prose ul, .prose ol { margin: 8px 0; padding-inline-start: 1.4em; }
+  .prose li { margin: 4px 0; }
+  .prose strong { color: #fff; font-weight: 650; }
+  .prose code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 5px;
+                font-size: 0.88em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* ── Branch grouping ─────────────────────────────────────────────────── */
+  .branches { margin-top: 14px; padding-top: 4px; border-top: 1px dashed #2a2a2a; }
+  .branches-head { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+                   color: #52525b; margin: 8px 0 2px; }
+
   .foot { margin-top: 36px; color: #52525b; font-size: 12px; text-align: center; }
 </style>
 </head>
