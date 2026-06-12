@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b --force
+
+      # 94 pre-existing errors as of Jun 2026 — non-blocking until the backlog
+      # is burned down. Ratchet: fix on touch, then remove continue-on-error.
+      - name: Lint (advisory)
+        run: npx eslint .
+        continue-on-error: true
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Build
+        run: npx vite build
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans full history on PRs
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

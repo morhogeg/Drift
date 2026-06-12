@@ -40,7 +40,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Tier 2 — Foundation (protects velocity and trust)
 
-### 4. [ ] CI + secret scanning
+### 4. [~] CI + secret scanning
+> **Status note (2026-06-12):** `.github/workflows/ci.yml` (tsc + vitest + vite build blocking; eslint advisory until the 94 pre-existing errors are ratcheted down), gitleaks job with full-history scan, `.github/dependabot.yml` (npm weekly grouped, actions monthly). `.gitleaks.toml` baselines the one known-leaked Gemini key in history (HANDOFF entry 164 — rotate!) so scans only surface NEW leaks. Verified locally with gitleaks 8.30.1: full history clean with baseline, 3 findings without it, and a planted format-valid dummy key IS caught in both dir and git modes. **Remaining:** confirm workflow green on the first real PR; owner toggles GitHub push protection/secret scanning in repo settings.
 - **Impact:** High. There is no automated safety net: no CI, no test enforcement, no secret scanning — in a repo that already had one key leak and is developed at high velocity with AI assistance. This protects every item below it.
 - **Effort:** Low (1 session).
 - **Scope:**
