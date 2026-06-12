@@ -1,11 +1,15 @@
 /**
  * driftMapExport — shareable read-only drift map.
  *
- * Builds a fully self-contained dark HTML page (inline CSS, no JS deps, no
+ * Builds a fully self-contained dark HTML page (inline CSS, no external JS, no
  * network) from a root chat and its drift tree, so a map can be shared as a
  * single file today and as a hosted link once cloud sync exists. The export
  * is built from the same persisted shapes the in-app map uses (ChatSession
  * metadata.parentChatId chains + driftInfos), independent of React.
+ *
+ * A book-style Contents sidebar lets the reader jump between drifts; a tiny
+ * inline (dependency-free, offline) script expands any collapsed ancestors of
+ * the jump target so the link always lands somewhere visible.
  */
 
 import type { ChatSession, Message } from '@/types/chat'
@@ -136,6 +140,28 @@ function mdToHtml(raw: string): string {
   return out.join('\n')
 }
 
+/** A stable, fragment-safe DOM id for a node (anchor target). */
+function anchorId(id: string): string {
+  return 'n-' + id.replace(/[^A-Za-z0-9_-]/g, '-')
+}
+
+function countNodes(node: ExportNode): number {
+  return 1 + node.children.reduce((sum, c) => sum + countNodes(c), 0)
+}
+
+/** Book-style nested Contents entries — one link per drift, jumps via anchor. */
+function buildToc(node: ExportNode, depth: number): string {
+  const dot = depth === 0 ? '#a855f7' : LENS_COLORS[node.lens]
+  const lens = depth === 0 ? '' : `<span class="toc-lens">${LENS_LABELS[node.lens]}</span>`
+  const kids = node.children.length
+    ? `<ul>${node.children.map((c) => buildToc(c, depth + 1)).join('')}</ul>`
+    : ''
+  return `<li>
+    <a href="#${anchorId(node.id)}" dir="auto"><span class="dot" style="background:${dot}"></span><span class="toc-text">${esc(node.phrase)}</span>${lens}</a>
+    ${kids}
+  </li>`
+}
+
 function renderNode(node: ExportNode, depth: number): string {
   const color = LENS_COLORS[node.lens]
   const msgs = node.messages
@@ -162,7 +188,7 @@ function renderNode(node: ExportNode, depth: number): string {
       : `<span class="tag" style="color:${color};border-color:${color}55;background:${color}14">${LENS_LABELS[node.lens]}</span>`
 
   return `
-<details class="node depth-${Math.min(depth, 4)}" ${depth < 2 ? 'open' : ''} style="--lens:${color}">
+<details id="${anchorId(node.id)}" class="node depth-${Math.min(depth, 4)}" ${depth < 2 ? 'open' : ''} style="--lens:${color}">
   <summary><span class="caret" aria-hidden="true"></span>${tag}<span class="phrase" dir="auto">${esc(node.phrase)}</span></summary>
   <div class="body">
     ${msgs}
@@ -189,9 +215,33 @@ export function buildShareableMapHtml(
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body { margin: 0; padding: 32px 16px 64px; background: #0a0a0a; color: #fff;
          font: 15px/1.65 -apple-system, 'Inter', system-ui, sans-serif; }
-  .wrap { max-width: 760px; margin: 0 auto; }
+
+  /* ── Page layout: Contents sidebar + content ─────────────────────────── */
+  .page { max-width: 1060px; margin: 0 auto; display: flex; gap: 30px; align-items: flex-start; }
+  .wrap { flex: 1 1 auto; min-width: 0; max-width: 760px; }
+  .node { scroll-margin-top: 16px; }
+
+  /* ── Contents (book-style table of contents) ─────────────────────────── */
+  .toc { position: sticky; top: 24px; flex: 0 0 250px; max-height: calc(100vh - 48px); overflow: auto;
+         border: 1px solid #222; border-radius: 14px; padding: 12px 8px 14px 14px;
+         background: rgba(255,255,255,0.022); }
+  .toc > summary { list-style: none; cursor: pointer; font-size: 10px; letter-spacing: 0.14em;
+                   text-transform: uppercase; color: #6b7280; font-weight: 700; padding: 2px 2px 0; }
+  .toc > summary::-webkit-details-marker { display: none; }
+  .toc ul { list-style: none; margin: 8px 0 0; padding: 0; }
+  .toc ul ul { margin-inline-start: 9px; padding-inline-start: 9px; border-inline-start: 1px solid #262626; }
+  .toc li { margin: 1px 0; }
+  .toc a { display: flex; gap: 7px; align-items: baseline; color: #a1a1aa; text-decoration: none;
+           padding: 4px 7px; border-radius: 8px; font-size: 12.5px; line-height: 1.4; }
+  .toc a:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .toc .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transform: translateY(1px); }
+  .toc .toc-text { overflow-wrap: anywhere; }
+  .toc .toc-lens { margin-inline-start: auto; padding-inline-start: 6px; font-size: 9px; font-weight: 700;
+                   letter-spacing: 0.06em; text-transform: uppercase; color: #52525b; flex-shrink: 0; }
+
   h1 { font-size: 22px; letter-spacing: -0.02em; margin: 0 0 4px;
        background: linear-gradient(90deg, #ff006e, #a855f7); -webkit-background-clip: text;
        background-clip: text; color: transparent; display: inline-block; }
@@ -244,15 +294,46 @@ export function buildShareableMapHtml(
                    color: #52525b; margin: 8px 0 2px; }
 
   .foot { margin-top: 36px; color: #52525b; font-size: 12px; text-align: center; }
+
+  /* On narrow screens the Contents collapses inline above the content. */
+  @media (max-width: 900px) {
+    .page { flex-direction: column; gap: 16px; }
+    .toc { position: static; flex: none; width: 100%; max-height: none; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>${esc(tree.phrase)}</h1>
-  <div class="sub">A Drift exploration map · exported ${exportedAt}</div>
-  ${renderNode(tree, 0)}
-  <div class="foot">Made with Drift — conversations that branch.</div>
+<div class="page">
+  ${
+    countNodes(tree) >= 3
+      ? `<details class="toc" open>
+    <summary>Contents</summary>
+    <ul>${buildToc(tree, 0)}</ul>
+  </details>`
+      : ''
+  }
+  <main class="wrap">
+    <h1>${esc(tree.phrase)}</h1>
+    <div class="sub">A Drift exploration map · exported ${exportedAt}</div>
+    ${renderNode(tree, 0)}
+    <div class="foot">Made with Drift — conversations that branch.</div>
+  </main>
 </div>
+<script>
+/* Contents jumps: open any collapsed ancestors of the target so the link
+   always lands somewhere visible. Dependency-free; runs offline. */
+(function () {
+  function openTo(el) { for (var p = el; p; p = p.parentElement) { if (p.tagName === 'DETAILS') p.open = true } }
+  function go() {
+    var id = decodeURIComponent((location.hash || '').slice(1));
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (el) { openTo(el); el.scrollIntoView(); }
+  }
+  window.addEventListener('hashchange', go);
+  if (location.hash) setTimeout(go, 0);
+})();
+</script>
 </body>
 </html>`
 }

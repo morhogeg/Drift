@@ -98,6 +98,28 @@ describe('drift map export', () => {
     expect(html).toMatch(/data-role="answer"/)
   })
 
+  it('includes a Contents sidebar with anchor links matching node ids', () => {
+    const html = buildShareableMapHtml('root', chats)! // root + d1 + d2 = 3 nodes
+    expect(html).toContain('class="toc"')
+    expect(html).toContain('>Contents<')
+    // Every node gets an anchor id and a matching TOC link.
+    expect(html).toContain('id="n-root"')
+    expect(html).toContain('href="#n-root"')
+    expect(html).toContain('id="n-d1"')
+    expect(html).toContain('href="#n-d1"')
+    // The jump script that opens collapsed ancestors is present.
+    expect(html).toContain('p.open = true')
+  })
+
+  it('omits the Contents sidebar for a single-node map', () => {
+    const html = buildShareableMapHtml('root', [
+      { id: 'root', title: 'Solo', createdAt: t, messages: [
+        { id: 'm1', text: 'hi', isUser: true, timestamp: t },
+      ] },
+    ])!
+    expect(html).not.toContain('class="toc"')
+  })
+
   it('returns null for an unknown root', () => {
     expect(buildShareableMapHtml('missing', chats)).toBeNull()
   })
