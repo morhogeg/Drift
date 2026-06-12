@@ -14,7 +14,10 @@
       "Bash(npm run build:*)",
       "Bash(npm run build)",
       "Bash(npx cap sync ios)",
-      "Read(/var/folders/**)"
+      "Read(/var/folders/**)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Add impact-ranked action plan from product/engineering review *)",
+      "Bash(git push *)"
     ],
     "deny": []
   },
