@@ -10,6 +10,7 @@ import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
+import CustomLensSheet from './components/CustomLensSheet'
 import { Login } from './components/Login'
 import { ONBOARDED_FLAG } from './lib/onboardingFlag'
 const Onboarding = lazy(() => import('./components/Onboarding'))
@@ -3376,6 +3377,9 @@ function App() {
         onSave={handleSaveSettings}
         currentSettings={aiSettings}
       />
+
+      {/* Inline custom-lens editor — opened from the selection tooltip / "View as" bar */}
+      <CustomLensSheet />
 
       {/* Mobile Model Picker Sheet */}
       <ModelPickerSheet

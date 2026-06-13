@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch, Scale } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch, Scale, Plus } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
@@ -9,6 +9,7 @@ import {
 } from '../lib/driftPanel'
 import type { AncestryEntry, Target, LensKey } from '../types/chat'
 import { customLensStore } from '../lib/customLenses'
+import { useUIStore } from '../store/uiStore'
 import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
 import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
@@ -165,6 +166,11 @@ export default function DriftPanel({
   onSetChallenger,
   onOpenModelSettings,
 }: DriftPanelProps) {
+  const openLensEditor = useUIStore((s) => s.openCustomLensEditor)
+  const customLensesVersion = useUIStore((s) => s.customLensesVersion)
+  // User-defined lenses for the "View as" bar — re-read when the shared version bumps
+  // so a lens created from the inline sheet appears immediately.
+  const customLensList = useMemo(() => customLensStore.getAll(), [customLensesVersion])
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [driftOnlyMessages, setDriftOnlyMessages] = useState<Message[]>([])
@@ -754,7 +760,7 @@ export default function DriftPanel({
                 { tpl: 'connect', label: 'Connect', key: 'connect' },
                 { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
               ]
-              const customs = customLensStore.getAll().map((l) => ({ tpl: l.id as LensKey, label: l.name, key: l.id, color: l.color }))
+              const customs = customLensList.map((l) => ({ tpl: l.id as LensKey, label: l.name, key: l.id, color: l.color }))
               const lenses = [...builtins, ...customs]
               // Each built-in lens's signature hue — filled when active, a small dot
               // when explored-but-inactive. Custom lenses tint inline from their color.
@@ -800,6 +806,14 @@ export default function DriftPanel({
                 )
               })
             })()}
+            <button
+              onClick={() => openLensEditor()}
+              title="Create your own lens"
+              className="shrink-0 inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border border-dashed border-dark-border text-text-muted hover:text-accent-violet hover:border-accent-violet/40 transition-colors"
+            >
+              <Plus className="w-3 h-3" strokeWidth={2} />
+              New lens
+            </button>
           </div>
         )}
         {/* First-run hint: the lens switcher is an invisible affordance — teach it once. */}
