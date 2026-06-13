@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, GitBranch, Scale, Plus } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, Scale, Plus } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
@@ -10,7 +10,7 @@ import {
 import type { AncestryEntry, Target, LensKey } from '../types/chat'
 import { customLensStore } from '../lib/customLenses'
 import { useUIStore } from '../store/uiStore'
-import { normalizeTerm, type TermOccurrence } from '../lib/termIndex'
+import { type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
 import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
 import ChallengerPicker from './ChallengerPicker'
@@ -157,7 +157,6 @@ export default function DriftPanel({
   onConnectStateChange,
   onConnectAnswerSaved,
   relatedDrifts,
-  onOpenRelatedDrift,
   siblingDrifts,
   currentDriftChatId,
   onNavigateToSibling,
@@ -924,16 +923,7 @@ export default function DriftPanel({
                 return { typeKey: '', relationship: '', concept: parts[0] ?? '' }
               }).filter(e => e.concept)
               void connectVisitedVersion // consumed to trigger re-render on cache changes
-              // Your own prior explorations near this term — the most meaningful
-              // connections are the ones you already made. Rendered as violet
-              // "You explored" edges on the same rail; tapping one reopens that
-              // drift directly (no API call). Same-term lens siblings are
-              // excluded — the sibling strip above already covers those.
-              const curTerm = normalizeTerm(selectedText)
-              const personal = (relatedDrifts ?? [])
-                .filter(o => normalizeTerm(o.term) !== curTerm)
-                .slice(0, 3)
-              if (edges.length === 0 && personal.length === 0) {
+              if (edges.length === 0) {
                 return <p className="text-[13px] text-text-muted/60 text-center mt-8">No connections found.</p>
               }
               const dir = getTextDirection(selectedText)
@@ -957,44 +947,6 @@ export default function DriftPanel({
                       -start) mirror automatically for RTL languages like Hebrew. */}
                   <div className="ms-[6px] border-s ps-5" style={{ borderColor: 'rgba(34,211,238,0.18)' }}>
                     <Stagger className="flex flex-col gap-2 pt-1" step={0.04}>
-                      {/* Personal edges first — connections to the user's own
-                          prior drifts. Violet (the drift brand hue) marks
-                          "yours" against the AI edges' per-kind colors. */}
-                      {personal.map((occ) => (
-                        <motion.button
-                          key={`personal-${occ.driftChatId}`}
-                          variants={staggerChild}
-                          onClick={() => onOpenRelatedDrift?.(occ)}
-                          className="group relative flex items-center gap-3 w-full text-start px-3 py-2.5 rounded-xl border active:scale-[0.98] transition-all duration-150 min-h-[54px]"
-                          style={{
-                            borderColor: 'rgba(168,85,247,0.40)',
-                            background: 'rgba(168,85,247,0.08)',
-                          }}
-                          title={`Reopen your drift: "${occ.chatTitle}"`}
-                        >
-                          <span
-                            className="absolute top-1/2 -translate-y-1/2 -start-5 w-5 h-px"
-                            style={{ background: 'rgba(168,85,247,0.45)' }}
-                            aria-hidden
-                          />
-                          <span
-                            className="absolute top-1/2 -translate-y-1/2 -start-[23px] w-1.5 h-1.5 rounded-full transition-transform duration-200 group-hover:scale-150"
-                            style={{ background: '#a855f7', boxShadow: '0 0 8px rgba(168,85,247,0.6)' }}
-                            aria-hidden
-                          />
-                          <span
-                            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
-                            style={{ background: 'rgba(168,85,247,0.10)', color: '#a855f7' }}
-                          >
-                            <GitBranch className="w-[18px] h-[18px]" strokeWidth={2} />
-                          </span>
-                          <div className="flex-1 min-w-0" dir={getTextDirection(occ.term)}>
-                            <span className="block text-[10px] tracking-wider leading-none mb-1 truncate" style={{ color: 'rgba(168,85,247,0.85)' }}>You explored</span>
-                            <span className="block text-[14px] text-text-secondary group-hover:text-text-primary leading-snug transition-colors">{occ.term}</span>
-                          </div>
-                          <Arrow className="w-4 h-4 text-text-muted/40 group-hover:text-text-secondary shrink-0 transition-colors" />
-                        </motion.button>
-                      ))}
                       {edges.map((e, i) => {
                         const q = bridgeQuestion(e.concept)
                         const visited = connectAnswersRef.current.has(q)
