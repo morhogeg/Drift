@@ -10,6 +10,7 @@
  */
 
 import { TEMPLATE_SYSTEM_PROMPTS } from './driftPanel'
+import { emitLocalDataChange } from '../services/cloudHooks'
 
 export interface CustomLens {
   /** Stable id, also used as the lens key in driftInfos.templateType space. */
@@ -106,6 +107,9 @@ function slugId(name: string, existing: CustomLens[]): string {
 function persist(lenses: CustomLens[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lenses))
+    // Let the (optional) cloud-sync layer know local data changed so a new/edited
+    // lens gets pushed. No-op when cloud is disabled (no subscribers).
+    emitLocalDataChange()
   } catch (err) {
     console.error('[customLenses] save failed:', err)
   }
