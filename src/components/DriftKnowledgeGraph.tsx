@@ -122,6 +122,7 @@ const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
 const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
 const EXAMPLE_SCAFFOLD_RE = /^(Show me an example of this|תן דוגמה לזה)/
+const EVIDENCE_SCAFFOLD_RE = /^(Show the evidence for this|הצג ראיות לכך)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
 /** Infer the lens from a drift's own messages — used when the parent driftInfos
@@ -136,6 +137,7 @@ function detectLensFromChat(chat: ChatSession): TreeNode['lens'] {
     if (RESEARCH_SCAFFOLD_RE.test(t)) return 'research'
     if (CHALLENGE_SCAFFOLD_RE.test(t)) return 'challenge'
     if (EXAMPLE_SCAFFOLD_RE.test(t)) return 'example'
+    if (EVIDENCE_SCAFFOLD_RE.test(t)) return 'evidence'
   }
   return undefined
 }

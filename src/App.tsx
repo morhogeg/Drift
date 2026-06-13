@@ -66,6 +66,7 @@ const PUSHED_LENS_TAG: Record<string, { label: string; chip: string; arrow: stri
   connect:   { label: 'connect',   chip: 'bg-accent-discovery/[0.10] border-accent-discovery/25 text-accent-discovery/90', arrow: '↗' },
   challenge: { label: 'challenge', chip: 'bg-rose-400/[0.10] border-rose-400/25 text-rose-400/85',                       arrow: '↗' },
   example:   { label: 'example',   chip: 'bg-emerald-400/[0.10] border-emerald-400/25 text-emerald-400/85',             arrow: '↗' },
+  evidence:  { label: 'evidence',  chip: 'bg-violet-400/[0.10] border-violet-400/25 text-violet-400/85',               arrow: '↗' },
 }
 const pushedLensTag = (tpl?: string) =>
   (tpl && PUSHED_LENS_TAG[tpl]) || { label: 'drift', chip: 'bg-accent-violet/[0.08] border-accent-violet/20 text-accent-violet/80', arrow: '↗' }

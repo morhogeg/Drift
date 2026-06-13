@@ -37,14 +37,14 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectFinding: (t) => `Finding connections for "${t}"…`,
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this', example: 'Show me an example of this' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this', example: 'Show me an example of this', evidence: 'Show the evidence for this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה', example: 'תן דוגמה לזה' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה', example: 'תן דוגמה לזה', evidence: 'הצג ראיות לכך' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -55,7 +55,7 @@ const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding con
 // 'Explore this' is the generic opener custom lenses fall back to (they have no
 // built-in prefix), so registering it here lets the same scaffold-stripping/hiding
 // work for any user-defined lens without driftPanel needing to know their names.
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'Show me an example of this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה', 'תן דוגמה לזה']
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'Show me an example of this', 'Show the evidence for this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה', 'תן דוגמה לזה', 'הצג ראיות לכך']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
@@ -140,17 +140,19 @@ Rules:
 - This is a reasoned peer judgment, NOT a literature review — give your own assessment in plain language; don't dump citations, study names, or reference lists (a different lens handles the evidence base).
 
 Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
-  'evidence': `You surface the actual evidence base behind an idea the user selected while reading. Not opinion, not vibes — what is the support, how strong is it, and how do we know? Hold yourself to the citation standard of a good review article.
+  'evidence': `You surface the actual evidence base behind an idea the user selected while reading — what supports it, how strong that support is, and how we know — and you back every claim with a real, checkable source. Not opinion, not vibes. Hold yourself to the citation standard of a good systematic review.
 
 - Interpret the idea in the sense the surrounding conversation implies; disambiguate by context.
-- USE Google Search grounding whenever it is available — especially for medical, health, nutrition, psychology, and policy claims — and prefer primary, high-quality sources: peer-reviewed papers, meta-analyses and systematic reviews (Cochrane), RCTs, and major institutional sources (WHO, NIH, CDC, top journals like NEJM/Lancet/Nature). Avoid blogs, content farms, and press releases.
-- Cite specifically: name the study or review (authors/journal/year, e.g. "a 2019 Cochrane review", "Smith et al., NEJM 2021"), the population/sample size, and the headline finding with its number where you know it.
-- Rank by evidence hierarchy and say where each item sits: meta-analysis > RCT > cohort/observational > case report > expert opinion > anecdote. Distinguish correlation from causation.
-- Lay out the evidence FOR and AGAINST, and say plainly when something is well-established, contested, or thin.
-- Flag what's missing — the study that would settle it but doesn't yet exist.
-- NEVER invent a citation. If grounding is unavailable and you're not confident a source is real, describe the type and approximate vintage of the evidence instead of fabricating a reference, and say you couldn't verify it.
+- USE Google Search grounding whenever it is available — especially for medical, health, nutrition, psychology, science, and policy claims — to pull REAL, current sources and their working links. Prefer the highest-quality primary evidence: systematic reviews and meta-analyses (e.g. Cochrane), randomized controlled trials, large cohort studies, and authoritative institutions (WHO, NIH, CDC, FDA, and leading journals like NEJM, The Lancet, JAMA, BMJ, Nature, Science). Avoid blogs, content farms, press releases, and SEO articles.
+- Rank by the evidence hierarchy and say where each item sits: meta-analysis > RCT > cohort/observational > case report > expert opinion > anecdote. Distinguish correlation from causation, and give the population/sample size and the headline finding with its number where you know it.
+- Lay out the evidence FOR and AGAINST, and say plainly whether the claim is well-established, contested, or thin. Flag what's missing — the study that would settle it but doesn't yet exist.
+- CITE WITH LINKS, RELIABLY. Reference claims inline by number ([1], [2]) and end with a "Sources" section: a numbered list where each entry is a markdown link followed by a one-line note of what it shows — e.g. "1. [Smith et al., "Title", NEJM 2021](https://doi.org/10.xxxx/xxxxx) — RCT, n=1,200; 30% relative risk reduction."
+  - Prefer stable, canonical URLs: a DOI link (https://doi.org/<doi>), a PubMed record (https://pubmed.ncbi.nlm.nih.gov/<pmid>/), or the official publisher / institution page. Make the links real markdown links the user can click.
+  - Only include a link you actually obtained from grounding or are certain is genuine. NEVER invent, guess, or pattern-fill a URL, DOI, or PMID — a fabricated link is worse than no link.
+  - If you know a real source but lack a verifiable link, cite it fully (authors, title, journal, year, and DOI/PMID if known) WITHOUT a link and mark it "(link not verified)".
+- If grounding is unavailable and you cannot confidently cite real, linked sources, say so honestly and describe the type and vintage of evidence that exists rather than fabricating references.
 
-Keep it tight and skimmable. Match the conversation's language.`,
+Keep the prose tight and skimmable, but never trade rigor for brevity in the Sources section. Match the conversation's language.`,
   'example': `You make an abstract idea tangible by SHOWING it, not defining it. The user selected a term while reading and wants a concrete, specific instance that makes it real — the kind of example that makes someone say "oh, THAT's what that means."
 
 - Interpret the term in the sense the surrounding conversation implies; disambiguate by context.

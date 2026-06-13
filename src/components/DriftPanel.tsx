@@ -759,6 +759,7 @@ export default function DriftPanel({
                 { tpl: 'example', label: 'Example', key: 'example' },
                 { tpl: 'connect', label: 'Connect', key: 'connect' },
                 { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
+                { tpl: 'evidence', label: 'Evidence', key: 'evidence' },
               ]
               const customs = customLensList.map((l) => ({ tpl: l.id as LensKey, label: l.name, key: l.id, color: l.color }))
               const lenses = [...builtins, ...customs]
@@ -771,6 +772,7 @@ export default function DriftPanel({
                 example:   'bg-emerald-500/15 text-emerald-500 border-emerald-500/40',
                 connect:   'bg-accent-discovery/15 text-accent-discovery border-accent-discovery/45',
                 challenge: 'bg-rose-500/15 text-rose-500 border-rose-500/40',
+                evidence:  'bg-violet-500/15 text-violet-500 border-violet-500/40',
               }
               const dotTint: Record<string, string> = {
                 drift:     'bg-accent-violet',
@@ -779,6 +781,7 @@ export default function DriftPanel({
                 example:   'bg-emerald-500',
                 connect:   'bg-accent-discovery',
                 challenge: 'bg-rose-500',
+                evidence:  'bg-violet-500',
               }
               return lenses.map((l) => {
                 const active = (l.tpl ?? undefined) === (templateType ?? undefined)
