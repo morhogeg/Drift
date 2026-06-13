@@ -61,7 +61,7 @@ interface TreeNode {
   /** Which lens opened this drift — drives the card's lens tag. `undefined` = a
    *  plain free-form drift (no template). Lives on the *parent* message's
    *  driftInfos, so it's resolved during tree construction. */
-  lens?: 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence' | 'example'
+  lens?: 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence'
 }
 
 // The user-facing name for each lens. Plain drifts (no templateType) read "Drift".
@@ -71,7 +71,6 @@ const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
   connect: 'Connect',
   challenge: 'Second opinion',
   evidence: 'Evidence',
-  example: 'Example',
 }
 function lensLabel(node: TreeNode): string {
   return node.lens ? LENS_LABELS[node.lens] : 'Drift'
@@ -85,7 +84,6 @@ const LENS_COLORS: Record<NonNullable<TreeNode['lens']>, string> = {
   connect: '#22d3ee',   // accent-discovery (cyan)
   challenge: '#f43f5e', // rose-500
   evidence: '#8b5cf6',  // violet-500
-  example: '#10b981',   // emerald-500
 }
 const DRIFT_LENS_COLOR = '#a855f7' // accent-violet
 function lensColor(node: TreeNode): string {
@@ -121,7 +119,6 @@ const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עב�
 const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
 const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
-const EXAMPLE_SCAFFOLD_RE = /^(Show me an example of this|תן דוגמה לזה)/
 const EVIDENCE_SCAFFOLD_RE = /^(Show the evidence for this|הצג ראיות לכך)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
@@ -136,7 +133,6 @@ function detectLensFromChat(chat: ChatSession): TreeNode['lens'] {
     if (SIMPLIFY_SCAFFOLD_RE.test(t)) return 'simplify'
     if (RESEARCH_SCAFFOLD_RE.test(t)) return 'research'
     if (CHALLENGE_SCAFFOLD_RE.test(t)) return 'challenge'
-    if (EXAMPLE_SCAFFOLD_RE.test(t)) return 'example'
     if (EVIDENCE_SCAFFOLD_RE.test(t)) return 'evidence'
   }
   return undefined

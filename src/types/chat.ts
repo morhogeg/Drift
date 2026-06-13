@@ -8,7 +8,7 @@ export type Provider = 'openrouter' | 'ollama' | 'gemini'
 
 /** The built-in lenses, in their canonical keys. `connect` and `challenge` carry
  *  special behavior (JSON chips / cross-model routing); the rest are plain prompt swaps. */
-export type BuiltinLensKey = 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence' | 'example'
+export type BuiltinLensKey = 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence'
 /** Any lens key — a built-in or a user-defined custom lens id. The `string & {}` keeps
  *  editor autocomplete for the built-ins while still accepting arbitrary custom ids. */
 export type LensKey = BuiltinLensKey | (string & {})

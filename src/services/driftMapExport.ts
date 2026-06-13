@@ -18,7 +18,7 @@ export interface ExportNode {
   id: string
   /** The highlighted phrase this drift branched from (root: chat title). */
   phrase: string
-  lens: 'drift' | 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence' | 'example'
+  lens: 'drift' | 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence'
   messages: { isUser: boolean; text: string }[]
   children: ExportNode[]
 }
@@ -30,7 +30,6 @@ const LENS_LABELS: Record<ExportNode['lens'], string> = {
   connect: 'Connect',
   challenge: 'Second opinion',
   evidence: 'Evidence',
-  example: 'Example',
 }
 
 const LENS_COLORS: Record<ExportNode['lens'], string> = {
@@ -40,12 +39,11 @@ const LENS_COLORS: Record<ExportNode['lens'], string> = {
   connect: '#06b6d4',
   challenge: '#f43f5e',
   evidence: '#8b5cf6',
-  example: '#10b981',
 }
 
 function lensOf(chat: ChatSession, allChats: ChatSession[]): ExportNode['lens'] {
   // Composite lens threads carry their lens as an id suffix (`<base>__research`).
-  const m = chat.id.match(/__(simplify|research|connect|challenge|evidence|example)$/)
+  const m = chat.id.match(/__(simplify|research|connect|challenge|evidence)$/)
   if (m) return m[1] as ExportNode['lens']
   // The first lens for a term is recorded on the parent message's driftInfos.
   // templateType is a LensKey — a custom lens id we don't render falls back to 'drift'.

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale, SquareStack, Aperture, Plus, FlaskConical } from 'lucide-react'
+import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale, Aperture, Plus, FlaskConical } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 import { customLensStore, type CustomLens } from '../lib/customLenses'
@@ -501,18 +501,16 @@ export default function SelectionTooltip({
   const TEMPLATES: Array<{ type: TemplateType; label: string; desc: string; Icon: LucideIcon }> = [
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: Lightbulb },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
-    { type: 'example',   label: 'Example',   desc: 'Show me a real one',    Icon: SquareStack },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Waypoints },
     { type: 'challenge', label: '2nd Opinion', desc: 'Another model weighs in',  Icon: Scale },
     { type: 'evidence',  label: 'Evidence',  desc: 'Sources & citations',  Icon: FlaskConical },
   ]
   /** Index where the menu splits "understand this" from "push outward / scrutinize". */
-  const TEMPLATE_DIVIDER_AT = 3
+  const TEMPLATE_DIVIDER_AT = 2
   /** Per-action tint — icon (rest + hover) and the card's hover border. */
   const ACTION_TINT: Record<string, { icon: string; border: string }> = {
     simplify:  { icon: 'text-amber-400/70 group-hover:text-amber-400',                       border: 'hover:border-amber-400/40' },
     research:  { icon: 'text-blue-400/70 group-hover:text-blue-400',                         border: 'hover:border-blue-400/40' },
-    example:   { icon: 'text-emerald-400/70 group-hover:text-emerald-400',                   border: 'hover:border-emerald-400/40' },
     connect:   { icon: 'text-accent-discovery/70 group-hover:text-accent-discovery',          border: 'hover:border-accent-discovery/40' },
     challenge: { icon: 'text-rose-400/70 group-hover:text-rose-400',                         border: 'hover:border-rose-400/40' },
     evidence:  { icon: 'text-violet-400/70 group-hover:text-violet-400',                     border: 'hover:border-violet-400/40' },

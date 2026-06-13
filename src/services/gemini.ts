@@ -494,6 +494,26 @@ export async function sendMessageToGemini(
   const decoder = new TextDecoder()
   let buffer = ''
 
+  // Google Search grounding returns its sources in `groundingMetadata`, NOT in the
+  // answer text. Collect them across chunks (deduped by URL), then append a clickable
+  // "Sources" list once the answer is complete — so grounded replies actually cite.
+  const groundingSources = new Map<string, string>() // url -> title
+  let sourcesFlushed = false
+  const flushGroundingSources = () => {
+    if (sourcesFlushed) return
+    sourcesFlushed = true
+    if (groundingSources.size === 0) return
+    let md = '\n\n**Sources**\n'
+    let i = 1
+    for (const [url, title] of groundingSources) {
+      let label = title
+      if (!label) { try { label = new URL(url).hostname.replace(/^www\./, '') } catch { label = url } }
+      md += `${i}. [${label}](${url})\n`
+      i++
+    }
+    onChunk(md)
+  }
+
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -506,11 +526,12 @@ export async function sendMessageToGemini(
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
         const data = line.slice(6).trim()
-        if (data === '[DONE]') return
+        if (data === '[DONE]') { flushGroundingSources(); return }
 
         try {
           const json = JSON.parse(data)
-          const parts: unknown[] = json?.candidates?.[0]?.content?.parts ?? []
+          const cand = json?.candidates?.[0]
+          const parts: unknown[] = cand?.content?.parts ?? []
           // Gemini grounding can return multiple parts per chunk; collect all string text
           let chunk = ''
           for (const part of parts) {
@@ -518,11 +539,23 @@ export async function sendMessageToGemini(
             if (typeof t === 'string') chunk += t
           }
           if (chunk) onChunk(chunk)
+          // Accumulate grounding sources (web.uri / web.title) as they arrive.
+          const gchunks = cand?.groundingMetadata?.groundingChunks
+          if (Array.isArray(gchunks)) {
+            for (const gc of gchunks) {
+              const uri = gc?.web?.uri
+              if (typeof uri === 'string' && uri) {
+                const title = gc?.web?.title
+                groundingSources.set(uri, typeof title === 'string' ? title : '')
+              }
+            }
+          }
         } catch {
           // Partial / non-JSON line — skip
         }
       }
     }
+    flushGroundingSources()
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return
     throw err
