@@ -239,7 +239,9 @@ export function useDriftMessageStream({
           const preset = sTargets.length === 1 ? sTargets[0] : null
           const inheritedModel = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
           const model = challengerCall?.model || inheritedModel
-          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
+          // Append a clickable "Sources" list only for the Evidence lens — that's
+          // the one whose job is citations; other drifts and the main chat stay clean.
+          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model, true, effectiveTemplate === 'evidence')
         } else if (provider === 'openrouter') {
           const apiKey = challengerCall?.apiKey || effectiveApiKey
           if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')

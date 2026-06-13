@@ -429,6 +429,9 @@ export async function sendMessageToGemini(
   signal?: AbortSignal,
   model: GeminiModel = GEMINI_MODELS.FLASH_LITE_PREVIEW,
   useGrounding = true,
+  /** Append a clickable "Sources" list (from grounding) after the answer. Off by
+   *  default so it shows only where we want it (the Evidence lens), not everywhere. */
+  appendGroundingSources = false,
 ): Promise<void> {
   if (!apiKey?.trim()) {
     throw new Error('Gemini API key not configured. Please set it in Settings.')
@@ -502,7 +505,7 @@ export async function sendMessageToGemini(
   const flushGroundingSources = () => {
     if (sourcesFlushed) return
     sourcesFlushed = true
-    if (groundingSources.size === 0) return
+    if (!appendGroundingSources || groundingSources.size === 0) return
     let md = '\n\n**Sources**\n'
     let i = 1
     for (const [url, title] of groundingSources) {
