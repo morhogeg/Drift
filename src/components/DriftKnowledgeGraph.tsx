@@ -296,7 +296,7 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
 
 // The auto-generated lens openers — these aren't real questions, so they never
 // make a good node label.
-const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i
+const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|second opinion on this|challenge this|show the evidence for this|explore this|what would you like to know about|finding connections for|מה תרצה לדעת על|מחפש קשרים עבור|הסבר בפשטות|צלילה לעומק|הראה למה זה מתחבר|חוות דעת שנייה על זה|ערער על זה|הצג ראיות לכך)/i
 
 function clipLabel(s: string, n: number): string {
   const t = s.trim()

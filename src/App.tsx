@@ -2722,9 +2722,9 @@ function App() {
                                               handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
                                             }}
                                             className="inline cursor-pointer
-                                                     border-b border-accent-violet/50 hover:border-accent-violet
-                                                     text-accent-violet hover:bg-accent-violet/10
-                                                     rounded-sm transition-all duration-100"
+                                                     border-b border-accent-violet/30 hover:border-accent-violet/70
+                                                     hover:text-accent-violet
+                                                     rounded-sm transition-colors duration-100"
                                             title={m.drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
                                           >
                                             {m.drift.selectedText}
