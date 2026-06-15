@@ -2190,10 +2190,11 @@ function App() {
                   {/* Capability cues — teach the three core verbs (drift → lenses →
                       synthesize) without a tutorial wall. Each chip carries a tooltip
                       so the screen stays uncrowded while the detail is one hover away. */}
-                  <div className="flex flex-wrap items-center justify-center gap-2 mt-1 max-w-[460px]">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-[580px] mt-3">
                     {[
                       {
                         icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', width: 'w-[268px]', stepped: true,
+                        tagline: 'Pull any phrase into its own thread',
                         title: 'Branch without losing your place',
                         body: 'Pull any phrase into a thread of its own:',
                         points: [
@@ -2205,6 +2206,7 @@ function App() {
                       },
                       {
                         icon: Layers, lead: 'Shift', accent: 'lenses', width: 'w-[288px]',
+                        tagline: 'Re-read a term six different ways',
                         title: 'Six ways to read a term',
                         body: 'Take any term you drift into and re-read it through a lens:',
                         points: [
@@ -2218,6 +2220,7 @@ function App() {
                       },
                       {
                         icon: Sparkles, lead: 'Synthesize', accent: 'drifts', width: 'w-[268px]', stepped: true,
+                        tagline: 'Weave every thread into one insight',
                         title: 'Many threads, one insight',
                         body: 'Pull a whole exploration back together:',
                         points: [
@@ -2226,15 +2229,21 @@ function App() {
                           { name: 'Distill', gloss: 'a single, clear takeaway', dot: 'bg-accent-violet', text: 'text-accent-violet' },
                         ],
                       },
-                    ].map(({ icon: Icon, lead, accent, width, title, body, points, stepped }) => (
+                    ].map(({ icon: Icon, lead, accent, tagline, width, title, body, points, stepped }, idx) => (
                       <div
                         key={accent}
-                        className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] cursor-default transition-colors hover:bg-accent-violet/[0.09] hover:border-accent-violet/30"
+                        className="group relative flex flex-col items-start rounded-2xl border border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent px-4 pt-3.5 pb-4 text-left cursor-default animate-fade-up transition-all duration-300 hover:-translate-y-0.5 hover:border-accent-violet/35 hover:shadow-lg hover:shadow-accent-violet/10"
+                        style={{ animationDelay: `${idx * 90}ms` }}
                       >
-                        <Icon className="w-3.5 h-3.5 text-accent-violet/70 shrink-0" />
-                        <span className="text-text-muted text-[12.5px] leading-none whitespace-nowrap">
-                          {lead} <span className="text-accent-violet font-medium">{accent}</span>
+                        {/* hover sheen — a soft brand wash that lifts the card on focus */}
+                        <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-gradient-to-br from-accent-pink/[0.06] via-transparent to-accent-violet/[0.06]" />
+                        <span className="relative mb-2.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-105">
+                          <Icon className="w-[18px] h-[18px]" />
                         </span>
+                        <span className="relative text-[13.5px] font-semibold leading-tight text-text-primary">
+                          {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
+                        </span>
+                        <span className="relative mt-1 text-[11.5px] leading-snug text-text-muted">{tagline}</span>
                         {/* Custom glass tooltip — opens downward so it never clips against
                             the header/scroll boundary above the chips row. */}
                         <div
@@ -2291,42 +2300,6 @@ function App() {
                               <span className="text-text-secondary group-hover:text-text-primary text-[13.5px] leading-snug transition-colors">{p}</span>
                             </span>
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {resumableTrees.length > 0 && (
-                    <div className="w-full max-w-[340px] mt-5 text-left">
-                      <div className="flex items-center gap-2 mb-2 px-1">
-                        <CornerUpLeft className="w-3.5 h-3.5 text-accent-violet/60 shrink-0" />
-                        <span className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold">Pick up where you left off</span>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        {resumableTrees.map(t => (
-                          <div
-                            key={t.rootId}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => { haptics.selection(); switchChat(t.rootId) }}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); haptics.selection(); switchChat(t.rootId) } }}
-                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-2.5"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-text-primary text-[13.5px] font-medium truncate" dir="auto">{t.title}</span>
-                              <span className="text-text-muted text-[11px] shrink-0 tabular-nums">{formatDate(new Date(t.sortKey || Date.now()))}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 mt-1">
-                              <span className="text-text-muted text-[12px] truncate" dir="auto">{t.terms}</span>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
-                                disabled={synthesizing}
-                                className="inline-flex items-center gap-1 shrink-0 text-[11.5px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
-                                title={`Synthesize ${t.driftCount} drifts into one insight`}
-                              >
-                                <span className="text-[12px] leading-none">✦</span> Synthesize {t.driftCount}
-                              </button>
-                            </div>
-                          </div>
                         ))}
                       </div>
                     </div>
