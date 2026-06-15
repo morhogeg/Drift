@@ -135,6 +135,7 @@ function DriftMessageBubbleInner({
                   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
                   p: ({ children }) => <p className="mb-2">{children}</p>,
                   br: () => <br />,
+                  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
                   table: ({ children }) => (
                     <div className="overflow-x-auto my-3">
                       <table className="min-w-full text-xs">{children}</table>

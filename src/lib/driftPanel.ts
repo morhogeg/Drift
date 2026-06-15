@@ -37,14 +37,14 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectFinding: (t) => `Finding connections for "${t}"…`,
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this', evidence: 'Show the evidence for this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה', evidence: 'הצג ראיות לכך' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -52,9 +52,35 @@ export const driftLabelsFor = (sample: string): DriftLabels =>
 // Every language variant of the opener / template-trigger prefixes, so the filters
 // that strip scaffolding from the API conversation work regardless of chat language.
 const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding connections for', 'מה תרצה לדעת על', 'מחפש קשרים עבור']
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה']
+// 'Explore this' is the generic opener custom lenses fall back to (they have no
+// built-in prefix), so registering it here lets the same scaffold-stripping/hiding
+// work for any user-defined lens without driftPanel needing to know their names.
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'Show the evidence for this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה', 'הצג ראיות לכך']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
+
+/** True when a message body is a raw Connect-cards JSON array — an internal artifact
+ *  (the chips payload) that the Connect view parses into cards. It must NEVER render
+ *  as a prose bubble, which can happen when a Connect thread is viewed under another
+ *  lens. Tolerates fences and a leading BOM / RTL-LTR mark Gemini may prepend in Hebrew. */
+export function isConnectCardsJson(text: string): boolean {
+  const cleaned = (text ?? '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  // Find the opening bracket, tolerating a few leading directionality / BOM marks
+  // (start > 4 means it's prose that merely contains a bracket, not a JSON payload).
+  const start = cleaned.indexOf('[')
+  if (start === -1 || start > 4) return false
+  try {
+    const parsed = JSON.parse(cleaned.slice(start))
+    return Array.isArray(parsed) && parsed.length > 0
+      && parsed.every((x) => typeof x === 'string')
+      && parsed.some((x) => (x as string).includes('::'))
+  } catch {
+    return false
+  }
+}
 
 // The Second-opinion lens routes to a *different* model and uses its prompt
 // ONLY for the explicit "Second opinion on this: X" turn. Follow-ups inside the
@@ -90,7 +116,7 @@ export const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
   'simplify': `You make hard ideas suddenly click. The user selected a term while reading and wants it made simple — but they are a smart adult, so never be condescending or babyish.
 
 - Interpret the term in the sense the surrounding conversation implies (disambiguate by context — don't explain the generic dictionary meaning if the conversation means something specific).
-- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences.
+- Lead with ONE vivid analogy or concrete everyday image that captures the core idea, then unpack it in 2-4 short sentences. BUT if the term is already concrete — a specific person, place, date, organization, or number — skip the analogy and just give the crisp, plain-language fact; never force a simile onto something that is already tangible.
 - Strip the jargon, but if a key technical word matters, name it once and translate it.
 - Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
 - Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
@@ -118,13 +144,13 @@ Example output for "Julius Caesar":
 ["tension :: assassinated by :: Brutus and the Senate","origin :: crossed :: the Rubicon","history :: reformed :: the Roman calendar","influence :: archetype for :: modern populist leaders","tension :: stands in tension with :: ideals of the Republic"]
 
 Rules:
-- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include at least one "tension" (something it opposes/rivals) wherever one honestly exists.
+- Use a SPREAD of types — never all the same kind. Aim for at least 3 distinct types across the 5-6 edges, and include a "tension" (something it opposes/rivals) wherever a real opposition honestly exists — but never manufacture a rivalry to fill the quota; if none is genuine, use another type instead.
 - Each <concept> must be a SPECIFIC, real, verifiable thing (a named person, place, event, work, or named idea) — not a vague category ("various philosophers", "modern society") and not a near-synonym of the term itself.
 - Mix the concrete (people/events/works) with the conceptual (ideas/tensions).
 - Prefer cross-domain surprises: history↔psychology, science↔culture, ancient↔modern. Reach for the link a thoughtful reader would NOT immediately predict.
 - Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
 - Do not invent facts. If you are not confident the connection is real, choose a different one.
-- Output raw JSON array of strings only. Any other text breaks the app.`,
+- Output the raw JSON array ONLY — it must start with [ and end with ]. No prose, no commentary, and no markdown code fences of any kind (do not wrap it in triple backticks or a json block). Any character outside the array breaks the app.`,
   'challenge': `You are a respected colleague giving an independent second opinion. Another model already answered; the user selected a claim or idea from that answer and wants a second qualified view — confirmation, refinement, or disagreement, whichever is honestly warranted. This is NOT a debate: never manufacture disagreement to seem rigorous.
 
 - Interpret the claim in the sense the surrounding conversation implies; disambiguate by context.
@@ -134,17 +160,18 @@ Rules:
 - If you disagree, give the single best reason, fairly stated — no strawman, no pile-on.
 - Note anything important the original answer left out.
 - Your credibility comes from honesty, not contrarianism: a confident "this is right, and here's what I'd add" is a perfectly good second opinion.
+- This is a reasoned peer judgment, NOT a literature review — give your own assessment in plain language; don't dump citations, study names, or reference lists (a different lens handles the evidence base).
 
 Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
-  'evidence': `You surface the actual evidence base behind an idea the user selected while reading. Not opinion, not vibes — what is the support, how strong is it, and how do we know? Hold yourself to the citation standard of a good review article.
+  'evidence': `You surface the actual evidence base behind an idea the user selected while reading — what supports it, how strong that support is, and how we know — and you back every claim with a real, checkable source. Not opinion, not vibes. Hold yourself to the citation standard of a good systematic review.
 
 - Interpret the idea in the sense the surrounding conversation implies; disambiguate by context.
-- USE Google Search grounding whenever it is available — especially for medical, health, nutrition, psychology, and policy claims — and prefer primary, high-quality sources: peer-reviewed papers, meta-analyses and systematic reviews (Cochrane), RCTs, and major institutional sources (WHO, NIH, CDC, top journals like NEJM/Lancet/Nature). Avoid blogs, content farms, and press releases.
-- Cite specifically: name the study or review (authors/journal/year, e.g. "a 2019 Cochrane review", "Smith et al., NEJM 2021"), the population/sample size, and the headline finding with its number where you know it.
-- Rank by evidence hierarchy and say where each item sits: meta-analysis > RCT > cohort/observational > case report > expert opinion > anecdote. Distinguish correlation from causation.
-- Lay out the evidence FOR and AGAINST, and say plainly when something is well-established, contested, or thin.
-- Flag what's missing — the study that would settle it but doesn't yet exist.
-- NEVER invent a citation. If grounding is unavailable and you're not confident a source is real, describe the type and approximate vintage of the evidence instead of fabricating a reference, and say you couldn't verify it.
+- USE Google Search grounding whenever it is available — especially for medical, health, nutrition, psychology, science, and policy claims — to pull REAL, current sources and their working links. Prefer the highest-quality primary evidence: systematic reviews and meta-analyses (e.g. Cochrane), randomized controlled trials, large cohort studies, and authoritative institutions (WHO, NIH, CDC, FDA, and leading journals like NEJM, The Lancet, JAMA, BMJ, Nature, Science). Avoid blogs, content farms, press releases, and SEO articles.
+- Rank by the evidence hierarchy and say where each item sits: meta-analysis > RCT > cohort/observational > case report > expert opinion > anecdote. Distinguish correlation from causation, and give the population/sample size and the headline finding with its number where you know it.
+- Lay out the evidence FOR and AGAINST, and say plainly whether the claim is well-established, contested, or thin. Flag what's missing — the study that would settle it but doesn't yet exist.
+- ATTRIBUTE EVERY KEY CLAIM to its source inline, by name — e.g. "a 2019 Cochrane review found…" or "Smith et al. (NEJM 2021), n=1,200, found…". Name the authors/institution, the journal, and the year, with the population/sample size and the headline number where you know it.
+- Do NOT write your own list of URLs and do NOT fabricate links, DOIs, or PMIDs — a made-up link is worse than none. When web search is available, the verified source links are listed automatically beneath your answer, so spend your words naming and weighing the sources, not composing URLs.
+- If you have no web access and cannot confidently name real sources, say so plainly and describe the type and vintage of evidence that exists, rather than inventing references.
 
-Keep it tight and skimmable. Match the conversation's language.`,
+Keep the prose tight and skimmable, but never trade rigor for naming the actual evidence. Match the conversation's language.`,
 }

@@ -32,6 +32,14 @@ interface UIStore {
   driftMapOpen: boolean
   knowledgeGraphOpen: boolean
 
+  // ── Custom lens editor (inline "New lens" sheet) ────────────────────────────
+  /** When non-null, the inline lens editor is open. A string = editing that lens
+   *  id; '' = creating a new one. Null = closed. */
+  customLensEditorId: string | null
+  /** Bumped whenever custom lenses change — surfaces (tooltip, View-as bar) read
+   *  it so a newly-created/edited/deleted lens appears without a manual refresh. */
+  customLensesVersion: number
+
   // ── User account UI ────────────────────────────────────────────────────────
   userMenuOpen: boolean
   profileOpen: boolean
@@ -68,6 +76,12 @@ interface UIStore {
   setUserMenuOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
 
+  /** Open the inline lens editor — pass a lens id to edit, or omit to create new. */
+  openCustomLensEditor: (id?: string) => void
+  closeCustomLensEditor: () => void
+  /** Signal that the custom-lens set changed (save/delete) so readers re-render. */
+  bumpCustomLensesVersion: () => void
+
   setHoveredMessageId: (id: string | null) => void
   /**
    * Mark a message as copied. Automatically clears itself after 2 seconds.
@@ -101,6 +115,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   galleryOpen: false,
   driftMapOpen: false,
   knowledgeGraphOpen: false,
+  customLensEditorId: null,
+  customLensesVersion: 0,
   userMenuOpen: false,
   profileOpen: false,
   hoveredMessageId: null,
@@ -129,6 +145,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setKnowledgeGraphOpen: (open) => set({ knowledgeGraphOpen: open }),
   setUserMenuOpen: (open) => set({ userMenuOpen: open }),
   setProfileOpen: (open) => set({ profileOpen: open }),
+
+  openCustomLensEditor: (id) => set({ customLensEditorId: id ?? '' }),
+  closeCustomLensEditor: () => set({ customLensEditorId: null }),
+  bumpCustomLensesVersion: () => set((state) => ({ customLensesVersion: state.customLensesVersion + 1 })),
 
   // ── Interaction states ─────────────────────────────────────────────────────
   setHoveredMessageId: (id) => set({ hoveredMessageId: id }),

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isVali
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle, Layers } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
+import { isConnectCardsJson } from './lib/driftPanel'
 import DriftPanel from './components/DriftPanel'
 import ResizeHandle from './components/ResizeHandle'
 const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
@@ -10,6 +11,7 @@ import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
+import CustomLensSheet from './components/CustomLensSheet'
 import { Login } from './components/Login'
 import { ONBOARDED_FLAG } from './lib/onboardingFlag'
 const Onboarding = lazy(() => import('./components/Onboarding'))
@@ -64,6 +66,7 @@ const PUSHED_LENS_TAG: Record<string, { label: string; chip: string; arrow: stri
   research:  { label: 'deep dive', chip: 'bg-blue-400/[0.10] border-blue-400/25 text-blue-400/85',                       arrow: '↗' },
   connect:   { label: 'connect',   chip: 'bg-accent-discovery/[0.10] border-accent-discovery/25 text-accent-discovery/90', arrow: '↗' },
   challenge: { label: 'challenge', chip: 'bg-rose-400/[0.10] border-rose-400/25 text-rose-400/85',                       arrow: '↗' },
+  evidence:  { label: 'evidence',  chip: 'bg-violet-400/[0.10] border-violet-400/25 text-violet-400/85',               arrow: '↗' },
 }
 const pushedLensTag = (tpl?: string) =>
   (tpl && PUSHED_LENS_TAG[tpl]) || { label: 'drift', chip: 'bg-accent-violet/[0.08] border-accent-violet/20 text-accent-violet/80', arrow: '↗' }
@@ -255,7 +258,7 @@ function App() {
   // In-session only (reset on reload by design). The main column is flex-1 and
   // reserves exactly these widths via margins, so it reflows for free as they change.
   const [sidebarWidth, setSidebarWidth] = useState(340)
-  const [driftWidth, setDriftWidth] = useState(450)
+  const [driftWidth, setDriftWidth] = useState(560)
   const [mapWidth, setMapWidth] = useState(680)
   // Smallest the main chat may get when a right panel grows — just enough that its
   // header icons (search/gallery/help on the left, Map/new-chat pills on the right)
@@ -2383,6 +2386,9 @@ function App() {
                 }
 
                 if (isDriftHeader || msg.isHiddenContext) return null
+                // A Connect-cards JSON payload must never render as prose (it would
+                // dump a wide raw-JSON block); the chips view owns it.
+                if (isConnectCardsJson(msg.text)) return null
 
                 return msg.text ? (
                   <div
@@ -2720,9 +2726,9 @@ function App() {
                                               handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
                                             }}
                                             className="inline cursor-pointer
-                                                     border-b border-accent-violet/50 hover:border-accent-violet
-                                                     text-accent-violet hover:bg-accent-violet/10
-                                                     rounded-sm transition-all duration-100"
+                                                     border-b border-accent-violet/30 hover:border-accent-violet/70
+                                                     hover:text-accent-violet
+                                                     rounded-sm transition-colors duration-100"
                                             title={m.drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
                                           >
                                             {m.drift.selectedText}
@@ -2759,6 +2765,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
+                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
                                     p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
                                     td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
@@ -2848,6 +2855,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
+                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
@@ -3277,7 +3285,7 @@ function App() {
         onExpandedChange={(expanded) => {
           driftStore.expandDrift(expanded)
           // The expand/collapse button doubles as a quick width preset alongside drag.
-          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 450)
+          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 560)
         }}
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}
@@ -3375,6 +3383,9 @@ function App() {
         onSave={handleSaveSettings}
         currentSettings={aiSettings}
       />
+
+      {/* Inline custom-lens editor — opened from the selection tooltip / "View as" bar */}
+      <CustomLensSheet />
 
       {/* Mobile Model Picker Sheet */}
       <ModelPickerSheet

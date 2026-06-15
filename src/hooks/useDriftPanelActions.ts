@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { snippetStorage } from '../services/snippetStorage'
 import { isDriftScaffoldText } from '../lib/driftPanel'
 import type { Message } from '../components/DriftPanel'
+import type { LensKey } from '../types/chat'
 
 interface DriftPanelActionsDeps {
   /** The drift-only conversation (excludes parent context messages). */
@@ -15,9 +16,9 @@ interface DriftPanelActionsDeps {
   /** The chat id of this drift, once it has one (used to reconstruct on click). */
   driftChatId?: string
   /** The lens this drift was explored through, carried into the pushed tag. */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Push the given messages back into the main chat. */
-  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: 'simplify' | 'research' | 'connect' | 'challenge') => void
+  onPushToMain?: (messages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: LensKey) => void
   /** Persist the drift conversation as a standalone chat. */
   onSaveAsChat: (messages: Message[], title: string, metadata: any) => void
   /** Mark already-pushed drift messages as saved (after a save-as-chat). */

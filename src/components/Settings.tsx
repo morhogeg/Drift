@@ -10,6 +10,7 @@ import { checkGeminiConnection, GEMINI_MODELS } from '../services/gemini'
 import { useUIStore } from '../store/uiStore'
 import AddModelSheet from './AddModelSheet'
 import ChallengerPicker from './ChallengerPicker'
+import CustomLensManager from './CustomLensManager'
 import { challengerOptions } from '../lib/challenger'
 import { useModelStore } from '../store/modelStore'
 import type { Target } from '../types/chat'
@@ -671,6 +672,10 @@ function SettingsInner({ isOpen, onClose, onSave, currentSettings }: SettingsPro
               }
             />
           </SettingsGroup>
+
+          {/* ── CUSTOM LENSES section ── */}
+          <SectionHeader label="Custom lenses" hint="Your own ways to re-view a term" />
+          <CustomLensManager />
 
           {/* ── APPEARANCE section ── */}
           <SectionHeader label="Appearance" />

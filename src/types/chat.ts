@@ -6,6 +6,13 @@
 
 export type Provider = 'openrouter' | 'ollama' | 'gemini'
 
+/** The built-in lenses, in their canonical keys. `connect` and `challenge` carry
+ *  special behavior (JSON chips / cross-model routing); the rest are plain prompt swaps. */
+export type BuiltinLensKey = 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence'
+/** Any lens key — a built-in or a user-defined custom lens id. The `string & {}` keeps
+ *  editor autocomplete for the built-ins while still accepting arbitrary custom ids. */
+export type LensKey = BuiltinLensKey | (string & {})
+
 export interface Target {
   provider: Provider
   key: string
@@ -27,7 +34,7 @@ export interface Message {
   driftInfos?: Array<{
     selectedText: string
     driftChatId: string
-    templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+    templateType?: LensKey
     connectCards?: string[]
     /** Cached per-question conversations for Connect chips — keyed by question text */
     connectAnswers?: Record<string, Message[]>
@@ -47,7 +54,7 @@ export interface Message {
     /** The lens the drift was explored through, so the pushed tag reads
      *  "connect" / "simplify" / "deep dive" / "challenge" instead of "drift",
      *  and re-opening restores the same lens. */
-    templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+    templateType?: LensKey
   }
   /** For single message pushes, hides context messages. */
   isHiddenContext?: boolean
@@ -93,7 +100,7 @@ export interface AncestryEntry {
   /** Drift chat ID — undefined for the root main-chat entry. */
   driftChatId?: string
   /** Template type in use when this drift was active (preserved for navigation restore). */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Active Connect question when the user navigated away — used to restore chat mode. */
   connectQuestion?: string | null
   /** Chips that were visible in Connect mode — avoids re-fetching on navigate back. */
@@ -110,7 +117,7 @@ export interface DriftContext {
   /** Breadcrumb trail of ancestor contexts, from root (main chat) to parent drift. */
   ancestry?: AncestryEntry[]
   /** Optional template type for one-tap workflow drifts. */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Pre-loaded suggestion chips to show in the drift panel (bypasses AI fetch). */
   initialSuggestions?: string[]
   /** Active Connect question to restore when re-opening a Connect drift. */

@@ -7,6 +7,7 @@ import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
 import { resolveLensPrompt } from '../lib/customLenses'
+import type { LensKey } from '../types/chat'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
 import type { Message } from '../components/DriftPanel'
 
@@ -22,7 +23,7 @@ interface DriftMessageStreamDeps {
   /** Parent conversation, used to ground/disambiguate the prompt. */
   contextMessages: Message[]
   /** One-tap workflow type, if this is a template drift. */
-  templateType?: 'simplify' | 'research' | 'connect' | 'challenge'
+  templateType?: LensKey
   /** Active Connect bridge question (null in chips view / non-connect drifts). */
   connectQuestion: string | null
   /** Prior explorations of related terms — fed into the Connect prompt to avoid repeats. */
@@ -238,7 +239,18 @@ export function useDriftMessageStream({
           const preset = sTargets.length === 1 ? sTargets[0] : null
           const inheritedModel = (preset?.key && aiSettings.modelPresets?.find((p: any) => p.id === preset.key)?.model) || aiSettings.geminiModel as any
           const model = challengerCall?.model || inheritedModel
-          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model)
+          // Grounding (Google Search) costs tokens, so run it only where it earns
+          // its keep: Evidence + Deep dive. Inline [n] citations + Sources are shown
+          // for Evidence only — that's the lens whose job is citing the proof.
+          const wantsGrounding = effectiveTemplate === 'evidence' || effectiveTemplate === 'research'
+          const onGroundedComplete = effectiveTemplate === 'evidence'
+            ? (annotated: string) => {
+                accumulatedResponse = annotated
+                setMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: annotated } : msg))
+                setDriftOnlyMessages(prev => prev.map(msg => msg.id === aiResponseId ? { ...msg, text: annotated } : msg))
+              }
+            : undefined
+          await sendMessageToGemini(apiMessages as GeminiMessage[], onChunk, apiKey, abortController.signal, model, wantsGrounding, onGroundedComplete)
         } else if (provider === 'openrouter') {
           const apiKey = challengerCall?.apiKey || effectiveApiKey
           if (!apiKey) throw new Error('No OpenRouter API key found. Please set VITE_OPENROUTER_API_KEY in .env file')

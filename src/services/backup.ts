@@ -3,15 +3,16 @@
  * file. A purely client-side safety net (no backend) so a person's chats and
  * drifts survive a cleared browser or a move to another device.
  *
- * Included: chats + drifts (IndexedDB), snippets + AI settings + theme
- * (localStorage). Excluded: the embeddings vector cache — it's regenerable from
- * the chats, so bundling it would bloat the file for no real benefit.
+ * Included: chats + drifts (IndexedDB), snippets + custom lenses + AI settings +
+ * theme (localStorage). Excluded: the embeddings vector cache — it's regenerable
+ * from the chats, so bundling it would bloat the file for no real benefit.
  */
 import { chatDB, type DBChatSession } from './db'
 
 const SNIPPETS_KEY = 'drift_snippets'
 const SETTINGS_KEY = 'drift_ai_settings'
 const THEME_KEY = 'drift-theme'
+const CUSTOM_LENSES_KEY = 'drift_custom_lenses'
 
 export const BACKUP_FORMAT = 'drift-backup'
 export const BACKUP_VERSION = 1
@@ -23,6 +24,8 @@ export interface DriftBackup {
   data: {
     chats: DBChatSession[]
     snippets: unknown[]
+    /** User-defined custom lenses. Optional so backups predating them still parse. */
+    lenses?: unknown[]
     settings: unknown | null
     theme: string | null
   }
@@ -75,6 +78,7 @@ function sanitizeSettings(settings: unknown): unknown | null {
 export async function buildBackup(): Promise<DriftBackup> {
   const chats = await chatDB.getAll()
   const snippets = readJSON(SNIPPETS_KEY)
+  const lenses = readJSON(CUSTOM_LENSES_KEY)
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -82,6 +86,7 @@ export async function buildBackup(): Promise<DriftBackup> {
     data: {
       chats,
       snippets: Array.isArray(snippets) ? snippets : [],
+      lenses: Array.isArray(lenses) ? lenses : [],
       settings: sanitizeSettings(readJSON(SETTINGS_KEY)),
       theme: localStorage.getItem(THEME_KEY),
     },
@@ -126,7 +131,7 @@ export function parseBackup(text: string): DriftBackup {
 /** Restore a parsed backup into IndexedDB + localStorage. */
 export async function restoreBackup(backup: DriftBackup, opts: ImportOptions = {}): Promise<ImportResult> {
   const mode = opts.mode ?? 'replace'
-  const { chats, snippets, settings, theme } = backup.data
+  const { chats, snippets, lenses, settings, theme } = backup.data
 
   // Chats (IndexedDB)
   if (mode === 'replace') await chatDB.clear()
@@ -151,6 +156,20 @@ export async function restoreBackup(backup: DriftBackup, opts: ImportOptions = {
       localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets))
     }
     snippetCount = snippets.length
+  }
+
+  // Custom lenses (localStorage) — merge by id so a restore never clobbers
+  // lenses created on this device since the backup was taken.
+  if (Array.isArray(lenses)) {
+    if (mode === 'merge') {
+      const existing = readJSON(CUSTOM_LENSES_KEY)
+      const byId = new Map<string, unknown>()
+      if (Array.isArray(existing)) for (const l of existing) { const id = (l as { id?: string })?.id; if (id) byId.set(id, l) }
+      for (const l of lenses) { const id = (l as { id?: string })?.id; if (id) byId.set(id, l) }
+      localStorage.setItem(CUSTOM_LENSES_KEY, JSON.stringify(Array.from(byId.values())))
+    } else {
+      localStorage.setItem(CUSTOM_LENSES_KEY, JSON.stringify(lenses))
+    }
   }
 
   // Settings + theme (localStorage)

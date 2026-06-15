@@ -422,13 +422,77 @@ ${languageDirective(`${rootTopic} ${branches.map((b) => b.content).join(' ').sli
 
 // ── Streaming ────────────────────────────────────────────────────────────────
 
+/** Insert markers at UTF-8 byte offsets (Gemini's grounding indices are byte-based,
+ *  so this stays correct for non-Latin scripts like Hebrew). */
+function spliceUtf8(text: string, inserts: Array<{ pos: number; marker: string }>): string {
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+  const bytes = enc.encode(text)
+  let cursor = 0
+  let out = ''
+  for (const ins of inserts) {
+    const pos = Math.max(0, Math.min(ins.pos, bytes.length))
+    if (pos < cursor) continue // skip out-of-order / overlapping spans
+    out += dec.decode(bytes.slice(cursor, pos)) + ins.marker
+    cursor = pos
+  }
+  out += dec.decode(bytes.slice(cursor))
+  return out
+}
+
+/** Rewrite a grounded answer to carry inline [n] citation links (one per claim,
+ *  from groundingSupports) plus a numbered "Sources" list (from groundingChunks).
+ *  Returns null when there are no usable sources. */
+function buildGroundedAnswer(
+  text: string,
+  chunks: Array<{ uri: string; title: string }>,
+  supports: Array<{ endIndex: number; indices: number[] }>,
+): string | null {
+  // Number each source that has a URL, in chunk order.
+  const numberFor = new Map<number, number>()
+  const listed: Array<{ n: number; uri: string; title: string }> = []
+  chunks.forEach((c, idx) => {
+    if (c && c.uri) {
+      const n = listed.length + 1
+      numberFor.set(idx, n)
+      listed.push({ n, uri: c.uri, title: c.title })
+    }
+  })
+  if (listed.length === 0) return null
+
+  // Inline markers at each supported span's end (e.g. "…claim.[1][2]"), linked.
+  let body = text
+  const inserts = supports
+    .map((s) => {
+      const nums = Array.from(new Set(s.indices.map((i) => numberFor.get(i)).filter((x): x is number => typeof x === 'number'))).sort((a, b) => a - b)
+      if (nums.length === 0) return null
+      const marker = nums.map((n) => `[[${n}]](${listed[n - 1].uri})`).join('')
+      return { pos: s.endIndex, marker }
+    })
+    .filter((x): x is { pos: number; marker: string } => x !== null)
+    .sort((a, b) => a.pos - b.pos)
+  if (inserts.length > 0) body = spliceUtf8(text, inserts)
+
+  let md = body + '\n\n**Sources**\n'
+  for (const s of listed) {
+    let label = s.title
+    if (!label) { try { label = new URL(s.uri).hostname.replace(/^www\./, '') } catch { label = s.uri } }
+    md += `${s.n}. [${label}](${s.uri})\n`
+  }
+  return md
+}
+
 export async function sendMessageToGemini(
   messages: ChatMessage[],
   onChunk: (chunk: string) => void,
   apiKey: string,
   signal?: AbortSignal,
   model: GeminiModel = GEMINI_MODELS.FLASH_LITE_PREVIEW,
-  useGrounding = true,
+  useGrounding = false,
+  /** When grounding is on, called once at the end with the full answer text
+   *  rewritten to carry inline [n] citation links plus a "Sources" list. The
+   *  caller replaces the streamed text with this. Omit it to skip citations. */
+  onGroundedComplete?: (annotatedFullText: string) => void,
 ): Promise<void> {
   if (!apiKey?.trim()) {
     throw new Error('Gemini API key not configured. Please set it in Settings.')
@@ -494,6 +558,22 @@ export async function sendMessageToGemini(
   const decoder = new TextDecoder()
   let buffer = ''
 
+  // Google Search grounding returns its sources + per-claim support spans in
+  // `groundingMetadata` (NOT in the answer text). We stream the plain answer live,
+  // collecting that metadata, then — once complete — hand the caller a rewritten
+  // version with inline [n] citation links and a "Sources" list (onGroundedComplete).
+  let fullText = ''
+  let chunksByIndex: Array<{ uri: string; title: string }> = []
+  let supports: Array<{ endIndex: number; indices: number[] }> = []
+  let finished = false
+  const finalize = () => {
+    if (finished) return
+    finished = true
+    if (!onGroundedComplete) return
+    const annotated = buildGroundedAnswer(fullText, chunksByIndex, supports)
+    if (annotated) onGroundedComplete(annotated)
+  }
+
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -506,23 +586,47 @@ export async function sendMessageToGemini(
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
         const data = line.slice(6).trim()
-        if (data === '[DONE]') return
+        if (data === '[DONE]') { finalize(); return }
 
         try {
           const json = JSON.parse(data)
-          const parts: unknown[] = json?.candidates?.[0]?.content?.parts ?? []
+          const cand = json?.candidates?.[0]
+          const parts: unknown[] = cand?.content?.parts ?? []
           // Gemini grounding can return multiple parts per chunk; collect all string text
           let chunk = ''
           for (const part of parts) {
             const t = (part as any)?.text
             if (typeof t === 'string') chunk += t
           }
-          if (chunk) onChunk(chunk)
+          if (chunk) { fullText += chunk; onChunk(chunk) }
+          // Grounding metadata usually arrives in the final message; replace (not
+          // append) each time so repeated frames don't duplicate.
+          const gm = cand?.groundingMetadata as {
+            groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>
+            groundingSupports?: Array<{ segment?: { endIndex?: number }; groundingChunkIndices?: number[] }>
+          } | undefined
+          if (gm) {
+            if (Array.isArray(gm.groundingChunks)) {
+              chunksByIndex = gm.groundingChunks.map((gc) => ({
+                uri: typeof gc?.web?.uri === 'string' ? gc.web.uri : '',
+                title: typeof gc?.web?.title === 'string' ? gc.web.title : '',
+              }))
+            }
+            if (Array.isArray(gm.groundingSupports)) {
+              supports = gm.groundingSupports
+                .map((s) => ({
+                  endIndex: Number(s?.segment?.endIndex) || 0,
+                  indices: (Array.isArray(s?.groundingChunkIndices) ? s.groundingChunkIndices : []).filter((n) => Number.isInteger(n)),
+                }))
+                .filter((s) => s.endIndex > 0 && s.indices.length > 0)
+            }
+          }
         } catch {
           // Partial / non-JSON line — skip
         }
       }
     }
+    finalize()
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return
     throw err

@@ -61,7 +61,7 @@ interface TreeNode {
   /** Which lens opened this drift — drives the card's lens tag. `undefined` = a
    *  plain free-form drift (no template). Lives on the *parent* message's
    *  driftInfos, so it's resolved during tree construction. */
-  lens?: 'simplify' | 'research' | 'connect' | 'challenge'
+  lens?: 'simplify' | 'research' | 'connect' | 'challenge' | 'evidence'
 }
 
 // The user-facing name for each lens. Plain drifts (no templateType) read "Drift".
@@ -70,6 +70,7 @@ const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
   research: 'Deep dive',
   connect: 'Connect',
   challenge: 'Second opinion',
+  evidence: 'Evidence',
 }
 function lensLabel(node: TreeNode): string {
   return node.lens ? LENS_LABELS[node.lens] : 'Drift'
@@ -82,6 +83,7 @@ const LENS_COLORS: Record<NonNullable<TreeNode['lens']>, string> = {
   research: '#3b82f6',  // blue-500
   connect: '#22d3ee',   // accent-discovery (cyan)
   challenge: '#f43f5e', // rose-500
+  evidence: '#8b5cf6',  // violet-500
 }
 const DRIFT_LENS_COLOR = '#a855f7' // accent-violet
 function lensColor(node: TreeNode): string {
@@ -95,7 +97,9 @@ function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens
     for (const m of c.messages ?? []) {
       const info = m.driftInfos?.find(d => d.driftChatId === driftChatId)
       if (!info) continue
-      if (info.templateType) return info.templateType
+      // templateType is a LensKey (may be a custom lens id the graph doesn't render);
+      // only honor it when it's one of the built-in lenses this view knows how to color.
+      if (info.templateType) return (info.templateType in LENS_LABELS) ? (info.templateType as TreeNode['lens']) : undefined
       // A Connect drift may pre-date persisted templateType — infer it from the
       // cached cards/answers (same fallback App.tsx uses when opening the drift).
       if ((info.connectCards?.length ?? 0) > 0 ||
@@ -115,6 +119,7 @@ const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עב�
 const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
 const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
+const EVIDENCE_SCAFFOLD_RE = /^(Show the evidence for this|הצג ראיות לכך)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
 /** Infer the lens from a drift's own messages — used when the parent driftInfos
@@ -128,6 +133,7 @@ function detectLensFromChat(chat: ChatSession): TreeNode['lens'] {
     if (SIMPLIFY_SCAFFOLD_RE.test(t)) return 'simplify'
     if (RESEARCH_SCAFFOLD_RE.test(t)) return 'research'
     if (CHALLENGE_SCAFFOLD_RE.test(t)) return 'challenge'
+    if (EVIDENCE_SCAFFOLD_RE.test(t)) return 'evidence'
   }
   return undefined
 }
@@ -290,7 +296,7 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
 
 // The auto-generated lens openers — these aren't real questions, so they never
 // make a good node label.
-const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|what would you like to know about|finding connections for)/i
+const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|second opinion on this|challenge this|show the evidence for this|explore this|what would you like to know about|finding connections for|מה תרצה לדעת על|מחפש קשרים עבור|הסבר בפשטות|צלילה לעומק|הראה למה זה מתחבר|חוות דעת שנייה על זה|ערער על זה|הצג ראיות לכך)/i
 
 function clipLabel(s: string, n: number): string {
   const t = s.trim()
@@ -366,6 +372,9 @@ function cleanGist(text: string, maxLen = 160): string {
   } else {
     s = s.replace(/\.$/, '')   // subtitles read cleaner without a trailing period
   }
+  // An intro line immediately followed by a "1." list item collapses to "…: 1",
+  // pulling the dangling list-marker number into the subtitle. Drop it.
+  s = s.replace(/\s*[:：]\s*\d{1,2}\.?\s*$/, '').trim()
   if (/[a-z]/.test(s[0])) s = s[0].toUpperCase() + s.slice(1)
   return s
 }
@@ -1847,7 +1856,7 @@ function OutlineView({
           >
             <ChevronRight className="w-3.5 h-3.5 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
           </button>
-          <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: color, boxShadow: `0 0 6px ${color}88` }} />
+          <span className="shrink-0 rounded-full" style={{ width: 6, height: 6, marginTop: 6, background: `${color}cc` }} />
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-1.5 flex-wrap">
               <span
@@ -1862,7 +1871,7 @@ function OutlineView({
                 {nodeOwnLabel(node)}
               </span>
               {isDrift && (
-                <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a`, marginTop: 1 }}>
+                <span className="shrink-0 text-[8.5px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.6, marginTop: 2.5 }}>
                   {lensLabel(node)}
                 </span>
               )}
@@ -1882,23 +1891,23 @@ function OutlineView({
             {gist && (
               <div
                 dir="auto"
-                className="text-[11.5px] leading-snug mt-0.5"
-                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                className="text-[12.5px] leading-relaxed mt-1"
+                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
                 {gist}
               </div>
             )}
             {related.length > 0 && (
               <div className="flex items-center flex-wrap gap-1 mt-1.5">
-                <Waypoints className="w-3 h-3 shrink-0" style={{ color: '#22d3ee' }} />
-                <span className="text-[10px] shrink-0" style={{ color: 'rgba(34,211,238,0.7)' }}>also relates to</span>
+                <Waypoints className="w-2.5 h-2.5 shrink-0" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.5 }} />
+                <span className="text-[9.5px] shrink-0" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.7 }}>also relates to</span>
                 {related.map(r => (
                   <button
                     key={r.id}
                     dir="auto"
                     onClick={(e) => { e.stopPropagation(); const n = byId.get(r.id); if (n) select(n) }}
-                    className="text-[10px] rounded-full px-1.5 py-0.5 transition-colors hover:brightness-125"
-                    style={{ color: '#67e8f9', background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)' }}
+                    className="text-[9.5px] rounded-full px-1.5 py-0.5 transition-colors hover:bg-white/[0.05]"
+                    style={{ color: 'rgb(var(--color-text-muted))', background: 'transparent', border: '1px solid rgb(var(--color-border))' }}
                   >
                     {r.label}
                   </button>
