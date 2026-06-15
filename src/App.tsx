@@ -2173,20 +2173,22 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="min-h-full flex flex-col items-center justify-start text-center px-8 pt-[clamp(2.5rem,9vh,7rem)] pb-10">
-                  <div className="mb-4">
-                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
+                <div className="relative min-h-full overflow-x-hidden flex flex-col items-center justify-start text-center px-8 pt-[clamp(2.5rem,9vh,7rem)] pb-10">
+                  {/* Ambient hero aura — a slow, faint pink→violet breath for depth */}
+                  <div aria-hidden className="drift-hero-aura pointer-events-none absolute left-1/2 top-[clamp(6rem,16vh,12rem)] h-[340px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[64px]" />
+                  <div className="relative mb-4">
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="drift-logo-draw mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
                         <linearGradient id="dg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                           <stop stopColor="#ff006e"/>
                           <stop offset="1" stopColor="#a855f7"/>
                         </linearGradient>
                       </defs>
-                      <circle cx="18" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <circle cx="6" cy="6" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <circle cx="6" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <circle cx="18" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <circle cx="6" cy="6" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <circle cx="6" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
                     </svg>
                     <h2 className="text-text-primary font-semibold text-[20px] leading-snug mb-1.5">What's on your mind?</h2>
                     <p className="text-text-muted text-[13.5px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
@@ -2236,17 +2238,23 @@ function App() {
                     ]
                     const active = activeCue !== null ? cues[activeCue] : null
                     return (
-                      <div className="w-full max-w-[640px] mt-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      <div
+                        className="w-full max-w-[680px] mt-5"
+                        onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActiveCue(null) }}
+                      >
+                        {/* Loose, staggered "fan" — desktop offsets the middle card up for a
+                            less rigid feel; stacks flat on mobile. */}
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-center gap-4 sm:gap-6">
                           {cues.map(({ icon: Icon, lead, accent, tagline }, idx) => {
                             const isActive = activeCue === idx
                             return (
                               <button
                                 key={accent}
                                 type="button"
+                                onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveCue(idx) }}
                                 onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
                                 aria-expanded={isActive}
-                                className={`group relative flex flex-col items-start rounded-2xl border px-5 pt-[18px] pb-5 text-left animate-fade-up transition-all duration-300 active:scale-[0.98]
+                                className={`group relative flex w-full flex-col items-start rounded-2xl border px-6 pt-5 pb-6 text-left animate-fade-up [animation-fill-mode:backwards] transition-all duration-300 active:scale-[0.98] sm:w-[210px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-8'}
                                   ${isActive
                                     ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-xl shadow-accent-violet/15 -translate-y-1'
                                     : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1 hover:border-accent-violet/40 hover:shadow-xl hover:shadow-accent-violet/15'}`}
@@ -2254,19 +2262,17 @@ function App() {
                               >
                                 {/* brand sheen */}
                                 <span className={`pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
-                                {/* shine sweep — a light streak glides across on hover */}
+                                {/* shine sweep — a brand-tinted streak glides across on hover */}
                                 <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
-                                  <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/[0.09] to-transparent -translate-x-full transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
+                                  <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 -translate-x-full bg-[linear-gradient(90deg,transparent,rgba(255,0,110,0.10),rgba(168,85,247,0.17),transparent)] transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
                                 </span>
-                                <span className="relative mb-3 inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                                  <Icon className="w-5 h-5" />
+                                <span className="relative mb-3.5 inline-flex h-12 w-12 items-center justify-center rounded-[15px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                                  <Icon className="w-6 h-6" />
                                 </span>
-                                <span className="relative text-[15px] font-semibold leading-tight text-text-primary">
+                                <span className="relative text-[16px] font-semibold leading-tight text-text-primary">
                                   {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
                                 </span>
-                                <span className="relative mt-1.5 text-[12px] leading-snug text-text-muted">{tagline}</span>
-                                {/* caret bridging the card to its detail panel */}
-                                <span className={`pointer-events-none absolute left-1/2 -bottom-[7px] h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-accent-violet/45 bg-dark-bg transition-opacity duration-200 ${isActive ? 'opacity-100' : 'opacity-0'}`} />
+                                <span className="relative mt-1.5 text-[12.5px] leading-snug text-text-muted">{tagline}</span>
                               </button>
                             )
                           })}
@@ -2308,19 +2314,20 @@ function App() {
                       so the drift gesture has something to act on. Shown only to genuinely
                       new users (returning users get "pick up where you left off" below). */}
                   {resumableTrees.length === 0 && (
-                    <div className="w-full max-w-[440px] mt-6">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3">Try one to start</p>
+                    <div className="w-full max-w-[440px] mt-7">
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '300ms' }}>Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {[
                           'Why did the Roman Empire really fall?',
                           'Explain quantum entanglement without the jargon',
                           'Compare Stoicism and Buddhism on suffering',
                           'How does caffeine actually work in the brain?',
-                        ].map((p) => (
+                        ].map((p, pi) => (
                           <button
                             key={p}
                             onClick={() => { haptics.selection(); sendMessage(p) }}
-                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3 active:scale-[0.98] animate-fade-up [animation-fill-mode:backwards]"
+                            style={{ animationDelay: `${360 + pi * 70}ms` }}
                           >
                             <span className="flex items-center gap-2">
                               <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />
