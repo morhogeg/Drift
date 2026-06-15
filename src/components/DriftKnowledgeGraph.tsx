@@ -1868,7 +1868,7 @@ function OutlineView({
                 {nodeOwnLabel(node)}
               </span>
               {isDrift && (
-                <span className="shrink-0 text-[9px] uppercase tracking-wider font-medium" style={{ color: `${color}b0`, marginTop: 2 }}>
+                <span className="shrink-0 text-[8.5px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.6, marginTop: 2.5 }}>
                   {lensLabel(node)}
                 </span>
               )}
@@ -1888,23 +1888,23 @@ function OutlineView({
             {gist && (
               <div
                 dir="auto"
-                className="text-[11.5px] leading-snug mt-0.5"
-                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                className="text-[12.5px] leading-relaxed mt-1"
+                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
               >
                 {gist}
               </div>
             )}
             {related.length > 0 && (
               <div className="flex items-center flex-wrap gap-1 mt-1.5">
-                <Waypoints className="w-3 h-3 shrink-0" style={{ color: '#22d3ee' }} />
-                <span className="text-[10px] shrink-0" style={{ color: 'rgba(34,211,238,0.7)' }}>also relates to</span>
+                <Waypoints className="w-2.5 h-2.5 shrink-0" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.5 }} />
+                <span className="text-[9.5px] shrink-0" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.7 }}>also relates to</span>
                 {related.map(r => (
                   <button
                     key={r.id}
                     dir="auto"
                     onClick={(e) => { e.stopPropagation(); const n = byId.get(r.id); if (n) select(n) }}
-                    className="text-[10px] rounded-full px-1.5 py-0.5 transition-colors hover:brightness-125"
-                    style={{ color: '#67e8f9', background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)' }}
+                    className="text-[9.5px] rounded-full px-1.5 py-0.5 transition-colors hover:bg-white/[0.05]"
+                    style={{ color: 'rgb(var(--color-text-muted))', background: 'transparent', border: '1px solid rgb(var(--color-border))' }}
                   >
                     {r.label}
                   </button>
