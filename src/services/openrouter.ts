@@ -122,7 +122,6 @@ async function validateApiKeyViaModels(apiKey: string): Promise<boolean> {
     })
 
     clearTimeout(timeoutId)
-    console.log('API key validation via /models:', response.status)
     return response.ok
   } catch (error) {
     if (error instanceof Error && error.name !== 'AbortError') {
@@ -169,9 +168,7 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
     })
     
     clearTimeout(timeoutId)
-    
-    console.log('OpenRouter connection response:', response.status, response.ok)
-    
+
     if (!response.ok) {
       const errorText = await response.text()
       console.error('OpenRouter connection error for model', model, ':', errorText)
@@ -198,7 +195,6 @@ export async function checkOpenRouterConnection(apiKey: string, model: OpenRoute
         // fall back to a lightweight /models endpoint check so we can confirm
         // that the API key itself is valid even when a free model is unavailable.
         if (response.status !== 401) {
-          console.log('Test model unavailable — falling back to /models endpoint check')
           return validateApiKeyViaModels(apiKey)
         }
 
@@ -249,44 +245,27 @@ export async function sendMessageToOpenRouter(
       temperature: 0.7,
       max_tokens: 2000
     }
-    
-    console.log('Request body:', requestBody)
-    
+
     const trimmedKey = apiKey.trim()
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'HTTP-Referer': window.location.origin || 'http://localhost:3000',
       'X-Title': 'Drift AI Chat'
     }
-    
+
     if (trimmedKey) {
       headers['Authorization'] = `Bearer ${trimmedKey}`
-      console.log('Sending with Authorization header')
-    } else {
-      console.error('NO API KEY BEING SENT!')
     }
-    
-    console.log('Full request details:', {
-      url: OPENROUTER_API_URL,
-      headers: {
-        ...headers,
-        'Authorization': headers['Authorization'] ? `Bearer ${trimmedKey.substring(0, 10)}...` : 'MISSING'
-      },
-      body: requestBody
-    })
-    
+
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
       signal
     })
-    
-    console.log('OpenRouter response status:', response.status)
-    
+
     if (!response.ok) {
       const error = await response.text()
-      console.error('OpenRouter API error response:', error)
       throw new Error(`OpenRouter API error: ${error}`)
     }
     
@@ -314,10 +293,6 @@ export async function sendMessageToOpenRouter(
           
           try {
             const json = JSON.parse(data)
-            // Log model info if available
-            if (json.model) {
-              console.log('Response from model:', json.model)
-            }
             const content = json.choices?.[0]?.delta?.content
             if (content) {
               onChunk(content)
@@ -331,7 +306,6 @@ export async function sendMessageToOpenRouter(
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === 'AbortError') {
-        console.log('Request aborted')
         return
       }
       throw error

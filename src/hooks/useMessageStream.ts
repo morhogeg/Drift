@@ -183,10 +183,30 @@ export function useMessageStream({
       } catch (error) {
         let errorMessage = "Failed to connect to AI model. Please check your connection."
         if (error instanceof Error) {
-          if (aiSettings.useOpenRouter && error.message.includes('API key')) {
+          const msg = error.message || ''
+          const lower = msg.toLowerCase()
+          // Auth/config problems (any provider): the key is missing or rejected.
+          // gemini.ts throws "...API key not configured..." or "Gemini API error 401/403"
+          // (and Google's body says "API key not valid"); these must not be hidden
+          // behind a generic "check your connection".
+          const keyMissing = lower.includes('not configured')
+          const keyInvalid =
+            lower.includes('api key not valid') ||
+            lower.includes('api_key_invalid') ||
+            lower.includes('invalid api key') ||
+            /api error 40[13]/.test(lower)
+          const rateLimited = lower.includes('429') || lower.includes('rate limit') || lower.includes('quota')
+
+          if (aiSettings.useOpenRouter && msg.includes('API key')) {
             errorMessage = "OpenRouter API key not configured. Please add your API key to the .env file."
-          } else if (!aiSettings.useOpenRouter && error.message.includes('Ollama is not running')) {
+          } else if (!aiSettings.useOpenRouter && msg.includes('Ollama is not running')) {
             errorMessage = "Ollama is not running. Please install and start Ollama."
+          } else if (keyMissing) {
+            errorMessage = "No API key set. Add your key in Settings to start chatting."
+          } else if (keyInvalid) {
+            errorMessage = "Your API key looks invalid. Check it in Settings."
+          } else if (rateLimited) {
+            errorMessage = "Rate limit reached. Wait a moment and try again."
           }
         }
         toast.error(errorMessage)

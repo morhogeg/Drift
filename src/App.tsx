@@ -80,6 +80,9 @@ function App() {
 
   // ── Local state (not in stores) ─────────────────────────────────────────────
   const { isAuthenticated, currentUser, login: handleLogin, logout: handleLogout } = useAuth()
+  // Gates the first paint until mount-time init (keychain, IndexedDB hydrate) is
+  // done, so a large chat history can't flash a blank screen on launch.
+  const [appReady, setAppReady] = useState(false)
   // First-run onboarding — shown once per device, only after login.
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
@@ -961,19 +964,25 @@ function App() {
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      // Load API keys from the iOS Keychain (and migrate any out of
-      // localStorage) before settings-derived state is trusted.
-      const hadSecureKeys = await secureKeys.init()
-      if (hadSecureKeys) setAiSettings(settingsStorage.get())
-      // Ask the browser not to evict IndexedDB under storage pressure —
-      // unsaved drifts now live there.
-      navigator.storage?.persist?.().catch(() => {})
-      await Promise.all([
-        chatStore.loadChatsFromDB(),
-        driftStore.hydrateTempConversations(),
-      ])
-      createNewChat()
-      startAutoBackup()
+      try {
+        // Load API keys from the iOS Keychain (and migrate any out of
+        // localStorage) before settings-derived state is trusted.
+        const hadSecureKeys = await secureKeys.init()
+        if (hadSecureKeys) setAiSettings(settingsStorage.get())
+        // Ask the browser not to evict IndexedDB under storage pressure —
+        // unsaved drifts now live there.
+        navigator.storage?.persist?.().catch(() => {})
+        await Promise.all([
+          chatStore.loadChatsFromDB(),
+          driftStore.hydrateTempConversations(),
+        ])
+        createNewChat()
+        startAutoBackup()
+      } finally {
+        // Always reveal the UI, even if a step above failed — a stuck splash is
+        // worse than launching with empty state.
+        setAppReady(true)
+      }
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1612,6 +1621,20 @@ function App() {
 
     return rows
   }, [sortedChats, chatHistory])
+
+  // ── Hold first paint until mount-time init settles ──────────────────────────
+  // Prevents a blank flash while the keychain + IndexedDB hydrate (noticeable on
+  // a large chat history or a slow device).
+  if (!appReady) {
+    return (
+      <div className="h-full flex items-center justify-center bg-dark-bg">
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-2xl font-bold tracking-tight text-text-primary animate-pulse">Drift</div>
+          <div className="text-sm text-text-muted">Loading your chats…</div>
+        </div>
+      </div>
+    )
+  }
 
   // ── Show login if not authenticated ────────────────────────────────────────
   if (!isAuthenticated) {

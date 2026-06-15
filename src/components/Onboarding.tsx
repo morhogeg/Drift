@@ -156,7 +156,10 @@ export default function Onboarding({ settings, onSaveGeminiKey, onDone }: Onboar
   const handleNext = () => {
     haptics.selection()
     if (onKeyStep) return // the key step has its own CTA
-    if (lastBeat) {
+    // Use >= so a fast double-tap (two handlers sharing a stale `step`) can never
+    // overshoot the final beat into a clamped dead-end with a "Next" that no longer
+    // finishes — the only escape would have been "Skip".
+    if (step >= totalBeats - 1) {
       if (needsKey) {
         setStep(totalBeats) // advance into the key step
         return
@@ -164,7 +167,8 @@ export default function Onboarding({ settings, onSaveGeminiKey, onDone }: Onboar
       finish()
       return
     }
-    setStep((s) => s + 1)
+    // Clamp the increment so step can never run past the last beat.
+    setStep((s) => Math.min(s + 1, totalBeats - 1))
   }
 
   const handleSaveKey = () => {

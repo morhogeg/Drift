@@ -1,4 +1,4 @@
-import { useRef, type Dispatch, type SetStateAction } from 'react'
+import { useRef, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { haptics } from '../lib/haptics'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, type OpenRouterModel, OPENROUTER_MODELS } from '../services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '../services/ollama'
@@ -331,6 +331,18 @@ export function useDriftMessageStream({
       compareAbortControllersRef.current = null
     }
   }
+
+  // Abort any in-flight stream when the panel unmounts (closed from the app shell,
+  // navigated away, etc.) so the fetch doesn't keep running and writing tokens into
+  // a now-unmounted component. Abort only — no setState in the unmount path.
+  useEffect(() => () => {
+    abortControllerRef.current?.abort()
+    if (compareAbortControllersRef.current) {
+      for (const c of Object.values(compareAbortControllersRef.current)) {
+        try { c.abort() } catch {}
+      }
+    }
+  }, [])
 
   // Run the current prompt across multiple selected targets and stream results
   const handleCompareAcrossModels = async () => {
