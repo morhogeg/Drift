@@ -372,6 +372,9 @@ function cleanGist(text: string, maxLen = 160): string {
   } else {
     s = s.replace(/\.$/, '')   // subtitles read cleaner without a trailing period
   }
+  // An intro line immediately followed by a "1." list item collapses to "…: 1",
+  // pulling the dangling list-marker number into the subtitle. Drop it.
+  s = s.replace(/\s*[:：]\s*\d{1,2}\.?\s*$/, '').trim()
   if (/[a-z]/.test(s[0])) s = s[0].toUpperCase() + s.slice(1)
   return s
 }

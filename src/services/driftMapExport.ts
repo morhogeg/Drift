@@ -96,6 +96,11 @@ function esc(s: string): string {
 function mdToHtml(raw: string): string {
   const inline = (s: string): string =>
     esc(s)
+      // Inline [[n]](url) citation markers → a small superscript link (hides the
+      // long grounding-redirect URL behind a tidy "n").
+      .replace(/\[\[(\d+)\]\]\(([^)\s]+)\)/g, '<sup class="cite"><a href="$2" target="_blank" rel="noopener noreferrer">$1</a></sup>')
+      // Ordinary [text](url) links (e.g. the Sources list) → real anchors.
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
       .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -213,7 +218,7 @@ function renderNode(node: ExportNode, depth: number): string {
   const tag =
     depth === 0
       ? `<span class="tag root">Exploration</span>`
-      : `<span class="tag" style="color:${color};border-color:${color}55;background:${color}14">${LENS_LABELS[node.lens]}</span>`
+      : `<span class="tag lens" style="color:${color}b0">${LENS_LABELS[node.lens]}</span>`
 
   return `
 <details id="${anchorId(node.id)}" class="node depth-${Math.min(depth, 4)}" ${depth < 2 ? 'open' : ''} style="--lens:${color}">
@@ -290,6 +295,8 @@ export function buildShareableMapHtml(
   .tag { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
          padding: 3px 9px; border-radius: 999px; border: 1px solid; flex-shrink: 0; }
   .tag.root { color: #fff; border: none; background: linear-gradient(90deg, #ff006e, #a855f7); }
+  /* Lens tags read as quiet labels (calmer, content-first — matching the app). */
+  .tag.lens { border: none; padding: 0; font-size: 9px; font-weight: 600; letter-spacing: 0.1em; }
   .phrase { font-weight: 600; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
   .body { padding: 2px 16px 16px; }
 
@@ -316,6 +323,11 @@ export function buildShareableMapHtml(
   .prose strong { color: #fff; font-weight: 650; }
   .prose code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 5px;
                 font-size: 0.88em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .prose a { color: #a78bfa; text-decoration: none; border-bottom: 1px solid rgba(167,139,250,0.3);
+             word-break: break-word; }
+  .prose a:hover { border-bottom-color: #a78bfa; }
+  .prose sup.cite { font-size: 0.72em; line-height: 0; margin-inline-start: 1px; }
+  .prose sup.cite a { border-bottom: none; padding: 0 1px; font-weight: 600; }
 
   /* ── Branch grouping ─────────────────────────────────────────────────── */
   .branches { margin-top: 14px; padding-top: 4px; border-top: 1px dashed #2a2a2a; }
