@@ -1853,7 +1853,7 @@ function OutlineView({
           >
             <ChevronRight className="w-3.5 h-3.5 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
           </button>
-          <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: color, boxShadow: `0 0 6px ${color}88` }} />
+          <span className="shrink-0 rounded-full" style={{ width: 6, height: 6, marginTop: 6, background: `${color}cc` }} />
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-1.5 flex-wrap">
               <span
@@ -1868,7 +1868,7 @@ function OutlineView({
                 {nodeOwnLabel(node)}
               </span>
               {isDrift && (
-                <span className="shrink-0 text-[9px] uppercase tracking-wider font-semibold rounded px-1 py-0.5" style={{ color, background: `${color}1a`, marginTop: 1 }}>
+                <span className="shrink-0 text-[9px] uppercase tracking-wider font-medium" style={{ color: `${color}b0`, marginTop: 2 }}>
                   {lensLabel(node)}
                 </span>
               )}
