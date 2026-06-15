@@ -2761,6 +2761,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
+                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
                                     p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
                                     td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
@@ -2850,6 +2851,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
+                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
