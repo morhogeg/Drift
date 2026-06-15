@@ -2281,7 +2281,7 @@ function App() {
                                   ${isActive
                                     ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-2xl shadow-accent-violet/20 -translate-y-1.5'
                                     : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1.5 hover:border-accent-violet/40 hover:shadow-2xl hover:shadow-accent-violet/20'}`}
-                                style={{ animationDelay: `${180 + idx * 240}ms` }}
+                                style={{ animationDelay: `${200 + idx * 360}ms` }}
                               >
                                 {/* brand sheen */}
                                 <span className={`pointer-events-none absolute inset-0 rounded-[22px] bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
@@ -2338,7 +2338,7 @@ function App() {
                       new users (returning users get "pick up where you left off" below). */}
                   {resumableTrees.length === 0 && (
                     <div className="w-full max-w-[440px] mt-7">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '980ms' }}>Try one to start</p>
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '1320ms' }}>Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {[
                           'Why did the Roman Empire really fall?',
@@ -2350,7 +2350,7 @@ function App() {
                             key={p}
                             onClick={() => { haptics.selection(); sendMessage(p) }}
                             className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3 active:scale-[0.98] animate-fade-up [animation-fill-mode:backwards]"
-                            style={{ animationDelay: `${1080 + pi * 80}ms` }}
+                            style={{ animationDelay: `${1420 + pi * 90}ms` }}
                           >
                             <span className="flex items-center gap-2">
                               <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />
