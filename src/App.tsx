@@ -2239,7 +2239,7 @@ function App() {
                     const active = activeCue !== null ? cues[activeCue] : null
                     return (
                       <div
-                        className="w-full max-w-[680px] mt-5"
+                        className="w-full max-w-[860px] mt-6"
                         onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActiveCue(null) }}
                       >
                         {/* Loose, staggered "fan" — desktop offsets the middle card up for a
@@ -2254,25 +2254,25 @@ function App() {
                                 onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveCue(idx) }}
                                 onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
                                 aria-expanded={isActive}
-                                className={`group relative flex w-full flex-col items-start rounded-2xl border px-6 pt-5 pb-6 text-left animate-fade-up [animation-fill-mode:backwards] transition-all duration-300 active:scale-[0.98] sm:w-[210px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-8'}
+                                className={`group relative flex w-full flex-col items-start rounded-[20px] border px-6 pt-6 pb-7 text-left animate-card-rise transition-all duration-300 active:scale-[0.98] sm:flex-1 sm:max-w-[270px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-9'}
                                   ${isActive
-                                    ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-xl shadow-accent-violet/15 -translate-y-1'
-                                    : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1 hover:border-accent-violet/40 hover:shadow-xl hover:shadow-accent-violet/15'}`}
-                                style={{ animationDelay: `${idx * 90}ms` }}
+                                    ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-2xl shadow-accent-violet/20 -translate-y-1.5'
+                                    : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1.5 hover:border-accent-violet/40 hover:shadow-2xl hover:shadow-accent-violet/20'}`}
+                                style={{ animationDelay: `${260 + idx * 150}ms` }}
                               >
                                 {/* brand sheen */}
-                                <span className={`pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                                <span className={`pointer-events-none absolute inset-0 rounded-[20px] bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                                 {/* shine sweep — a brand-tinted streak glides across on hover */}
-                                <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                                <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-[20px]">
                                   <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 -translate-x-full bg-[linear-gradient(90deg,transparent,rgba(255,0,110,0.10),rgba(168,85,247,0.17),transparent)] transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
                                 </span>
-                                <span className="relative mb-3.5 inline-flex h-12 w-12 items-center justify-center rounded-[15px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                                  <Icon className="w-6 h-6" />
+                                <span className="relative mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                                  <Icon className="w-7 h-7" />
                                 </span>
-                                <span className="relative text-[16px] font-semibold leading-tight text-text-primary">
+                                <span className="relative text-[18px] font-semibold leading-tight text-text-primary">
                                   {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
                                 </span>
-                                <span className="relative mt-1.5 text-[12.5px] leading-snug text-text-muted">{tagline}</span>
+                                <span className="relative mt-2 text-[13px] leading-snug text-text-muted">{tagline}</span>
                               </button>
                             )
                           })}
@@ -2280,7 +2280,7 @@ function App() {
                         {/* Shared detail panel — inline, so it can never clip against the
                             scroll boundary or the composer, and it's reachable on touch. */}
                         {active && (
-                          <div key={activeCue} className="mt-3 rounded-2xl border border-accent-violet/25 bg-dark-elevated/70 px-4 py-3.5 text-left shadow-lg shadow-black/20 backdrop-blur-sm animate-fade-up">
+                          <div key={activeCue} className="mx-auto mt-4 w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/70 px-4 py-3.5 text-left shadow-lg shadow-black/20 backdrop-blur-sm animate-fade-up">
                             <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
                             <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
                             <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>
@@ -2315,7 +2315,7 @@ function App() {
                       new users (returning users get "pick up where you left off" below). */}
                   {resumableTrees.length === 0 && (
                     <div className="w-full max-w-[440px] mt-7">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '300ms' }}>Try one to start</p>
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '780ms' }}>Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {[
                           'Why did the Roman Empire really fall?',
@@ -2327,7 +2327,7 @@ function App() {
                             key={p}
                             onClick={() => { haptics.selection(); sendMessage(p) }}
                             className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3 active:scale-[0.98] animate-fade-up [animation-fill-mode:backwards]"
-                            style={{ animationDelay: `${360 + pi * 70}ms` }}
+                            style={{ animationDelay: `${860 + pi * 80}ms` }}
                           >
                             <span className="flex items-center gap-2">
                               <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />

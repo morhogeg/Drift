@@ -477,6 +477,21 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   .drift-hero-aura { animation: none; opacity: 0.05; }
 }
 
+/* Capability cards "materialize" on entrance — rise + settle from slightly small
+   and blurred, so the choreographed stagger is clearly visible. backwards fill
+   holds the start state through each card's delay (no pre-flash). */
+@keyframes driftCardRise {
+  0%   { opacity: 0; transform: translateY(28px) scale(0.9); filter: blur(8px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.animate-card-rise {
+  animation: driftCardRise 0.72s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-rise { animation: none; }
+}
+
 @keyframes fade-down {
   from {
     opacity: 1;
