@@ -257,7 +257,7 @@ function App() {
   // In-session only (reset on reload by design). The main column is flex-1 and
   // reserves exactly these widths via margins, so it reflows for free as they change.
   const [sidebarWidth, setSidebarWidth] = useState(340)
-  const [driftWidth, setDriftWidth] = useState(450)
+  const [driftWidth, setDriftWidth] = useState(560)
   const [mapWidth, setMapWidth] = useState(680)
   // Smallest the main chat may get when a right panel grows — just enough that its
   // header icons (search/gallery/help on the left, Map/new-chat pills on the right)
@@ -3281,7 +3281,7 @@ function App() {
         onExpandedChange={(expanded) => {
           driftStore.expandDrift(expanded)
           // The expand/collapse button doubles as a quick width preset alongside drag.
-          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 450)
+          setDriftWidth(expanded ? clampDrift(Math.round(window.innerWidth * 0.62)) : 560)
         }}
         ancestry={driftContext?.ancestry}
         onNavigateToBreadcrumb={handleNavigateToBreadcrumb}

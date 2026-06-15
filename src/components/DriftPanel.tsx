@@ -6,6 +6,7 @@ import {
   driftLabelsFor,
   isDriftScaffoldText,
   isDriftOpenerText,
+  isConnectCardsJson,
 } from '../lib/driftPanel'
 import type { AncestryEntry, Target, LensKey } from '../types/chat'
 import { customLensStore } from '../lib/customLenses'
@@ -188,10 +189,13 @@ export default function DriftPanel({
   const anchorOnOpenRef = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const siblingStripRef = useRef<HTMLDivElement>(null)
+  const lensStripRef = useRef<HTMLDivElement>(null)
   const breadcrumbScrollRef = useRef<HTMLDivElement>(null)
   // Click-and-drag horizontal scroll for the sibling term strip. `dragged` lets a
   // drag suppress the chip's click so dragging never accidentally switches drifts.
   const stripDrag = useRef({ active: false, startX: 0, startScroll: 0, dragged: false })
+  // Same click-and-drag scroll for the "View as" lens bar (so all lenses are reachable).
+  const lensDrag = useRef({ active: false, startX: 0, startScroll: 0, dragged: false })
   const voiceInput = useVoiceInput((transcript) => {
     setMessage((prev) => (prev ? prev + ' ' : '') + transcript)
   })
@@ -746,7 +750,26 @@ export default function DriftPanel({
             without returning to the chat. Each lens keeps its own thread. Hidden in
             Connect's bridge sub-mode (you're inside an answer there). */}
         {onSwitchLens && !(templateType === 'connect' && connectQuestion) && (
-          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          <div
+            ref={lensStripRef}
+            className="flex items-center gap-1 px-3 py-1.5 border-b border-dark-border bg-white/[0.015] shrink-0 overflow-x-auto cursor-grab active:cursor-grabbing select-none [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+            onPointerDown={(e) => {
+              const el = lensStripRef.current
+              if (!el) return
+              lensDrag.current = { active: true, startX: e.clientX, startScroll: el.scrollLeft, dragged: false }
+            }}
+            onPointerMove={(e) => {
+              const el = lensStripRef.current
+              const d = lensDrag.current
+              if (!el || !d.active) return
+              const dx = e.clientX - d.startX
+              if (Math.abs(dx) > 4) { d.dragged = true; el.setPointerCapture?.(e.pointerId) }
+              el.scrollLeft = d.startScroll - dx
+            }}
+            onPointerUp={() => { lensDrag.current.active = false }}
+            onPointerCancel={() => { lensDrag.current.active = false }}
+          >
             <span className="text-[10px] uppercase tracking-wider text-text-muted/50 mr-1 shrink-0">View as</span>
             {(() => {
               // Built-in lenses, then any user-defined custom lenses (read fresh so a
@@ -789,7 +812,7 @@ export default function DriftPanel({
                 return (
                   <button
                     key={l.key}
-                    onClick={() => { markLensHint(); if (!active) onSwitchLens(l.tpl) }}
+                    onClick={() => { if (lensDrag.current.dragged) { lensDrag.current.dragged = false; return } markLensHint(); if (!active) onSwitchLens(l.tpl) }}
                     title={explored ? `${l.label} — already explored` : undefined}
                     style={active && isCustom ? { backgroundColor: `${l.color}26`, color: l.color, borderColor: `${l.color}66` } : undefined}
                     className={`shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border transition-colors
@@ -806,7 +829,7 @@ export default function DriftPanel({
               })
             })()}
             <button
-              onClick={() => openLensEditor()}
+              onClick={() => { if (lensDrag.current.dragged) { lensDrag.current.dragged = false; return } openLensEditor() }}
               title="Create your own lens"
               className="shrink-0 inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 py-1 rounded-full text-[11px] font-medium leading-none border border-dashed border-dark-border text-text-muted hover:text-accent-violet hover:border-accent-violet/40 transition-colors"
             >
@@ -1054,6 +1077,10 @@ export default function DriftPanel({
             const renderedGroups = new Set<string>()
             return messages.map((msg) => {
               if (!msg.text) return null
+              // A Connect-cards JSON payload is parsed into the chips view, never shown
+              // as prose. Guard here so it can't leak as raw JSON when this thread is
+              // viewed under a non-Connect lens.
+              if (isConnectCardsJson(msg.text)) return null
               // Template scaffold ("Second opinion on this: …" etc.) is immediately
               // duplicated by the auto-sent user bubble — render only the bubble.
               if (msg.id?.startsWith('drift-system-') && isDriftScaffoldText(msg.text) && !isDriftOpenerText(msg.text)) return null

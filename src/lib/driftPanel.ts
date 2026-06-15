@@ -59,6 +59,29 @@ const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
+/** True when a message body is a raw Connect-cards JSON array — an internal artifact
+ *  (the chips payload) that the Connect view parses into cards. It must NEVER render
+ *  as a prose bubble, which can happen when a Connect thread is viewed under another
+ *  lens. Tolerates fences and a leading BOM / RTL-LTR mark Gemini may prepend in Hebrew. */
+export function isConnectCardsJson(text: string): boolean {
+  const cleaned = (text ?? '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  // Find the opening bracket, tolerating a few leading directionality / BOM marks
+  // (start > 4 means it's prose that merely contains a bracket, not a JSON payload).
+  const start = cleaned.indexOf('[')
+  if (start === -1 || start > 4) return false
+  try {
+    const parsed = JSON.parse(cleaned.slice(start))
+    return Array.isArray(parsed) && parsed.length > 0
+      && parsed.every((x) => typeof x === 'string')
+      && parsed.some((x) => (x as string).includes('::'))
+  } catch {
+    return false
+  }
+}
+
 // The Second-opinion lens routes to a *different* model and uses its prompt
 // ONLY for the explicit "Second opinion on this: X" turn. Follow-ups inside the
 // thread (a typed question, or tapping a dotted suggestion) are ordinary
