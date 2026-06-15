@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense } from 'react'
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle, Layers } from 'lucide-react'
 import { Pressable } from './components/motion'
+import { motion, useReducedMotion, type Variants } from 'framer-motion'
 import { synthesizeDrifts } from './services/gemini'
 import { isConnectCardsJson } from './lib/driftPanel'
 import DriftPanel from './components/DriftPanel'
@@ -71,6 +72,18 @@ const PUSHED_LENS_TAG: Record<string, { label: string; chip: string; arrow: stri
 const pushedLensTag = (tpl?: string) =>
   (tpl && PUSHED_LENS_TAG[tpl]) || { label: 'drift', chip: 'bg-accent-violet/[0.08] border-accent-violet/20 text-accent-violet/80', arrow: '↗' }
 
+// Home capability cards "stand up" in 3D on first appearance, with real spring
+// physics. Plays once per page-load (the flag below latches on completion so it
+// survives StrictMode's double-mount but resets on reload); new chats don't replay.
+let homeIntroPlayed = false
+const CARD_VARIANTS: Variants = {
+  hidden: { opacity: 0, y: 54, rotateX: -26, scale: 0.86 },
+  shown: (i: number) => ({
+    opacity: 1, y: 0, rotateX: 0, scale: 1,
+    transition: { type: 'spring', stiffness: 90, damping: 13, mass: 1.05, delay: 0.2 + i * 0.34 },
+  }),
+}
+
 function App() {
   // ── Stores ──────────────────────────────────────────────────────────────────
   const chatStore = useChatStore()
@@ -110,6 +123,7 @@ function App() {
   // Home-screen capability cards: which card's detail panel is expanded (tap/click
   // to toggle — works on touch, and the inline panel can never be clipped).
   const [activeCue, setActiveCue] = useState<number | null>(null)
+  const prefersReducedMotion = useReducedMotion()
 
   // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
@@ -2260,6 +2274,8 @@ function App() {
                       },
                     ]
                     const active = activeCue !== null ? cues[activeCue] : null
+                    // First appearance of this page-load → play the 3D spring entrance.
+                    const playIntro = !homeIntroPlayed && !prefersReducedMotion
                     return (
                       <div
                         className="w-full max-w-[1000px] mt-6"
@@ -2271,17 +2287,25 @@ function App() {
                           {cues.map(({ icon: Icon, lead, accent, tagline }, idx) => {
                             const isActive = activeCue === idx
                             return (
-                              <button
+                              <motion.div
                                 key={accent}
+                                custom={idx}
+                                variants={CARD_VARIANTS}
+                                initial={playIntro ? 'hidden' : false}
+                                animate="shown"
+                                onAnimationComplete={() => { homeIntroPlayed = true }}
+                                style={{ transformPerspective: 1100, transformOrigin: 'center bottom' }}
+                                className={`w-full sm:flex-1 sm:max-w-[300px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-10'}`}
+                              >
+                              <button
                                 type="button"
                                 onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveCue(idx) }}
                                 onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
                                 aria-expanded={isActive}
-                                className={`group relative flex w-full flex-col items-start rounded-[22px] border px-7 pt-7 pb-8 text-left animate-card-rise transition-all duration-300 active:scale-[0.98] sm:flex-1 sm:max-w-[300px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-10'}
+                                className={`group relative flex w-full flex-col items-start rounded-[22px] border px-7 pt-7 pb-8 text-left transition-all duration-300 active:scale-[0.98]
                                   ${isActive
                                     ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-2xl shadow-accent-violet/20 -translate-y-1.5'
                                     : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1.5 hover:border-accent-violet/40 hover:shadow-2xl hover:shadow-accent-violet/20'}`}
-                                style={{ animationDelay: `${200 + idx * 360}ms` }}
                               >
                                 {/* brand sheen */}
                                 <span className={`pointer-events-none absolute inset-0 rounded-[22px] bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
@@ -2297,6 +2321,7 @@ function App() {
                                 </span>
                                 <span className="relative mt-2.5 text-[13.5px] leading-snug text-text-muted">{tagline}</span>
                               </button>
+                              </motion.div>
                             )
                           })}
                         </div>

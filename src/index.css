@@ -480,34 +480,6 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
 /* Capability cards "materialize" on entrance — rise + settle from slightly small
    and blurred, so the choreographed stagger is clearly visible. backwards fill
    holds the start state through each card's delay (no pre-flash). */
-/* Capability cards "stand up" in 3D on entrance — each tilts upright from its
-   base in perspective with a violet glow blooming as it lands. Slow + staggered
-   so the choreography is unmistakable. backwards fill holds the start state. */
-@keyframes driftCardRise {
-  0% {
-    opacity: 0;
-    transform: perspective(1100px) rotateX(-24deg) translateY(50px) scale(0.9);
-  }
-  100% {
-    opacity: 1;
-    transform: perspective(1100px) rotateX(0deg) translateY(0) scale(1);
-  }
-}
-@keyframes driftCardLand {
-  0%, 62% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
-  84%     { box-shadow: 0 14px 44px -8px rgba(168, 85, 247, 0.32); }
-  100%    { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
-}
-.animate-card-rise {
-  transform-origin: center bottom;
-  animation:
-    driftCardRise 0.95s cubic-bezier(0.18, 0.9, 0.28, 1) backwards,
-    driftCardLand 0.95s ease-out backwards;
-}
-@media (prefers-reduced-motion: reduce) {
-  .animate-card-rise { animation: none; }
-}
-
 @keyframes fade-down {
   from {
     opacity: 1;
