@@ -2205,13 +2205,15 @@ function App() {
                       },
                       {
                         icon: Layers, lead: 'Shift', accent: 'lenses', width: 'w-[288px]',
-                        title: 'Four ways to read a term',
+                        title: 'Six ways to read a term',
                         body: 'Take any term you drift into and re-read it through a lens:',
                         points: [
                           { name: 'Simplify', gloss: 'one vivid analogy that makes it click', dot: 'bg-amber-500', text: 'text-amber-500' },
                           { name: 'Deep dive', gloss: 'the mechanism, history and live debates', dot: 'bg-blue-500', text: 'text-blue-500' },
                           { name: 'Connect', gloss: 'the people, ideas and tensions it links to', dot: 'bg-accent-discovery', text: 'text-accent-discovery' },
                           { name: 'Second opinion', gloss: 'a different AI model weighs in independently', dot: 'bg-rose-500', text: 'text-rose-500' },
+                          { name: 'Evidence', gloss: 'the proof behind it, sourced and ranked', dot: 'bg-violet-500', text: 'text-violet-500' },
+                          { name: 'Custom', gloss: 'your own lens, in your own words', dot: 'bg-gradient-to-br from-fuchsia-500 to-cyan-400', text: 'text-accent-violet' },
                         ],
                       },
                       {
