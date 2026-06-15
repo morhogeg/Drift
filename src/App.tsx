@@ -2169,7 +2169,7 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="min-h-full flex flex-col items-center justify-center text-center px-8 py-5">
+                <div className="min-h-full flex flex-col items-center justify-start text-center px-8 pt-[9vh] pb-10">
                   <div className="mb-4">
                     <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
@@ -2190,7 +2190,7 @@ function App() {
                   {/* Capability cues — teach the three core verbs (drift → lenses →
                       synthesize) without a tutorial wall. Each chip carries a tooltip
                       so the screen stays uncrowded while the detail is one hover away. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-[580px] mt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 w-full max-w-[640px] mt-4">
                     {[
                       {
                         icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', width: 'w-[268px]', stepped: true,
@@ -2232,18 +2232,22 @@ function App() {
                     ].map(({ icon: Icon, lead, accent, tagline, width, title, body, points, stepped }, idx) => (
                       <div
                         key={accent}
-                        className="group relative flex flex-col items-start rounded-2xl border border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent px-4 pt-3.5 pb-4 text-left cursor-default animate-fade-up transition-all duration-300 hover:-translate-y-0.5 hover:border-accent-violet/35 hover:shadow-lg hover:shadow-accent-violet/10"
+                        className="group relative flex flex-col items-start rounded-2xl border border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent px-5 pt-[18px] pb-5 text-left cursor-default animate-fade-up transition-all duration-300 hover:-translate-y-1 hover:border-accent-violet/40 hover:shadow-xl hover:shadow-accent-violet/15"
                         style={{ animationDelay: `${idx * 90}ms` }}
                       >
                         {/* hover sheen — a soft brand wash that lifts the card on focus */}
-                        <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-gradient-to-br from-accent-pink/[0.06] via-transparent to-accent-violet/[0.06]" />
-                        <span className="relative mb-2.5 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-105">
-                          <Icon className="w-[18px] h-[18px]" />
+                        <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07]" />
+                        {/* shine sweep — a single light streak glides across on hover */}
+                        <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                          <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/[0.09] to-transparent -translate-x-full transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
                         </span>
-                        <span className="relative text-[13.5px] font-semibold leading-tight text-text-primary">
+                        <span className="relative mb-3 inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                          <Icon className="w-5 h-5" />
+                        </span>
+                        <span className="relative text-[15px] font-semibold leading-tight text-text-primary">
                           {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
                         </span>
-                        <span className="relative mt-1 text-[11.5px] leading-snug text-text-muted">{tagline}</span>
+                        <span className="relative mt-1.5 text-[12px] leading-snug text-text-muted">{tagline}</span>
                         {/* Custom glass tooltip — opens downward so it never clips against
                             the header/scroll boundary above the chips row. */}
                         <div
@@ -2255,18 +2259,26 @@ function App() {
                           <span className="block text-[12.5px] font-semibold leading-snug text-text-primary">{title}</span>
                           <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{body}</span>
                           {points && (
-                            <ul className="mt-2.5 space-y-2">
+                            <ul className={`mt-2.5 ${stepped ? 'space-y-2' : 'space-y-1.5'}`}>
                               {points.map((l, i) => (
                                 <li key={l.name} className="flex items-baseline gap-2.5">
                                   {stepped ? (
                                     <span className="flex h-[17px] w-[17px] shrink-0 translate-y-0.5 items-center justify-center self-start rounded-full bg-accent-violet/15 text-[9px] font-semibold text-accent-violet tabular-nums">{i + 1}</span>
                                   ) : (
-                                    <span className={`h-1.5 w-1.5 shrink-0 translate-y-[3px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
+                                    <span className={`h-1.5 w-1.5 shrink-0 translate-y-[5px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
                                   )}
-                                  <span className="min-w-0">
-                                    <span className={`block text-[12px] font-semibold leading-snug ${stepped ? 'text-accent-violet' : l.text}`}>{l.name}</span>
-                                    <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
-                                  </span>
+                                  {stepped ? (
+                                    <span className="min-w-0">
+                                      <span className="block text-[12px] font-semibold leading-snug text-accent-violet">{l.name}</span>
+                                      <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
+                                    </span>
+                                  ) : (
+                                    /* Lenses: one tight line each (name · gloss) so all six fit without clipping */
+                                    <span className="min-w-0 text-[11.5px] leading-snug">
+                                      <span className={`font-semibold ${l.text}`}>{l.name}</span>
+                                      <span className="text-text-muted"> · {l.gloss}</span>
+                                    </span>
+                                  )}
                                 </li>
                               ))}
                             </ul>
