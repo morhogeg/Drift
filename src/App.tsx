@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isVali
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle, Layers } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { synthesizeDrifts } from './services/gemini'
+import { isConnectCardsJson } from './lib/driftPanel'
 import DriftPanel from './components/DriftPanel'
 import ResizeHandle from './components/ResizeHandle'
 const DriftKnowledgeGraph = lazy(() => import('./components/DriftKnowledgeGraph'))
@@ -2385,6 +2386,9 @@ function App() {
                 }
 
                 if (isDriftHeader || msg.isHiddenContext) return null
+                // A Connect-cards JSON payload must never render as prose (it would
+                // dump a wide raw-JSON block); the chips view owns it.
+                if (isConnectCardsJson(msg.text)) return null
 
                 return msg.text ? (
                   <div
