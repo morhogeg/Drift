@@ -104,6 +104,10 @@ function App() {
   const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
   const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Home-screen capability cards: which card's detail panel is expanded (tap/click
+  // to toggle — works on touch, and the inline panel can never be clipped).
+  const [activeCue, setActiveCue] = useState<number | null>(null)
+
   // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [addModelSheetOpen, setAddModelSheetOpen] = useState(false)
@@ -2169,7 +2173,7 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="min-h-full flex flex-col items-center justify-start text-center px-8 pt-[9vh] pb-10">
+                <div className="min-h-full flex flex-col items-center justify-start text-center px-8 pt-[clamp(2.5rem,9vh,7rem)] pb-10">
                   <div className="mb-4">
                     <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
@@ -2190,10 +2194,10 @@ function App() {
                   {/* Capability cues — teach the three core verbs (drift → lenses →
                       synthesize) without a tutorial wall. Each chip carries a tooltip
                       so the screen stays uncrowded while the detail is one hover away. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 w-full max-w-[640px] mt-4">
-                    {[
+                  {(() => {
+                    const cues = [
                       {
-                        icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', width: 'w-[268px]', stepped: true,
+                        icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', stepped: true,
                         tagline: 'Pull any phrase into its own thread',
                         title: 'Branch without losing your place',
                         body: 'Pull any phrase into a thread of its own:',
@@ -2205,7 +2209,7 @@ function App() {
                         ],
                       },
                       {
-                        icon: Layers, lead: 'Shift', accent: 'lenses', width: 'w-[288px]',
+                        icon: Layers, lead: 'Shift', accent: 'lenses', stepped: false,
                         tagline: 'Re-read a term six different ways',
                         title: 'Six ways to read a term',
                         body: 'Take any term you drift into and re-read it through a lens:',
@@ -2219,7 +2223,7 @@ function App() {
                         ],
                       },
                       {
-                        icon: Sparkles, lead: 'Synthesize', accent: 'drifts', width: 'w-[268px]', stepped: true,
+                        icon: Sparkles, lead: 'Synthesize', accent: 'drifts', stepped: true,
                         tagline: 'Weave every thread into one insight',
                         title: 'Many threads, one insight',
                         body: 'Pull a whole exploration back together:',
@@ -2229,51 +2233,64 @@ function App() {
                           { name: 'Distill', gloss: 'a single, clear takeaway', dot: 'bg-accent-violet', text: 'text-accent-violet' },
                         ],
                       },
-                    ].map(({ icon: Icon, lead, accent, tagline, width, title, body, points, stepped }, idx) => (
-                      <div
-                        key={accent}
-                        className="group relative flex flex-col items-start rounded-2xl border border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent px-5 pt-[18px] pb-5 text-left cursor-default animate-fade-up transition-all duration-300 hover:-translate-y-1 hover:border-accent-violet/40 hover:shadow-xl hover:shadow-accent-violet/15"
-                        style={{ animationDelay: `${idx * 90}ms` }}
-                      >
-                        {/* hover sheen — a soft brand wash that lifts the card on focus */}
-                        <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07]" />
-                        {/* shine sweep — a single light streak glides across on hover */}
-                        <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
-                          <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/[0.09] to-transparent -translate-x-full transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
-                        </span>
-                        <span className="relative mb-3 inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                          <Icon className="w-5 h-5" />
-                        </span>
-                        <span className="relative text-[15px] font-semibold leading-tight text-text-primary">
-                          {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
-                        </span>
-                        <span className="relative mt-1.5 text-[12px] leading-snug text-text-muted">{tagline}</span>
-                        {/* Custom glass tooltip — opens downward so it never clips against
-                            the header/scroll boundary above the chips row. */}
-                        <div
-                          role="tooltip"
-                          className={`pointer-events-none absolute top-full left-1/2 z-30 mt-2.5 ${width} -translate-x-1/2 -translate-y-1
-                                     rounded-xl border border-dark-border/70 bg-dark-elevated/95 px-3.5 py-3 text-left shadow-xl shadow-black/40 backdrop-blur-md
-                                     opacity-0 transition-all duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100`}
-                        >
-                          <span className="block text-[12.5px] font-semibold leading-snug text-text-primary">{title}</span>
-                          <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{body}</span>
-                          {points && (
-                            <ul className={`mt-2.5 ${stepped ? 'space-y-2' : 'space-y-1.5'}`}>
-                              {points.map((l, i) => (
+                    ]
+                    const active = activeCue !== null ? cues[activeCue] : null
+                    return (
+                      <div className="w-full max-w-[640px] mt-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                          {cues.map(({ icon: Icon, lead, accent, tagline }, idx) => {
+                            const isActive = activeCue === idx
+                            return (
+                              <button
+                                key={accent}
+                                type="button"
+                                onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
+                                aria-expanded={isActive}
+                                className={`group relative flex flex-col items-start rounded-2xl border px-5 pt-[18px] pb-5 text-left animate-fade-up transition-all duration-300 active:scale-[0.98]
+                                  ${isActive
+                                    ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-xl shadow-accent-violet/15 -translate-y-1'
+                                    : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1 hover:border-accent-violet/40 hover:shadow-xl hover:shadow-accent-violet/15'}`}
+                                style={{ animationDelay: `${idx * 90}ms` }}
+                              >
+                                {/* brand sheen */}
+                                <span className={`pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                                {/* shine sweep — a light streak glides across on hover */}
+                                <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                                  <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/[0.09] to-transparent -translate-x-full transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
+                                </span>
+                                <span className="relative mb-3 inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                                  <Icon className="w-5 h-5" />
+                                </span>
+                                <span className="relative text-[15px] font-semibold leading-tight text-text-primary">
+                                  {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
+                                </span>
+                                <span className="relative mt-1.5 text-[12px] leading-snug text-text-muted">{tagline}</span>
+                                {/* caret bridging the card to its detail panel */}
+                                <span className={`pointer-events-none absolute left-1/2 -bottom-[7px] h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-accent-violet/45 bg-dark-bg transition-opacity duration-200 ${isActive ? 'opacity-100' : 'opacity-0'}`} />
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {/* Shared detail panel — inline, so it can never clip against the
+                            scroll boundary or the composer, and it's reachable on touch. */}
+                        {active && (
+                          <div key={activeCue} className="mt-3 rounded-2xl border border-accent-violet/25 bg-dark-elevated/70 px-4 py-3.5 text-left shadow-lg shadow-black/20 backdrop-blur-sm animate-fade-up">
+                            <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
+                            <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
+                            <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>
+                              {active.points.map((l, i) => (
                                 <li key={l.name} className="flex items-baseline gap-2.5">
-                                  {stepped ? (
+                                  {active.stepped ? (
                                     <span className="flex h-[17px] w-[17px] shrink-0 translate-y-0.5 items-center justify-center self-start rounded-full bg-accent-violet/15 text-[9px] font-semibold text-accent-violet tabular-nums">{i + 1}</span>
                                   ) : (
                                     <span className={`h-1.5 w-1.5 shrink-0 translate-y-[5px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
                                   )}
-                                  {stepped ? (
+                                  {active.stepped ? (
                                     <span className="min-w-0">
                                       <span className="block text-[12px] font-semibold leading-snug text-accent-violet">{l.name}</span>
                                       <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
                                     </span>
                                   ) : (
-                                    /* Lenses: one tight line each (name · gloss) so all six fit without clipping */
                                     <span className="min-w-0 text-[11.5px] leading-snug">
                                       <span className={`font-semibold ${l.text}`}>{l.name}</span>
                                       <span className="text-text-muted"> · {l.gloss}</span>
@@ -2282,13 +2299,11 @@ function App() {
                                 </li>
                               ))}
                             </ul>
-                          )}
-                          {/* upward arrow */}
-                          <span className="absolute left-1/2 bottom-full -translate-x-1/2 translate-y-1/2 h-2 w-2 rotate-45 border-t border-l border-dark-border/70 bg-dark-elevated/95" />
-                        </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })()}
                   {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
                       so the drift gesture has something to act on. Shown only to genuinely
                       new users (returning users get "pick up where you left off" below). */}
