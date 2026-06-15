@@ -480,9 +480,6 @@ export function useDriftActions({
   }
 
   const handlePushDriftToMain = (driftMessages: Message[], selectedText: string, sourceMessageId: string, wasSavedAsChat: boolean, userQuestion?: string, driftChatId?: string, templateType?: LensKey) => {
-    const pushCallId = Math.random().toString(36).substring(7)
-    console.log(`[PUSH ${pushCallId}] handlePushDriftToMain called`)
-
     const originalSourceId = sourceMessageId.split('-push-')[0].split('-single-')[0]
     const driftSignature = driftMessages.map(m => `${m.isUser}:${m.text}`).join('|||')
 
@@ -515,7 +512,6 @@ export function useDriftActions({
     })()
 
     if (duplicateExists) {
-      console.log(`[PUSH ${pushCallId}] BLOCKED - Duplicate detected`)
       return
     }
 

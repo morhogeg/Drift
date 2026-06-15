@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { 
-  Search, Grid, List, Calendar, Star, 
+import {
+  Search, Grid, List, Calendar, Star,
   Download, Trash2, Copy, ExternalLink,
-  X, ChevronLeft, Filter, Check
+  X, ChevronLeft, Filter, Check, Bookmark
 } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
+import { toast } from '../hooks/useToast'
 import type { Snippet, SnippetView, SnippetFilter } from '../types/snippet'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -57,7 +58,11 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
   }
 
   const handleDelete = (id: string) => {
-    snippetStorage.deleteSnippet(id)
+    try {
+      snippetStorage.deleteSnippet(id)
+    } catch {
+      toast.error("Couldn't delete that snippet. Please try again.")
+    }
     loadSnippets()
     if (selectedSnippet?.id === id) {
       setSelectedSnippet(null)
@@ -65,7 +70,11 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
   }
 
   const handleBulkDelete = () => {
-    snippetStorage.deleteMultiple(Array.from(selectedIds))
+    try {
+      snippetStorage.deleteMultiple(Array.from(selectedIds))
+    } catch {
+      toast.error("Couldn't delete those snippets. Please try again.")
+    }
     setSelectedIds(new Set())
     setIsMultiSelect(false)
     loadSnippets()
@@ -125,7 +134,7 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
                   <ChevronLeft className="w-5 h-5 text-text-muted" />
                 </button>
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl">📚</span>
+                  <Bookmark className="w-5 h-5 text-cyan-500" />
                   <h1 className="text-xl font-semibold text-text-primary">
                     Snippet Gallery
                   </h1>
@@ -264,6 +273,23 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-6">
+          {snippets.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center px-6">
+              {searchQuery.trim() || filter.tags?.length || filter.starred ? (
+                <>
+                  <Search className="w-10 h-10 text-text-muted/40 mb-4" />
+                  <h3 className="text-base font-medium text-text-secondary mb-1">No matching snippets</h3>
+                  <p className="text-sm text-text-muted max-w-xs">Try a different search term or clear your filters.</p>
+                </>
+              ) : (
+                <>
+                  <Bookmark className="w-10 h-10 text-cyan-500/50 mb-4" />
+                  <h3 className="text-base font-medium text-text-secondary mb-1">No snippets yet</h3>
+                  <p className="text-sm text-text-muted max-w-xs">Highlight any text in a reply and tap the bookmark to save it here for later.</p>
+                </>
+              )}
+            </div>
+          )}
           {view === 'grid' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {snippets.map(snippet => (

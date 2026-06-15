@@ -87,7 +87,6 @@ export function useDriftPanelActions({
 
       // If there are more messages now than when we pushed, reset the button
       if (currentMessageCount > pushedMessageCount) {
-        console.log('DriftPanel: Resetting push button - new messages added')
         setPushedToMain(false)
         setPushedMessageCount(0)
         setLastPushSourceId(null) // Also clear the last push source
@@ -252,13 +251,8 @@ export function useDriftPanelActions({
   }
 
   const handlePushToMain = async () => {
-    const clickId = Math.random().toString(36).substring(7)
-    console.log(`[BUTTON-CLICK ${clickId}] Push button clicked`)
-    console.log(`[BUTTON-CLICK ${clickId}] Current state - pushedToMain:`, pushedToMain, 'isPushing:', isPushing)
-
     // If already pushed, handle undo
     if (pushedToMain && lastPushSourceId && onUndoPushToMain) {
-      console.log(`[BUTTON-CLICK ${clickId}] Undoing previous push`)
       onUndoPushToMain(lastPushSourceId)
       setPushedToMain(false)
       setLastPushSourceId(null)
@@ -268,7 +262,6 @@ export function useDriftPanelActions({
 
     // Prevent multiple pushes while one is in progress
     if (pushedToMain || isPushing) {
-      console.log(`[BUTTON-CLICK ${clickId}] BLOCKED - Already pushed or pushing`)
       return
     }
 
@@ -287,7 +280,6 @@ export function useDriftPanelActions({
 
         // Check if we've already pushed this exact content
         if (pushedContentSignature === contentSignature) {
-          console.log('DriftPanel: Preventing duplicate push - same content already pushed')
           return
         }
 
@@ -304,16 +296,9 @@ export function useDriftPanelActions({
           const messageHash = messagesToPush.map(m => m.text).join('').substring(0, 10)
           const pushSourceId = `${sourceMessageId}-push-${messageHash}-${Date.now()}`
 
-          const pushAttemptId = Math.random().toString(36).substring(7)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Initiating push to main`)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] sourceId:`, pushSourceId)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Messages:`, messagesToPush.length)
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Content signature:`, contentSignature.substring(0, 50))
-
           const chatIdToUse = savedChatId || driftChatId || `drift-temp-full-${Date.now()}`
           onPushToMain(messagesToPush, selectedText, pushSourceId, savedAsChat, userQuestion, chatIdToUse, templateType)
 
-          console.log(`[DRIFT-PANEL ${pushAttemptId}] Push call completed`)
           setPushedToMain(true)
           setPushedMessageCount(messagesToPush.length)
           setLastPushSourceId(pushSourceId)

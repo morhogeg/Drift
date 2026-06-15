@@ -80,6 +80,9 @@ function App() {
 
   // ── Local state (not in stores) ─────────────────────────────────────────────
   const { isAuthenticated, currentUser, login: handleLogin, logout: handleLogout } = useAuth()
+  // Gates the first paint until mount-time init (keychain, IndexedDB hydrate) is
+  // done, so a large chat history can't flash a blank screen on launch.
+  const [appReady, setAppReady] = useState(false)
   // First-run onboarding — shown once per device, only after login.
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem(ONBOARDED_FLAG) !== 'true'
@@ -103,6 +106,10 @@ function App() {
   // animation (cleared shortly after, so reloads/scroll don't re-animate it).
   const [justPromotedChatId, setJustPromotedChatId] = useState<string | null>(null)
   const justPromotedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Home-screen capability cards: which card's detail panel is expanded (tap/click
+  // to toggle — works on touch, and the inline panel can never be clipped).
+  const [activeCue, setActiveCue] = useState<number | null>(null)
 
   // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
@@ -957,19 +964,25 @@ function App() {
   // ── On mount ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      // Load API keys from the iOS Keychain (and migrate any out of
-      // localStorage) before settings-derived state is trusted.
-      const hadSecureKeys = await secureKeys.init()
-      if (hadSecureKeys) setAiSettings(settingsStorage.get())
-      // Ask the browser not to evict IndexedDB under storage pressure —
-      // unsaved drifts now live there.
-      navigator.storage?.persist?.().catch(() => {})
-      await Promise.all([
-        chatStore.loadChatsFromDB(),
-        driftStore.hydrateTempConversations(),
-      ])
-      createNewChat()
-      startAutoBackup()
+      try {
+        // Load API keys from the iOS Keychain (and migrate any out of
+        // localStorage) before settings-derived state is trusted.
+        const hadSecureKeys = await secureKeys.init()
+        if (hadSecureKeys) setAiSettings(settingsStorage.get())
+        // Ask the browser not to evict IndexedDB under storage pressure —
+        // unsaved drifts now live there.
+        navigator.storage?.persist?.().catch(() => {})
+        await Promise.all([
+          chatStore.loadChatsFromDB(),
+          driftStore.hydrateTempConversations(),
+        ])
+        createNewChat()
+        startAutoBackup()
+      } finally {
+        // Always reveal the UI, even if a step above failed — a stuck splash is
+        // worse than launching with empty state.
+        setAppReady(true)
+      }
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1609,6 +1622,20 @@ function App() {
     return rows
   }, [sortedChats, chatHistory])
 
+  // ── Hold first paint until mount-time init settles ──────────────────────────
+  // Prevents a blank flash while the keychain + IndexedDB hydrate (noticeable on
+  // a large chat history or a slow device).
+  if (!appReady) {
+    return (
+      <div className="h-full flex items-center justify-center bg-dark-bg">
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-2xl font-bold tracking-tight text-text-primary animate-pulse">Drift</div>
+          <div className="text-sm text-text-muted">Loading your chats…</div>
+        </div>
+      </div>
+    )
+  }
+
   // ── Show login if not authenticated ────────────────────────────────────────
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />
@@ -2169,20 +2196,22 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="min-h-full flex flex-col items-center justify-center text-center px-8 py-5">
-                  <div className="mb-4">
-                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
+                <div className="relative min-h-full overflow-x-hidden flex flex-col items-center justify-start text-center px-8 pt-[clamp(2.5rem,9vh,7rem)] pb-10">
+                  {/* Ambient hero aura — a slow, faint pink→violet breath for depth */}
+                  <div aria-hidden className="drift-hero-aura pointer-events-none absolute left-1/2 top-[clamp(6rem,16vh,12rem)] h-[340px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[64px]" />
+                  <div className="relative mb-4">
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="drift-logo-draw mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
                         <linearGradient id="dg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                           <stop stopColor="#ff006e"/>
                           <stop offset="1" stopColor="#a855f7"/>
                         </linearGradient>
                       </defs>
-                      <circle cx="18" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <circle cx="6" cy="6" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <circle cx="6" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8"/>
-                      <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8"/>
+                      <circle cx="18" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <circle cx="6" cy="6" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <circle cx="6" cy="18" r="3" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <path d="M6 9v6" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
+                      <path d="M9 6h10a2 2 0 0 1 2 2v7" stroke="url(#dg)" strokeWidth="1.8" pathLength={1}/>
                     </svg>
                     <h2 className="text-text-primary font-semibold text-[20px] leading-snug mb-1.5">What's on your mind?</h2>
                     <p className="text-text-muted text-[13.5px] leading-relaxed max-w-[280px] mx-auto">Ask anything to begin.</p>
@@ -2190,10 +2219,11 @@ function App() {
                   {/* Capability cues — teach the three core verbs (drift → lenses →
                       synthesize) without a tutorial wall. Each chip carries a tooltip
                       so the screen stays uncrowded while the detail is one hover away. */}
-                  <div className="flex flex-wrap items-center justify-center gap-2 mt-1 max-w-[460px]">
-                    {[
+                  {(() => {
+                    const cues = [
                       {
-                        icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', width: 'w-[268px]', stepped: true,
+                        icon: MousePointerClick, lead: 'Highlight to', accent: 'drift', stepped: true,
+                        tagline: 'Pull any phrase into its own thread',
                         title: 'Branch without losing your place',
                         body: 'Pull any phrase into a thread of its own:',
                         points: [
@@ -2204,18 +2234,22 @@ function App() {
                         ],
                       },
                       {
-                        icon: Layers, lead: 'Shift', accent: 'lenses', width: 'w-[288px]',
-                        title: 'Four ways to read a term',
+                        icon: Layers, lead: 'Shift', accent: 'lenses', stepped: false,
+                        tagline: 'Re-read a term six different ways',
+                        title: 'Six ways to read a term',
                         body: 'Take any term you drift into and re-read it through a lens:',
                         points: [
                           { name: 'Simplify', gloss: 'one vivid analogy that makes it click', dot: 'bg-amber-500', text: 'text-amber-500' },
                           { name: 'Deep dive', gloss: 'the mechanism, history and live debates', dot: 'bg-blue-500', text: 'text-blue-500' },
                           { name: 'Connect', gloss: 'the people, ideas and tensions it links to', dot: 'bg-accent-discovery', text: 'text-accent-discovery' },
                           { name: 'Second opinion', gloss: 'a different AI model weighs in independently', dot: 'bg-rose-500', text: 'text-rose-500' },
+                          { name: 'Evidence', gloss: 'the proof behind it, sourced and ranked', dot: 'bg-violet-500', text: 'text-violet-500' },
+                          { name: 'Custom', gloss: 'your own lens, in your own words', dot: 'bg-gradient-to-br from-fuchsia-500 to-cyan-400', text: 'text-accent-violet' },
                         ],
                       },
                       {
-                        icon: Sparkles, lead: 'Synthesize', accent: 'drifts', width: 'w-[268px]', stepped: true,
+                        icon: Sparkles, lead: 'Synthesize', accent: 'drifts', stepped: true,
+                        tagline: 'Weave every thread into one insight',
                         title: 'Many threads, one insight',
                         body: 'Pull a whole exploration back together:',
                         points: [
@@ -2224,107 +2258,105 @@ function App() {
                           { name: 'Distill', gloss: 'a single, clear takeaway', dot: 'bg-accent-violet', text: 'text-accent-violet' },
                         ],
                       },
-                    ].map(({ icon: Icon, lead, accent, width, title, body, points, stepped }) => (
+                    ]
+                    const active = activeCue !== null ? cues[activeCue] : null
+                    return (
                       <div
-                        key={accent}
-                        className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-accent-violet/20 bg-accent-violet/[0.05] cursor-default transition-colors hover:bg-accent-violet/[0.09] hover:border-accent-violet/30"
+                        className="w-full max-w-[1000px] mt-6"
+                        onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActiveCue(null) }}
                       >
-                        <Icon className="w-3.5 h-3.5 text-accent-violet/70 shrink-0" />
-                        <span className="text-text-muted text-[12.5px] leading-none whitespace-nowrap">
-                          {lead} <span className="text-accent-violet font-medium">{accent}</span>
-                        </span>
-                        {/* Custom glass tooltip — opens downward so it never clips against
-                            the header/scroll boundary above the chips row. */}
-                        <div
-                          role="tooltip"
-                          className={`pointer-events-none absolute top-full left-1/2 z-30 mt-2.5 ${width} -translate-x-1/2 -translate-y-1
-                                     rounded-xl border border-dark-border/70 bg-dark-elevated/95 px-3.5 py-3 text-left shadow-xl shadow-black/40 backdrop-blur-md
-                                     opacity-0 transition-all duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100`}
-                        >
-                          <span className="block text-[12.5px] font-semibold leading-snug text-text-primary">{title}</span>
-                          <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{body}</span>
-                          {points && (
-                            <ul className="mt-2.5 space-y-2">
-                              {points.map((l, i) => (
+                        {/* Loose, staggered "fan" — desktop offsets the middle card up for a
+                            less rigid feel; stacks flat on mobile. */}
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-center gap-4 sm:gap-6">
+                          {cues.map(({ icon: Icon, lead, accent, tagline }, idx) => {
+                            const isActive = activeCue === idx
+                            return (
+                              <button
+                                key={accent}
+                                type="button"
+                                onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveCue(idx) }}
+                                onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
+                                aria-expanded={isActive}
+                                className={`group relative flex w-full flex-col items-start rounded-[22px] border px-7 pt-7 pb-8 text-left animate-card-rise transition-all duration-300 active:scale-[0.98] sm:flex-1 sm:max-w-[300px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-10'}
+                                  ${isActive
+                                    ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-2xl shadow-accent-violet/20 -translate-y-1.5'
+                                    : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1.5 hover:border-accent-violet/40 hover:shadow-2xl hover:shadow-accent-violet/20'}`}
+                                style={{ animationDelay: `${180 + idx * 240}ms` }}
+                              >
+                                {/* brand sheen */}
+                                <span className={`pointer-events-none absolute inset-0 rounded-[22px] bg-gradient-to-br from-accent-pink/[0.07] via-transparent to-accent-violet/[0.07] transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                                {/* shine sweep — a brand-tinted streak glides across on hover */}
+                                <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-[22px]">
+                                  <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 -translate-x-full bg-[linear-gradient(90deg,transparent,rgba(255,0,110,0.10),rgba(168,85,247,0.17),transparent)] transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
+                                </span>
+                                <span className="relative mb-5 inline-flex h-16 w-16 items-center justify-center rounded-[18px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                                  <Icon className="w-8 h-8" />
+                                </span>
+                                <span className="relative text-[19px] font-semibold leading-tight text-text-primary">
+                                  {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
+                                </span>
+                                <span className="relative mt-2.5 text-[13.5px] leading-snug text-text-muted">{tagline}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {/* Shared detail panel — inline, so it can never clip against the
+                            scroll boundary or the composer, and it's reachable on touch. */}
+                        {active && (
+                          <div key={activeCue} className="mx-auto mt-4 w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/70 px-4 py-3.5 text-left shadow-lg shadow-black/20 backdrop-blur-sm animate-fade-up">
+                            <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
+                            <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
+                            <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>
+                              {active.points.map((l, i) => (
                                 <li key={l.name} className="flex items-baseline gap-2.5">
-                                  {stepped ? (
+                                  {active.stepped ? (
                                     <span className="flex h-[17px] w-[17px] shrink-0 translate-y-0.5 items-center justify-center self-start rounded-full bg-accent-violet/15 text-[9px] font-semibold text-accent-violet tabular-nums">{i + 1}</span>
                                   ) : (
-                                    <span className={`h-1.5 w-1.5 shrink-0 translate-y-[3px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
+                                    <span className={`h-1.5 w-1.5 shrink-0 translate-y-[5px] self-start rounded-full ${l.dot} ${l.text}`} style={{ boxShadow: '0 0 6px currentColor' }} />
                                   )}
-                                  <span className="min-w-0">
-                                    <span className={`block text-[12px] font-semibold leading-snug ${stepped ? 'text-accent-violet' : l.text}`}>{l.name}</span>
-                                    <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
-                                  </span>
+                                  {active.stepped ? (
+                                    <span className="min-w-0">
+                                      <span className="block text-[12px] font-semibold leading-snug text-accent-violet">{l.name}</span>
+                                      <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{l.gloss}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="min-w-0 text-[11.5px] leading-snug">
+                                      <span className={`font-semibold ${l.text}`}>{l.name}</span>
+                                      <span className="text-text-muted"> · {l.gloss}</span>
+                                    </span>
+                                  )}
                                 </li>
                               ))}
                             </ul>
-                          )}
-                          {/* upward arrow */}
-                          <span className="absolute left-1/2 bottom-full -translate-x-1/2 translate-y-1/2 h-2 w-2 rotate-45 border-t border-l border-dark-border/70 bg-dark-elevated/95" />
-                        </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })()}
                   {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
                       so the drift gesture has something to act on. Shown only to genuinely
                       new users (returning users get "pick up where you left off" below). */}
                   {resumableTrees.length === 0 && (
-                    <div className="w-full max-w-[440px] mt-6">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3">Try one to start</p>
+                    <div className="w-full max-w-[440px] mt-7">
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '980ms' }}>Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {[
                           'Why did the Roman Empire really fall?',
                           'Explain quantum entanglement without the jargon',
                           'Compare Stoicism and Buddhism on suffering',
                           'How does caffeine actually work in the brain?',
-                        ].map((p) => (
+                        ].map((p, pi) => (
                           <button
                             key={p}
                             onClick={() => { haptics.selection(); sendMessage(p) }}
-                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3"
+                            className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3 active:scale-[0.98] animate-fade-up [animation-fill-mode:backwards]"
+                            style={{ animationDelay: `${1080 + pi * 80}ms` }}
                           >
                             <span className="flex items-center gap-2">
                               <ArrowUpRight className="w-3.5 h-3.5 text-accent-violet/50 group-hover:text-accent-violet/90 shrink-0 transition-colors" />
                               <span className="text-text-secondary group-hover:text-text-primary text-[13.5px] leading-snug transition-colors">{p}</span>
                             </span>
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {resumableTrees.length > 0 && (
-                    <div className="w-full max-w-[340px] mt-5 text-left">
-                      <div className="flex items-center gap-2 mb-2 px-1">
-                        <CornerUpLeft className="w-3.5 h-3.5 text-accent-violet/60 shrink-0" />
-                        <span className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold">Pick up where you left off</span>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        {resumableTrees.map(t => (
-                          <div
-                            key={t.rootId}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => { haptics.selection(); switchChat(t.rootId) }}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); haptics.selection(); switchChat(t.rootId) } }}
-                            className="group cursor-pointer rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-2.5"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-text-primary text-[13.5px] font-medium truncate" dir="auto">{t.title}</span>
-                              <span className="text-text-muted text-[11px] shrink-0 tabular-nums">{formatDate(new Date(t.sortKey || Date.now()))}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 mt-1">
-                              <span className="text-text-muted text-[12px] truncate" dir="auto">{t.terms}</span>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); haptics.selection(); handleSynthesize(t.rootId) }}
-                                disabled={synthesizing}
-                                className="inline-flex items-center gap-1 shrink-0 text-[11.5px] font-medium text-accent-violet/90 hover:text-accent-violet disabled:opacity-50 transition-colors"
-                                title={`Synthesize ${t.driftCount} drifts into one insight`}
-                              >
-                                <span className="text-[12px] leading-none">✦</span> Synthesize {t.driftCount}
-                              </button>
-                            </div>
-                          </div>
                         ))}
                       </div>
                     </div>

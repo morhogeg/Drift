@@ -445,6 +445,53 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   animation: fade-up 0.3s ease-out;
 }
 
+/* Drift logo "draws itself" on load — the node-graph strokes trace in, literally
+   sketching the branch concept. pathLength=1 normalizes every node/connector so
+   they draw uniformly; nodes first, then the connectors. Respects reduced motion. */
+@keyframes driftLogoDraw {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
+.drift-logo-draw circle,
+.drift-logo-draw path {
+  stroke-dasharray: 1;
+  animation: driftLogoDraw 0.7s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+.drift-logo-draw path { animation-delay: 0.32s; }
+@media (prefers-reduced-motion: reduce) {
+  .drift-logo-draw circle,
+  .drift-logo-draw path { animation: none; stroke-dasharray: none; }
+}
+
+/* Ambient hero aura — a slow, very faint pink→violet breath behind the empty
+   state for depth. Persistent and subtle; frozen for reduced motion. */
+@keyframes driftAuraBreath {
+  0%, 100% { opacity: 0.05; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 0.09; transform: translate(-50%, -50%) scale(1.06); }
+}
+.drift-hero-aura {
+  background: radial-gradient(closest-side, rgba(168, 85, 247, 0.55), rgba(255, 0, 110, 0.30) 55%, transparent 78%);
+  animation: driftAuraBreath 7s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drift-hero-aura { animation: none; opacity: 0.05; }
+}
+
+/* Capability cards "materialize" on entrance — rise + settle from slightly small
+   and blurred, so the choreographed stagger is clearly visible. backwards fill
+   holds the start state through each card's delay (no pre-flash). */
+@keyframes driftCardRise {
+  0%   { opacity: 0; transform: translateY(22px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-card-rise {
+  /* Clean slide-up with a gentle spring settle (no blur/zoom — that read dated). */
+  animation: driftCardRise 0.66s cubic-bezier(0.34, 1.45, 0.5, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-rise { animation: none; }
+}
+
 @keyframes fade-down {
   from {
     opacity: 1;

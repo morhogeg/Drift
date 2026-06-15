@@ -291,6 +291,14 @@ export default function DriftPanel({
     setMsgHighlights,
   })
 
+  // Closing the panel while a drift is still streaming should cancel the in-flight
+  // request — otherwise the fetch keeps running, writing tokens into state behind a
+  // hidden panel (wasted quota + a half-finished answer waiting on reopen).
+  const handleClose = () => {
+    if (isTyping) stopGeneration()
+    onClose(driftOnlyMessages)
+  }
+
   // Drift panel push/save action layer (owns the push/save state cluster).
   const {
     pushedToMain,
@@ -614,7 +622,7 @@ export default function DriftPanel({
                 setMessages([])
                 setDriftOnlyMessages([])
               } else {
-                onClose(driftOnlyMessages)
+                handleClose()
               }
             }
 
