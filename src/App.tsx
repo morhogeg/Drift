@@ -2014,11 +2014,14 @@ function App() {
                       {chain.map((crumb, i) => {
                         const isLast = i === chain.length - 1
                         const childSrc = chain[i + 1]?.sourceMessageId
+                        // Back crumbs stay full-size and tappable (shrink-0); the current
+                        // (often very long) term yields space first so "back" is never
+                        // pushed off-screen.
                         return (
-                          <span key={crumb.id} className="flex items-center gap-0 shrink-0">
+                          <span key={crumb.id} className={`flex items-center gap-0 ${isLast ? 'min-w-0' : 'shrink-0'}`}>
                             <button
                               onClick={() => isLast ? uiStore.setSidebarOpen(true) : goToCrumb(crumb, childSrc)}
-                              className={`flex items-center gap-1 px-1 py-1 rounded-md hover:bg-dark-elevated/60 transition-colors duration-75
+                              className={`flex items-center gap-1 px-1 py-1 rounded-md hover:bg-dark-elevated/60 transition-colors duration-75 min-w-0
                                 ${isLast
                                   ? (crumb.isDrift ? 'text-accent-violet/90' : 'text-text-secondary')
                                   : 'text-text-muted hover:text-text-secondary'}`}
@@ -2027,7 +2030,7 @@ function App() {
                               {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
                               {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                               <span
-                                className={`truncate text-[13px] font-medium max-w-[24vw] lg:max-w-[160px] ${getRTLTruncateClassName(crumb.label)}`}
+                                className={`truncate text-[13px] font-medium ${isLast ? 'min-w-0' : 'max-w-[24vw] lg:max-w-[160px]'} ${getRTLTruncateClassName(crumb.label)}`}
                                 dir={getTextDirection(crumb.label)}
                               >
                                 {crumb.label}

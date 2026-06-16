@@ -10,7 +10,8 @@
  * body has inline `[[n]](uri)` markers. We parse the list into a number → source
  * map so each inline [n] can show its title + domain on hover.
  */
-import React from 'react'
+import React, { useCallback, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 export interface CitedSource {
   title: string
@@ -36,26 +37,45 @@ export function parseGroundingSources(text: string): Map<number, CitedSource> {
   return map
 }
 
-/** An inline [n] citation that reveals its source (title + domain) on hover. */
+/** An inline [n] citation that reveals its source (title + domain) on hover.
+ *  The tooltip renders in a portal with viewport-clamped fixed positioning, so it
+ *  can never be clipped by the panel's overflow and flips below near the top. */
 export function CitationLink({ href, n, source }: { href?: string; n: number; source?: CitedSource }) {
+  const ref = useRef<HTMLAnchorElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null)
+
+  const show = useCallback(() => {
+    const el = ref.current
+    if (!el || !source) return
+    const r = el.getBoundingClientRect()
+    const margin = 8
+    const half = 132 // half of the max tooltip width — keeps it fully on-screen
+    const left = Math.min(Math.max(r.left + r.width / 2, margin + half), window.innerWidth - margin - half)
+    const below = r.top < 96 // not enough room above → open downward
+    setPos({ left, top: below ? r.bottom + 6 : r.top - 6, below })
+  }, [source])
+  const hide = useCallback(() => setPos(null), [])
+
   return (
-    <span className="group/cite relative inline-block align-baseline">
+    <span className="relative inline-block align-baseline" onMouseEnter={show} onMouseLeave={hide}>
       <a
+        ref={ref}
         href={href}
         target="_blank"
         rel="noopener noreferrer"
         className="font-medium text-accent-violet no-underline hover:underline"
       >[{n}]</a>
-      {source && (
+      {pos && source && createPortal(
         <span
           role="tooltip"
-          className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-max max-w-[260px] -translate-x-1/2
-                     rounded-lg border border-dark-border/70 bg-dark-elevated/95 px-2.5 py-1.5 text-left shadow-xl shadow-black/40
-                     backdrop-blur-md opacity-0 transition-opacity duration-150 group-hover/cite:opacity-100"
+          style={{ position: 'fixed', left: pos.left, top: pos.top, transform: `translate(-50%, ${pos.below ? '0' : '-100%'})` }}
+          className="pointer-events-none z-[200] block w-max max-w-[264px] rounded-lg border border-dark-border/70 bg-dark-elevated/95
+                     px-2.5 py-1.5 text-left shadow-xl shadow-black/40 backdrop-blur-md"
         >
           <span className="block text-[11px] font-semibold leading-snug text-text-primary line-clamp-3">{source.title}</span>
           <span className="mt-0.5 block text-[10px] text-accent-violet/80">{source.domain}</span>
-        </span>
+        </span>,
+        document.body,
       )}
     </span>
   )
