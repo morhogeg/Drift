@@ -69,7 +69,7 @@ const LENS_LABELS: Record<NonNullable<TreeNode['lens']>, string> = {
   simplify: 'Simplify',
   research: 'Deep dive',
   connect: 'Connect',
-  challenge: 'Second opinion',
+  challenge: 'Stress test',
   evidence: 'Evidence',
 }
 function lensLabel(node: TreeNode): string {
@@ -118,7 +118,7 @@ function findLensType(driftChatId: string, chats: ChatSession[]): TreeNode['lens
 const CONNECT_SCAFFOLD_RE = /^(Finding connections for|מחפש קשרים עבור|Show me what this connects to|הראה למה זה מתחבר)/
 const SIMPLIFY_SCAFFOLD_RE = /^(Simplify this|הסבר בפשטות)/
 const RESEARCH_SCAFFOLD_RE = /^(Deep dive into this|צלילה לעומק)/
-const CHALLENGE_SCAFFOLD_RE = /^(Second opinion on this|Challenge this|חוות דעת שנייה על זה|ערער על זה)/
+const CHALLENGE_SCAFFOLD_RE = /^(Stress test this|Second opinion on this|Challenge this|העמד את זה במבחן|חוות דעת שנייה על זה|ערער על זה)/
 const EVIDENCE_SCAFFOLD_RE = /^(Show the evidence for this|הצג ראיות לכך)/
 const BRIDGE_USER_RE = /(connect(?:s|ed)?\s+to\s+.+|קשור\s+ל-?\s*.+)/i
 
@@ -296,7 +296,7 @@ function collectTopics(node: TreeNode): { phrase: string; chatId: string }[] {
 
 // The auto-generated lens openers — these aren't real questions, so they never
 // make a good node label.
-const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|second opinion on this|challenge this|show the evidence for this|explore this|what would you like to know about|finding connections for|מה תרצה לדעת על|מחפש קשרים עבור|הסבר בפשטות|צלילה לעומק|הראה למה זה מתחבר|חוות דעת שנייה על זה|ערער על זה|הצג ראיות לכך)/i
+const TEMPLATE_OPENER_RE = /^(show me what this connects to|simplify this|deep dive into this|stress test this|second opinion on this|challenge this|show the evidence for this|explore this|what would you like to know about|finding connections for|מה תרצה לדעת על|מחפש קשרים עבור|הסבר בפשטות|צלילה לעומק|הראה למה זה מתחבר|העמד את זה במבחן|חוות דעת שנייה על זה|ערער על זה|הצג ראיות לכך)/i
 
 function clipLabel(s: string, n: number): string {
   const t = s.trim()

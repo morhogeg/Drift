@@ -47,7 +47,7 @@ export default function ChallengerPicker({ open, options, current, onPick, onClo
           <div className="min-w-0 flex-1">
             <h3 className="text-[14px] font-semibold leading-tight" style={{ color: 'rgb(var(--color-text-primary))' }}>Choose a challenger</h3>
             <p className="text-[11.5px] leading-snug mt-0.5" style={{ color: 'rgb(var(--color-text-muted))' }}>
-              Challenge pressure-tests answers with a different model — an independent critic, not the main model second-guessing itself.
+              Stress test pressure-tests an answer with a different model — an independent critic, not the main model second-guessing itself.
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" className="shrink-0 p-1 rounded-lg hover:bg-white/10" style={{ color: 'rgb(var(--color-text-secondary))' }}>
@@ -60,7 +60,7 @@ export default function ChallengerPicker({ open, options, current, onPick, onClo
           {empty ? (
             <div className="px-3 py-6 text-center">
               <p className="text-[12.5px] leading-snug" style={{ color: 'rgb(var(--color-text-secondary))' }}>
-                You only have one model set up. Add a second one — e.g. Claude or Grok via your OpenRouter key — to challenge with a different voice.
+                You only have one model set up. Add a second one — e.g. Claude or Grok via your OpenRouter key — to stress-test with a different voice.
               </p>
             </div>
           ) : (

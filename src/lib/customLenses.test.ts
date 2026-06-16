@@ -51,7 +51,7 @@ describe('customLenses', () => {
   })
 
   it('lensMeta returns built-in, custom, and drift fallback', () => {
-    expect(lensMeta('challenge')).toEqual({ label: 'Second opinion', color: '#f43f5e' })
+    expect(lensMeta('challenge')).toEqual({ label: 'Stress test', color: '#f43f5e' })
     const c = customLensStore.save({ name: 'Skeptic', color: '#abcdef', systemPrompt: 'p' })
     expect(lensMeta(c.id)).toEqual({ label: 'Skeptic', color: '#abcdef' })
     expect(lensMeta('whatever').label).toBe('Drift')

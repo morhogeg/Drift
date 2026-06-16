@@ -28,7 +28,7 @@ const LENS_LABELS: Record<ExportNode['lens'], string> = {
   simplify: 'Simplify',
   research: 'Deep dive',
   connect: 'Connect',
-  challenge: 'Second opinion',
+  challenge: 'Stress test',
   evidence: 'Evidence',
 }
 
