@@ -535,10 +535,10 @@ interface Laid {
 
 // ── Layout geometry (canvas units → scales uniformly with the map, so non-overlap
 //    proven at the fit zoom holds at every zoom). Nodes are CARDS, not orbs. ──
-const CARD_W = 252        // drift card width
-const CARD_W_ROOT = 276   // origin card a touch larger
-const COL = 322           // distance between depth columns (> card width + connector gap)
-const PAD_X = 140         // ≥ CARD_W_ROOT/2 so the (wider) root never clips at the left edge
+const CARD_W = 340        // drift card width
+const CARD_W_ROOT = 364   // origin card a touch larger
+const COL = 416           // distance between depth columns (> card width + connector gap)
+const PAD_X = 190         // ≥ CARD_W_ROOT/2 so the (wider) root never clips at the left edge
 const PAD_Y = 70
 const ROW_GAP = 30        // vertical breathing room between cards
 // The smallest the fit-to-view will zoom: below this, card text stops being
@@ -553,14 +553,14 @@ const GIST_LH = 17        // subtitle line-height
 const META_H = 16         // meta row height
 const GAP_TITLE_GIST = 6
 const GAP_GIST_META = 7
-const MAX_TITLE_LINES = 3
-const MAX_GIST_LINES = 2
+const MAX_TITLE_LINES = 4
+const MAX_GIST_LINES = 3
 // Conservative chars-per-line estimates: deliberately LOW so the estimated line
 // count is always ≥ the browser's actual wrap (even for wide Hebrew glyphs). That
 // keeps each reserved band ≥ the rendered card height → non-overlap stays guaranteed,
 // while CSS still hard-clamps to the MAX_*_LINES caps.
-const CPL_TITLE = 20
-const CPL_GIST = 26
+const CPL_TITLE = 25
+const CPL_GIST = 33
 
 function estLines(len: number, cpl: number, max: number): number {
   return Math.min(max, Math.max(1, Math.ceil(len / cpl)))
@@ -2364,14 +2364,14 @@ function StyleBlock() {
       }
       .dkg-card-title {
         font-size: 14.5px; font-weight: 650; line-height: 20px; color: #fff;
-        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
         overflow: hidden; overflow-wrap: anywhere;
       }
       .dkg-card-root .dkg-card-title { font-size: 15.5px; }
       .dkg-card-gist {
         margin-top: 6px;
         font-size: 12px; line-height: 17px; color: rgba(255,255,255,0.6);
-        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
         overflow: hidden; overflow-wrap: anywhere;
       }
       .dkg-card-meta {
