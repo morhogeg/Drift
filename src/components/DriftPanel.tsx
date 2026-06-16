@@ -20,6 +20,7 @@ import { useDriftPanelActions } from '../hooks/useDriftPanelActions'
 import { useConnectThreads } from '../hooks/useConnectThreads'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { parseGroundingSources, citationAnchor } from '../lib/citations'
 import { CodeBlock } from './CodeBlock'
 import type { AISettings } from './Settings'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
@@ -1274,7 +1275,7 @@ export default function DriftPanel({
                                 th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
                                 td: ({ node, children }: any) => <td>{proc(children, node)}</td>,
                                 br: () => <br />,
-                                a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
+                                a: citationAnchor(parseGroundingSources(msg.text)),
                                 table: ({ children }: any) => <div className="overflow-x-auto my-3"><table className="min-w-full text-xs">{children}</table></div>,
                               }
                             })()}

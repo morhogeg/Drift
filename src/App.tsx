@@ -38,6 +38,7 @@ import { useOnceFlag } from '@/lib/onceFlags'
 import { embedTexts } from '@/services/embeddings'
 import { rankBySemanticSimilarity, mergeLexicalAndSemantic } from '@/lib/semanticRecall'
 import { haptics } from '@/lib/haptics'
+import { parseGroundingSources, citationAnchor } from '@/lib/citations'
 import { sanitizeText, formatDate, timeAgo } from '@/lib/format'
 import { useKeyboardVisibility } from '@/hooks/useKeyboardVisibility'
 import { useCoachMark } from '@/hooks/useCoachMark'
@@ -2822,7 +2823,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
-                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
+                                    a: citationAnchor(parseGroundingSources(msg.text)),
                                     p: ({ node, children }: any) => <p className="mb-2">{procWithBoth(children, node)}</p>,
                                     td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
@@ -2912,7 +2913,7 @@ function App() {
                                   }
                                   return {
                                     pre: ({ children }: any) => <CodeBlock>{children}</CodeBlock>,
-                                    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
+                                    a: citationAnchor(parseGroundingSources(msg.text)),
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)

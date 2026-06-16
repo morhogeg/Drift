@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CodeBlock } from './CodeBlock'
 import { getTextDirection, getRTLClassName } from '../utils/rtl'
+import { parseGroundingSources, citationAnchor } from '../lib/citations'
 
 interface DriftMessage {
   id: string
@@ -135,7 +136,7 @@ function DriftMessageBubbleInner({
                   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
                   p: ({ children }) => <p className="mb-2">{children}</p>,
                   br: () => <br />,
-                  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-violet hover:underline">{children}</a>,
+                  a: citationAnchor(parseGroundingSources(msg.text)),
                   table: ({ children }) => (
                     <div className="overflow-x-auto my-3">
                       <table className="min-w-full text-xs">{children}</table>
