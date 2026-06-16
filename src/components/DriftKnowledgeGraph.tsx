@@ -440,6 +440,14 @@ function nodeOwnLabel(node: TreeNode): string {
   return (node.chat.title || 'Untitled').trim()
 }
 
+/** Same as nodeOwnLabel but UNCLIPPED — the outline wraps the full question/term
+ *  (nodeOwnLabel clips to 32 chars for the compact lineage breadcrumbs). */
+function nodeFullLabel(node: TreeNode): string {
+  if (node.chat.id === ALL_ROOT_ID) return node.chat.title || 'All explorations'
+  if (node.chat.metadata?.isDrift) return nodeTopic(node.chat, null)
+  return (node.chat.title || 'Untitled').trim()
+}
+
 /**
  * Bug 7: the lineage (breadcrumb) of origin terms leading to a node, oldest→newest.
  * Walks the laid-out parent chain so a leaf question carries its whole chain
@@ -1866,7 +1874,7 @@ function OutlineView({
                 // vertical room, and a cut-off question/term is worse than a tall row.
                 style={{ color: 'rgb(var(--color-text-primary))', overflowWrap: 'anywhere' }}
               >
-                {nodeOwnLabel(node)}
+                {nodeFullLabel(node)}
               </span>
               {isDrift && (
                 <span className="shrink-0 text-[8.5px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--color-text-muted))', opacity: 0.6, marginTop: 2.5 }}>
