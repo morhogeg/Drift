@@ -477,9 +477,6 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   .drift-hero-aura { animation: none; opacity: 0.05; }
 }
 
-/* Capability cards "materialize" on entrance — rise + settle from slightly small
-   and blurred, so the choreographed stagger is clearly visible. backwards fill
-   holds the start state through each card's delay (no pre-flash). */
 @keyframes fade-down {
   from {
     opacity: 1;
