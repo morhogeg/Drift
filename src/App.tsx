@@ -80,7 +80,7 @@ const CARD_VARIANTS: Variants = {
   hidden: { opacity: 0, y: 54, rotateX: -26, scale: 0.86 },
   shown: (i: number) => ({
     opacity: 1, y: 0, rotateX: 0, scale: 1,
-    transition: { type: 'spring', stiffness: 90, damping: 13, mass: 1.05, delay: 0.2 + i * 0.34 },
+    transition: { type: 'spring', stiffness: 60, damping: 12, mass: 1.15, delay: 0.2 + i * 0.42 },
   }),
 }
 
