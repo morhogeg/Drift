@@ -2767,33 +2767,32 @@ function App() {
                                       for (const m of matches) {
                                         if (m.start < cursor || usedInBlock.has(m.drift.selectedText) || priorText.includes(m.drift.selectedText)) continue
                                         if (m.start > cursor) out.push(text.slice(cursor, m.start))
+                                        const openDrift = () => {
+                                          const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
+                                            ?? driftStore.getTempConversation(m.drift.driftChatId)
+                                            ?? undefined
+                                          handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
+                                        }
                                         out.push(
-                                          <button
+                                          // A <span role=button>, NOT a <button>: a real button is an
+                                          // inline-block box with UA text-align:center, so a long multi-line
+                                          // drifted selection would render as a centered block. A span flows
+                                          // inline like text — inherits alignment and wraps naturally.
+                                          <span
                                             key={`drift-${m.idx}-${m.drift.driftChatId}`}
-                                            onClick={(e) => {
-                                              e.preventDefault()
-                                              e.stopPropagation()
-                                              const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
-                                                ?? driftStore.getTempConversation(m.drift.driftChatId)
-                                                ?? undefined
-                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
-                                            }}
-                                            onTouchEnd={(e) => {
-                                              e.preventDefault()
-                                              e.stopPropagation()
-                                              const existing = chatHistory.find(c => c.id === m.drift.driftChatId)?.messages
-                                                ?? driftStore.getTempConversation(m.drift.driftChatId)
-                                                ?? undefined
-                                              handleStartDrift(m.drift.selectedText, msg.id, m.drift.driftChatId, existing, m.drift.templateType, undefined, m.drift.connectCards, m.drift.connectAnswers)
-                                            }}
-                                            className="inline cursor-pointer
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDrift() }}
+                                            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); openDrift() }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openDrift() } }}
+                                            className="cursor-pointer
                                                      border-b border-accent-violet/30 hover:border-accent-violet/70
                                                      hover:text-accent-violet
                                                      rounded-sm transition-colors duration-100"
                                             title={m.drift.driftChatId.startsWith('drift-temp-') ? "Open drift panel" : "View drift conversation"}
                                           >
                                             {m.drift.selectedText}
-                                          </button>
+                                          </span>
                                         )
                                         usedInBlock.add(m.drift.selectedText)
                                         cursor = m.end
