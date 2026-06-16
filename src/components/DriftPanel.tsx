@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement } from 'react'
+import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement, Fragment } from 'react'
 import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, Scale, Plus } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
@@ -1255,7 +1255,7 @@ export default function DriftPanel({
                               const walkHL = (node: React.ReactNode, seen: Set<string>, priorText: string): React.ReactNode => {
                                 if (typeof node === 'string') return injectHL(node, seen, priorText)
                                 if (typeof node === 'number' || node == null || node === false) return node
-                                if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkHL(n, seen, priorText)}</span>)
+                                if (Array.isArray(node)) return node.map((n, i) => <Fragment key={i}>{walkHL(n, seen, priorText)}</Fragment>)
                                 if (isValidElement(node)) {
                                   const props: any = (node as any).props || {}
                                   if ('children' in props) return cloneElement(node as any, { ...props, children: walkHL(props.children, seen, priorText) })

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, lazy, Suspense, Fragment } from 'react'
 import { Menu, Plus, Search, ChevronLeft, ChevronRight, Square, ArrowDown, ArrowUp, ArrowUpRight, Bookmark, Edit3, Copy, Trash2, Pin, PinOff, Star, StarOff, ExternalLink, Check, ChevronDown, Settings as SettingsIcon, Save, X, LogOut, User, GitBranch, Home, Mic, CornerUpLeft, MousePointerClick, Sparkles, HelpCircle, Layers } from 'lucide-react'
 import { Pressable } from './components/motion'
 import { motion, useReducedMotion, type Variants } from 'framer-motion'
@@ -1127,7 +1127,7 @@ function App() {
     const walk = (node: React.ReactNode): React.ReactNode => {
       if (typeof node === 'string') return renderString(node)
       if (typeof node === 'number' || node == null || node === false) return node
-      if (Array.isArray(node)) return node.map((n, i) => <span key={`n-${i}`}>{walk(n)}</span>)
+      if (Array.isArray(node)) return node.map((n, i) => <Fragment key={`n-${i}`}>{walk(n)}</Fragment>)
       if (isValidElement(node)) {
         const props: any = (node as any).props || {}
         if ('children' in props) {
@@ -1210,7 +1210,7 @@ function App() {
     const walk = (node: React.ReactNode): React.ReactNode => {
       if (typeof node === 'string') return injectHighlight(node)
       if (typeof node === 'number' || node == null || node === false) return node
-      if (Array.isArray(node)) return node.map((n, i) => <span key={`hl-n-${i}`}>{walk(n)}</span>)
+      if (Array.isArray(node)) return node.map((n, i) => <Fragment key={`hl-n-${i}`}>{walk(n)}</Fragment>)
       if (isValidElement(node)) {
         const props: any = (node as any).props || {}
         if ('children' in props) return cloneElement(node as any, { ...props, children: walk(props.children) })
@@ -2008,7 +2008,7 @@ function App() {
                   }
                   return (
                     <div
-                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[52vw] lg:max-w-[420px] [&::-webkit-scrollbar]:hidden"
+                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[64vw] lg:max-w-[860px] [&::-webkit-scrollbar]:hidden"
                       style={{ scrollbarWidth: 'none' }}
                     >
                       {chain.map((crumb, i) => {
@@ -2030,7 +2030,7 @@ function App() {
                               {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
                               {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                               <span
-                                className={`truncate text-[13px] font-medium ${isLast ? 'min-w-0' : 'max-w-[24vw] lg:max-w-[160px]'} ${getRTLTruncateClassName(crumb.label)}`}
+                                className={`truncate text-[13px] font-medium ${isLast ? 'min-w-0' : 'max-w-[40vw] lg:max-w-[380px]'} ${getRTLTruncateClassName(crumb.label)}`}
                                 dir={getTextDirection(crumb.label)}
                               >
                                 {crumb.label}
@@ -2804,7 +2804,7 @@ function App() {
                                     const walkNode = (node: React.ReactNode): React.ReactNode => {
                                       if (typeof node === 'string') return injectIntoString(node)
                                       if (typeof node === 'number' || node == null || node === false) return node
-                                      if (Array.isArray(node)) return node.map((n, i) => <span key={i}>{walkNode(n)}</span>)
+                                      if (Array.isArray(node)) return node.map((n, i) => <Fragment key={i}>{walkNode(n)}</Fragment>)
                                       if (isValidElement(node)) {
                                         const props: any = (node as any).props || {}
                                         if ('children' in props) return cloneElement(node as any, { ...props, children: walkNode(props.children) })
