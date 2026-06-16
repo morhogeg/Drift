@@ -37,14 +37,14 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectFinding: (t) => `Finding connections for "${t}"…`,
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
-  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Second opinion on this', evidence: 'Show the evidence for this' },
+  prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Stress test this', evidence: 'Show the evidence for this' },
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
   connectFinding: (t) => `מחפש קשרים עבור "${t}"…`,
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
-  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'חוות דעת שנייה על זה', evidence: 'הצג ראיות לכך' },
+  prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'העמד את זה במבחן', evidence: 'הצג ראיות לכך' },
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN
@@ -55,7 +55,7 @@ const DRIFT_OPENER_PREFIXES = ['What would you like to know about', 'Finding con
 // 'Explore this' is the generic opener custom lenses fall back to (they have no
 // built-in prefix), so registering it here lets the same scaffold-stripping/hiding
 // work for any user-defined lens without driftPanel needing to know their names.
-const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Second opinion on this', 'Challenge this', 'Show the evidence for this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'חוות דעת שנייה על זה', 'ערער על זה', 'הצג ראיות לכך']
+const TEMPLATE_TRIGGER_PREFIXES = ['Simplify this', 'Deep dive into this', 'Show me what this connects to', 'Stress test this', 'Second opinion on this', 'Challenge this', 'Show the evidence for this', 'Explore this', 'הסבר בפשטות', 'צלילה לעומק', 'הראה למה זה מתחבר', 'העמד את זה במבחן', 'חוות דעת שנייה על זה', 'ערער על זה', 'הצג ראיות לכך']
 export const isDriftOpenerText = (t: string): boolean => DRIFT_OPENER_PREFIXES.some(p => t.startsWith(p))
 export const isDriftScaffoldText = (t: string): boolean => isDriftOpenerText(t) || TEMPLATE_TRIGGER_PREFIXES.some(p => t.startsWith(p))
 
@@ -82,12 +82,13 @@ export function isConnectCardsJson(text: string): boolean {
   }
 }
 
-// The Second-opinion lens routes to a *different* model and uses its prompt
-// ONLY for the explicit "Second opinion on this: X" turn. Follow-ups inside the
+// The Stress-test lens routes to a *different* model and uses its prompt
+// ONLY for the explicit "Stress test this: X" turn. Follow-ups inside the
 // thread (a typed question, or tapping a dotted suggestion) are ordinary
 // exploration on the main model — so we detect the trigger by prefix.
-// Old "Challenge this" prefixes kept so existing chats still classify correctly.
-const CHALLENGE_TRIGGER_PREFIXES = ['Second opinion on this', 'Challenge this', 'חוות דעת שנייה על זה', 'ערער על זה']
+// Old "Second opinion on this" / "Challenge this" prefixes kept so existing
+// chats still classify correctly.
+const CHALLENGE_TRIGGER_PREFIXES = ['Stress test this', 'Second opinion on this', 'Challenge this', 'העמד את זה במבחן', 'חוות דעת שנייה על זה', 'ערער על זה']
 export const isChallengeTriggerText = (t: string): boolean =>
   CHALLENGE_TRIGGER_PREFIXES.some(p => (t ?? '').startsWith(p))
 
@@ -120,12 +121,13 @@ export const TEMPLATE_SYSTEM_PROMPTS: Record<string, string> = {
 - Strip the jargon, but if a key technical word matters, name it once and translate it.
 - Aim for the "aha" — the reader should walk away able to re-explain it to a friend. Memorable over exhaustive.
 - Keep it tight (under ~120 words). No "Imagine you're a kid" framing, no filler preamble.`,
-  'research': `You are a sharp domain expert giving an authoritative deep dive on a term the user selected mid-reading. This is NOT a Wikipedia dump and NOT a beginner explainer — assume an intelligent reader who wants depth, nuance, and the things a non-expert would miss.
+  'research': `You are a sharp domain expert giving an authoritative deep dive on a term the user selected mid-reading. This is NOT a Wikipedia dump and NOT a beginner explainer — assume an intelligent reader who wants to understand how the thing actually works under the hood.
 
 - Interpret the term in the sense the surrounding conversation implies; disambiguate by context.
-- Go past the obvious: give the mechanism, the history that actually shaped it, the live debates or open questions, and why it matters. Prefer specific names, dates, figures, and concrete examples over vague generalities.
+- LEAD WITH THE MECHANISM: explain how it actually works — the moving parts, the causal chain, what drives what, why it produces the effect it does. This is the spine of the answer: make the gears visible, trace the "how" and the "why," not just the "what." For an abstract idea, the mechanism is its internal logic — the steps by which it does its work.
+- Then add the depth a non-expert would miss: the history that actually shaped it (specific names, dates, figures) and the live debates or open questions where experts still disagree. Keep these secondary to the mechanism, not a substitute for it.
 - Be accurate. If something is contested or uncertain, say so plainly rather than asserting it. Do not invent specifics — when unsure, use Google Search grounding if available, otherwise hedge honestly.
-- Structure for skimming: a strong opening line, then tight paragraphs or a few headed sections. No padding.
+- Structure for skimming: a strong opening line on the mechanism, then tight paragraphs or a few headed sections. No padding.
 - Add genuine NEW value beyond what the conversation already showed.`,
   'connect': `You map the conceptual neighborhood of an idea for an exploratory reading app. The user selected a word or phrase and wants to see what it CONNECTS to — people, events, works, ideas, tensions — so they can later explore the link between the two.
 
@@ -151,18 +153,19 @@ Rules:
 - Skip the obvious and avoid duplicates — every edge should open a genuinely different bridge, and the 5-6 edges together should feel like a map of a neighborhood, not a list of the same relationship five ways.
 - Do not invent facts. If you are not confident the connection is real, choose a different one.
 - Output the raw JSON array ONLY — it must start with [ and end with ]. No prose, no commentary, and no markdown code fences of any kind (do not wrap it in triple backticks or a json block). Any character outside the array breaks the app.`,
-  'challenge': `You are a respected colleague giving an independent second opinion. Another model already answered; the user selected a claim or idea from that answer and wants a second qualified view — confirmation, refinement, or disagreement, whichever is honestly warranted. This is NOT a debate: never manufacture disagreement to seem rigorous.
+  'challenge': `You are an independent expert giving an answer its most rigorous stress test. Another model already answered; the user selected a claim or idea from that answer and wants it pressure-tested by a second, independent mind — to find out whether it actually holds up. Your job is to PROBE for weakness, then report honestly what you find. You are not the opposition: you never manufacture disagreement to seem rigorous, and you never soften a real problem to seem agreeable.
 
 - Interpret the claim in the sense the surrounding conversation implies; disambiguate by context.
-- Form your OWN assessment first, then compare. Open with your verdict in one plain sentence: agree, agree with caveats, or disagree.
-- If you agree, say so plainly — then add real value: the strongest reason it holds, plus any nuance, boundary condition, or sharper framing the first take missed.
-- If you partly agree, be precise about which part holds, which doesn't, and why.
-- If you disagree, give the single best reason, fairly stated — no strawman, no pile-on.
-- Note anything important the original answer left out.
-- Your credibility comes from honesty, not contrarianism: a confident "this is right, and here's what I'd add" is a perfectly good second opinion.
-- This is a reasoned peer judgment, NOT a literature review — give your own assessment in plain language; don't dump citations, study names, or reference lists (a different lens handles the evidence base).
+- Steelman first: state the strongest version of the claim in one line, so you are testing the real idea, not a weak caricature.
+- Then actively attack it — genuinely try to break it. Probe for: the strongest counterexample or counter-argument, the boundary conditions where it fails, the hidden assumption it rests on, what would have to be true for it to be wrong, and anything important the original answer left out.
+- Then give your honest verdict up front in one plain sentence: HOLDS, HOLDS WITH CAVEATS, or DOESN'T HOLD.
+  - If it holds: say so plainly — "I pushed on this and it stands" — and give the strongest reason it survives, plus the sharpest caveat or boundary you found. A confident, well-earned "this is right" is a complete and valuable answer; never invent a flaw to look critical.
+  - If it holds with caveats: be precise about which part is solid, which part is shaky, and why.
+  - If it doesn't hold: give the single strongest reason, fairly stated — no strawman, no pile-on.
+- Your credibility comes from honesty under pressure, not from contrarianism. Showing that a claim is robust is just as rigorous as breaking it.
+- This is a reasoned judgment, NOT a literature review — give your own assessment in plain language; don't dump citations, study names, or reference lists (a different lens handles the evidence base).
 
-Keep it tight and high-signal (under ~160 words). No hedging preamble. Match the conversation's language.`,
+Keep it tight and high-signal (under ~170 words). No hedging preamble. Match the conversation's language.`,
   'evidence': `You surface the actual evidence base behind an idea the user selected while reading — what supports it, how strong that support is, and how we know — and you back every claim with a real, checkable source. Not opinion, not vibes. Hold yourself to the citation standard of a good systematic review.
 
 - Interpret the idea in the sense the surrounding conversation implies; disambiguate by context.

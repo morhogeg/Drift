@@ -632,7 +632,7 @@ export default function DriftPanel({
                   : 'Connect')
               : templateType === 'simplify' ? 'Simplify'
               : templateType === 'research' ? 'Deep dive'
-              : templateType === 'challenge' ? 'Second opinion'
+              : templateType === 'challenge' ? 'Stress test'
               : null
 
             return (
@@ -787,7 +787,7 @@ export default function DriftPanel({
                 { tpl: 'simplify', label: 'Simplify', key: 'simplify' },
                 { tpl: 'research', label: 'Deep dive', key: 'research' },
                 { tpl: 'connect', label: 'Connect', key: 'connect' },
-                { tpl: 'challenge', label: '2nd opinion', key: 'challenge' },
+                { tpl: 'challenge', label: 'Stress test', key: 'challenge' },
                 { tpl: 'evidence', label: 'Evidence', key: 'evidence' },
               ]
               const customs = customLensList.map((l) => ({ tpl: l.id as LensKey, label: l.name, key: l.id, color: l.color }))
@@ -1202,7 +1202,7 @@ export default function DriftPanel({
                       {msg.modelTag && (
                         <span className="flex items-center gap-1 mb-1 text-[10px] text-text-muted/60 pl-1">
                           {templateType === 'challenge' && <Scale className="w-2.5 h-2.5 text-rose-400/70" />}
-                          {templateType === 'challenge' ? `Second opinion from ${msg.modelTag}` : msg.modelTag}
+                          {templateType === 'challenge' ? `Stress-tested by ${msg.modelTag}` : msg.modelTag}
                         </span>
                       )}
                       <div className="px-1 pb-1">

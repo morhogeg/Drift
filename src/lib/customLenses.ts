@@ -1,7 +1,7 @@
 /**
  * customLenses — user-defined lenses for the Drift panel.
  *
- * The four signature lenses (Simplify / Deep dive / Connect / Second opinion)
+ * The four signature lenses (Simplify / Deep dive / Connect / Stress test)
  * plus the Evidence built-in live in TEMPLATE_SYSTEM_PROMPTS.
  * This module adds USER-defined lenses on top: a name, an accent color, and a
  * system prompt, persisted to localStorage. `resolveLensPrompt()` is the single
@@ -30,7 +30,7 @@ export const BUILTIN_LENS_META: Record<string, { label: string; color: string }>
   simplify: { label: 'Simplify', color: '#f59e0b' },
   research: { label: 'Deep dive', color: '#3b82f6' },
   connect: { label: 'Connect', color: '#06b6d4' },
-  challenge: { label: 'Second opinion', color: '#f43f5e' },
+  challenge: { label: 'Stress test', color: '#f43f5e' },
   evidence: { label: 'Evidence', color: '#8b5cf6' },
 }
 

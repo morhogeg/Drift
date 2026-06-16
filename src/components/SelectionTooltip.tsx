@@ -502,7 +502,7 @@ export default function SelectionTooltip({
     { type: 'simplify',  label: 'Simplify',  desc: 'Explain it simply',     Icon: Lightbulb },
     { type: 'research',  label: 'Deep dive', desc: 'Facts & background',    Icon: Telescope },
     { type: 'connect',   label: 'Connect',   desc: 'Where does this lead?', Icon: Waypoints },
-    { type: 'challenge', label: '2nd Opinion', desc: 'Another model weighs in',  Icon: Scale },
+    { type: 'challenge', label: 'Stress test', desc: 'Pressure-test the claim',  Icon: Scale },
     { type: 'evidence',  label: 'Evidence',  desc: 'Sources & citations',  Icon: FlaskConical },
   ]
   /** Index where the menu splits "understand this" from "push outward / scrutinize". */
