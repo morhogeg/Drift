@@ -561,14 +561,16 @@ const GIST_LH = 17        // subtitle line-height
 const META_H = 16         // meta row height
 const GAP_TITLE_GIST = 6
 const GAP_GIST_META = 7
-const MAX_TITLE_LINES = 4
-const MAX_GIST_LINES = 3
+// Generous ceilings (not the common case): cards fit their actual text, so heights
+// vary with content and the map stops looking monotone. Only runaway text caps out.
+const MAX_TITLE_LINES = 8
+const MAX_GIST_LINES = 6
 // Conservative chars-per-line estimates: deliberately LOW so the estimated line
 // count is always ≥ the browser's actual wrap (even for wide Hebrew glyphs). That
 // keeps each reserved band ≥ the rendered card height → non-overlap stays guaranteed,
 // while CSS still hard-clamps to the MAX_*_LINES caps.
-const CPL_TITLE = 25
-const CPL_GIST = 33
+const CPL_TITLE = 30
+const CPL_GIST = 36
 
 function estLines(len: number, cpl: number, max: number): number {
   return Math.min(max, Math.max(1, Math.ceil(len / cpl)))
@@ -2372,14 +2374,14 @@ function StyleBlock() {
       }
       .dkg-card-title {
         font-size: 14.5px; font-weight: 650; line-height: 20px; color: #fff;
-        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8;
         overflow: hidden; overflow-wrap: anywhere;
       }
       .dkg-card-root .dkg-card-title { font-size: 15.5px; }
       .dkg-card-gist {
         margin-top: 6px;
         font-size: 12px; line-height: 17px; color: rgba(255,255,255,0.6);
-        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6;
         overflow: hidden; overflow-wrap: anywhere;
       }
       .dkg-card-meta {
