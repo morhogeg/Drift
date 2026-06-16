@@ -2008,7 +2008,7 @@ function App() {
                   }
                   return (
                     <div
-                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[52vw] lg:max-w-[420px] [&::-webkit-scrollbar]:hidden"
+                      className="flex items-center gap-0 min-w-0 overflow-x-auto max-w-[64vw] lg:max-w-[860px] [&::-webkit-scrollbar]:hidden"
                       style={{ scrollbarWidth: 'none' }}
                     >
                       {chain.map((crumb, i) => {
@@ -2030,7 +2030,7 @@ function App() {
                               {i === 0 && !crumb.isDrift && <Home className="w-3 h-3 shrink-0" />}
                               {crumb.isDrift && isLast && <GitBranch className="w-3 h-3 text-accent-violet/70 shrink-0" />}
                               <span
-                                className={`truncate text-[13px] font-medium ${isLast ? 'min-w-0' : 'max-w-[24vw] lg:max-w-[160px]'} ${getRTLTruncateClassName(crumb.label)}`}
+                                className={`truncate text-[13px] font-medium ${isLast ? 'min-w-0' : 'max-w-[40vw] lg:max-w-[380px]'} ${getRTLTruncateClassName(crumb.label)}`}
                                 dir={getTextDirection(crumb.label)}
                               >
                                 {crumb.label}
