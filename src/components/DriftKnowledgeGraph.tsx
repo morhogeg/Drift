@@ -1862,11 +1862,9 @@ function OutlineView({
               <span
                 dir="auto"
                 className="text-[13px] font-medium leading-snug"
-                style={isMother
-                  // Mother questions wrap fully — no clamp — so they're never cut off.
-                  ? { color: 'rgb(var(--color-text-primary))', overflowWrap: 'anywhere' }
-                  // Leaves use the horizontal room for up to two lines before clamping.
-                  : { color: 'rgb(var(--color-text-primary))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                // Every title wraps fully — never truncated. The outline has the
+                // vertical room, and a cut-off question/term is worse than a tall row.
+                style={{ color: 'rgb(var(--color-text-primary))', overflowWrap: 'anywhere' }}
               >
                 {nodeOwnLabel(node)}
               </span>
@@ -1889,10 +1887,12 @@ function OutlineView({
               )}
             </div>
             {gist && (
+              // The gist is already one clean, complete sentence (cleanGist bounds it),
+              // so we show it whole — no line-clamp that would cut it mid-thought.
               <div
                 dir="auto"
                 className="text-[12.5px] leading-relaxed mt-1"
-                style={{ color: 'rgb(var(--color-text-secondary))', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}
+                style={{ color: 'rgb(var(--color-text-secondary))', overflowWrap: 'anywhere' }}
               >
                 {gist}
               </div>
