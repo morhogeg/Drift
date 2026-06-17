@@ -140,6 +140,17 @@ Drift is a sophisticated AI chat application with a unique "drift" feature that 
 - No calendar/heatmap view yet (pending feature)
 - TypeScript verbatimModuleSyntax requires type-only imports
 
+## Loop Engineering / Autonomous Workflow
+
+Drift is developed with self-driving Claude Code loops (act → verify → fix → repeat) rather than step-by-step hand-prompting. Conventions:
+
+- **Verification gate — `npm run check`**: the single "observe" step every loop calls. `check` = `tsc -b && vitest run && vite build` (mirrors CI); `check:fix` = `tsc -b && vitest run` (fast inner-loop gate, skips the build). Lint stays advisory (~94 pre-existing eslint errors; fix-on-touch, don't gate on it).
+- **`/ship "<goal>"`** — inner loop. Implements the smallest increment → `check:fix` → fixes on failure (max 3 tries) → repeats until the goal's acceptance criteria are met → runs full `check` + `/grind` → commits per increment.
+- **`/grind`** — review→fix loop. Alternates `/review-feature` and `/work-the-list` until `summary.md` has zero open non-`needs-decision` items, or after N rounds (default 3).
+- **CI autofix ("while you sleep")** — after a PR exists, `subscribe_pr_activity` so CI failures wake the session; re-diagnose → fix → push until green. Event-driven — never `sleep`-poll.
+- **Stop rules / guardrails**: every loop has explicit caps (3 repair attempts, 3 grind rounds, merge/close for CI). `needs-decision` items and scope-balloons escalate via `AskUserQuestion` — never auto-decided. `.claude/settings.json` holds the committed allowlist so loops don't stall on permission prompts. Run risky/parallel loops in an Agent `isolation: "worktree"`.
+- **Goals must be checkable**: state acceptance criteria (definition of done). Open-ended "make it better" with no finish line is the loop anti-pattern — it causes goal-drift and token blowup. Bounded goal + verifier + `summary.md` = the finish line.
+
 ## Future Considerations
 
 - Calendar/heatmap view for snippets

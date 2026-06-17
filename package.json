@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "tsc -b && vitest run && vite build",
+    "check:fix": "tsc -b && vitest run"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",

@@ -1,0 +1,33 @@
+{
+  "$comment": "Committed, shared permission allowlist so autonomous loops (/ship, /grind, /work-the-list) don't stall on prompts for routine, safe commands. Personal/experimental allows belong in settings.local.json. Keep this list to verification, test, and standard git operations.",
+  "permissions": {
+    "allow": [
+      "Bash(npm run check)",
+      "Bash(npm run check:*)",
+      "Bash(npm run build)",
+      "Bash(npm run build:*)",
+      "Bash(npm run test)",
+      "Bash(npm run test:*)",
+      "Bash(npm run lint)",
+      "Bash(npx vitest run)",
+      "Bash(npx vitest run:*)",
+      "Bash(npx tsc -b)",
+      "Bash(npx tsc -b:*)",
+      "Bash(npx playwright test)",
+      "Bash(npx playwright test:*)",
+      "Bash(npx vite --port 5199 --strictPort)",
+      "Bash(pgrep:*)",
+      "Bash(curl -sf http://localhost:*)",
+      "Bash(curl -sf -o /dev/null http://localhost:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout -b:*)",
+      "Bash(git branch:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": []
+  }
+}
