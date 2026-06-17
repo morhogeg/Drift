@@ -623,6 +623,20 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   text-align: right;
 }
 
+/* Loose-list marker alignment — remark-gfm wraps each <li>'s content in a <p>,
+   and Tailwind Typography puts margin-top/bottom on that <p>. The top margin
+   shoves the item's text down while the ::marker stays pinned to the <li>'s top
+   edge, stranding the number/bullet above its line (most visible in RTL, where
+   the digit floats up and to the side). Collapse only the leading/trailing
+   margins so text sits beside its marker; spacing between multiple paragraphs
+   inside one item is preserved. Direction-agnostic by design. */
+.prose li > p:first-child {
+  margin-top: 0;
+}
+.prose li > p:last-child {
+  margin-bottom: 0;
+}
+
 /* Fix markdown elements in RTL */
 .dir-rtl blockquote {
   border-right: 4px solid;
