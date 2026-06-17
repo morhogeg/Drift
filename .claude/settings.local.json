@@ -17,7 +17,8 @@
       "Read(/var/folders/**)",
       "Bash(git add *)",
       "Bash(git commit -m 'Add impact-ranked action plan from product/engineering review *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "mcp__playwright__browser_navigate"
     ],
     "deny": []
   },
