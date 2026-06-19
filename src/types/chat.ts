@@ -82,6 +82,9 @@ export interface ChatSession {
     forkedFrom?: string
     /** The message id the fork was taken at. */
     forkedAtMessageId?: string
+    /** Marks a chat that belongs to the first-run sample exploration (root + its
+     *  drifts). Drives the "Sample" badge and the one-tap "Clear sample" action. */
+    isSample?: boolean
   }
 }
 

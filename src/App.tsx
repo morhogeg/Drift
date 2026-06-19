@@ -12,6 +12,7 @@ import SelectionTooltip from './components/SelectionTooltip'
 import SnippetGallery from './components/SnippetGallery'
 import ContextMenu from './components/ContextMenu'
 import Settings, { type AISettings } from './components/Settings'
+import { ApiKeyPrompt } from './components/ApiKeyPrompt'
 import CustomLensSheet from './components/CustomLensSheet'
 import { Login } from './components/Login'
 import { ONBOARDED_FLAG } from './lib/onboardingFlag'
@@ -23,6 +24,7 @@ import { snippetStorage } from './services/snippetStorage'
 import { settingsStorage } from './services/settingsStorage'
 import { secureKeys } from './services/secureKeys'
 import { startAutoBackup } from './services/autoBackup'
+import { maybeSeedSampleExploration, clearSampleExploration, isSampleChat, SAMPLE_ROOT_ID } from './services/sampleExploration'
 import { getTextDirection, getRTLClassName, getRTLTruncateClassName } from './utils/rtl'
 import HeaderControls from './components/HeaderControls'
 import ModelPickerSheet from './components/ModelPickerSheet'
@@ -991,7 +993,12 @@ function App() {
           chatStore.loadChatsFromDB(),
           driftStore.hydrateTempConversations(),
         ])
+        // First-run wow: seed a finished sample exploration (zero API calls) and,
+        // if seeded, drop the user straight into it so they see drift → map →
+        // synthesize before being asked for a key.
+        const seededSample = maybeSeedSampleExploration()
         createNewChat()
+        if (seededSample) switchChat(SAMPLE_ROOT_ID)
         startAutoBackup()
       } finally {
         // Always reveal the UI, even if a step above failed — a stuck splash is
@@ -1343,6 +1350,61 @@ function App() {
     scrollToBottom,
     stripMarkdown,
   })
+
+  // ── Friendly, just-in-time key capture ──────────────────────────────────────
+  // A brand-new user can explore the seeded sample with no key. The moment they
+  // try to send their OWN question with no usable key for the selected model, we
+  // ask for a free key inline (value first) instead of failing with a toast.
+  // `isConfigured()` can't be used here — the default Ollama url/model make it
+  // always-true — so we mirror useMessageStream's per-target key resolution.
+  const [keyPromptOpen, setKeyPromptOpen] = useState(false)
+  const [resumeSendAfterKey, setResumeSendAfterKey] = useState(false)
+  const pendingSendRef = useRef<null | (() => void)>(null)
+
+  const selectedNeedsKey = useCallback(() => {
+    const t = modelStore.selectedTargets[0]
+    const presets = aiSettings.modelPresets || []
+    if (!t || t.provider === 'gemini') {
+      const preset = presets.find(p => p.id === t?.key)
+      return !(import.meta.env.VITE_GEMINI_API_KEY || preset?.apiKey || aiSettings.geminiApiKey)
+    }
+    if (t.provider === 'openrouter') {
+      const preset = presets.find(p => p.id === t.key)
+      return !(import.meta.env.VITE_OPENROUTER_API_KEY || preset?.apiKey || aiSettings.openRouterApiKey)
+    }
+    return false // ollama needs no key
+  }, [modelStore.selectedTargets, aiSettings])
+
+  const guardedSend = useCallback((text?: string) => {
+    if (selectedNeedsKey()) {
+      pendingSendRef.current = () => sendMessage(text)
+      setKeyPromptOpen(true)
+      return
+    }
+    sendMessage(text)
+  }, [selectedNeedsKey, sendMessage])
+
+  const handleSaveKeyFromPrompt = (key: string) => {
+    const presets = aiSettings.modelPresets || []
+    const idx = presets.findIndex(p => p.provider === 'gemini')
+    const nextPresets = idx >= 0
+      ? presets.map((p, i) => (i === idx ? { ...p, apiKey: key, enabled: true } : p))
+      : [{ id: 'gemini-flash-lite', provider: 'gemini' as const, label: 'Gemini Flash Lite', apiKey: key, enabled: true }, ...presets]
+    handleSaveSettings({ ...aiSettings, geminiApiKey: key, modelPresets: nextPresets })
+    setKeyPromptOpen(false)
+    setResumeSendAfterKey(true) // fire the pending send once aiSettings reflects the key
+  }
+
+  // Resume the deferred send only after the new key has flowed into aiSettings,
+  // so useMessageStream resolves it (a setTimeout would race the re-render).
+  useEffect(() => {
+    if (resumeSendAfterKey && !selectedNeedsKey()) {
+      setResumeSendAfterKey(false)
+      const pending = pendingSendRef.current
+      pendingSendRef.current = null
+      pending?.()
+    }
+  }, [resumeSendAfterKey, selectedNeedsKey])
 
   // ── Edit & regenerate (user messages) ──────────────────────────────────────
   // Editing a sent question keeps the exploration continuous instead of forcing
@@ -2377,7 +2439,7 @@ function App() {
                         ].map((p, pi) => (
                           <button
                             key={p}
-                            onClick={() => { haptics.selection(); sendMessage(p) }}
+                            onClick={() => { haptics.selection(); guardedSend(p) }}
                             className="group text-left rounded-xl border border-dark-border/60 bg-dark-elevated/40 hover:bg-dark-elevated/70 hover:border-accent-violet/30 transition-all px-3.5 py-3 active:scale-[0.98] animate-fade-up [animation-fill-mode:backwards]"
                             style={{ animationDelay: `${1420 + pi * 90}ms` }}
                           >
@@ -2390,6 +2452,27 @@ function App() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Sample-exploration banner — orients first-run users and offers a
+                  one-tap clear. Shows on any chat in the seeded sample tree. */}
+              {messages.length > 0 && isSampleChat(chatHistory.find(c => c.id === activeChatId) ?? {}) && (
+                <div className="mx-auto mb-4 flex w-full max-w-[680px] items-start gap-3 rounded-xl border border-accent-violet/25 bg-gradient-to-br from-accent-violet/[0.08] to-accent-pink/[0.04] px-4 py-3">
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent-violet" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12.5px] font-semibold text-text-primary">A sample exploration — no key needed</p>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-text-muted">
+                      Tap an underlined phrase to open a drift, hit the Drift Map to see the constellation, or start your own question anytime.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { haptics.selection(); clearSampleExploration(); createNewChat() }}
+                    className="shrink-0 rounded-lg border border-dark-border/60 px-2.5 py-1 text-[11.5px] font-medium text-text-muted hover:text-text-primary hover:border-accent-violet/40 transition-colors"
+                    title="Remove the sample exploration"
+                  >
+                    Clear sample
+                  </button>
                 </div>
               )}
 
@@ -2947,7 +3030,7 @@ function App() {
                                 Explore next
                               </div>
                               <button
-                                onClick={(e) => { e.stopPropagation(); haptics.selection(); sendMessage(synthNext) }}
+                                onClick={(e) => { e.stopPropagation(); haptics.selection(); guardedSend(synthNext) }}
                                 dir={getTextDirection(synthNext)}
                                 className="group flex items-start gap-2 w-full text-start px-3.5 py-2.5 rounded-2xl
                                   text-[13px] font-medium leading-snug text-accent-violet/90
@@ -3139,7 +3222,7 @@ function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
                     e.preventDefault()
-                    sendMessage()
+                    guardedSend()
                   }
                 }}
                 placeholder={"Type your message..."}
@@ -3202,7 +3285,7 @@ function App() {
                 {/* Send button */}
                 {!isTyping && (
                   <button
-                    onClick={() => sendMessage()}
+                    onClick={() => guardedSend()}
                     disabled={!message.trim() && !voiceInput.isListening}
                     className={`
                       w-9 h-9 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center
@@ -3248,6 +3331,13 @@ function App() {
         />
         </Suspense>
       )}
+
+      {/* Just-in-time free-key prompt (fires when a keyless user sends their own message) */}
+      <ApiKeyPrompt
+        open={keyPromptOpen}
+        onClose={() => { setKeyPromptOpen(false); pendingSendRef.current = null }}
+        onSave={handleSaveKeyFromPrompt}
+      />
 
       {/* Selection Tooltip */}
       <SelectionTooltip

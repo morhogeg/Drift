@@ -51,8 +51,8 @@ const BEATS: Beat[] = [
   {
     Icon: MousePointerClick,
     eyebrow: 'Start anywhere',
-    title: 'Ask anything',
-    body: 'Begin a conversation like you would with any assistant — Drift answers fast and thinks deeply.',
+    title: 'Ask anything you’re curious about',
+    body: 'Begin like you would with any assistant — a question, a topic, something you want to understand. Drift answers fast and goes deep.',
     art: 'ask',
   },
   {
@@ -240,13 +240,14 @@ export default function Onboarding({ settings, onSaveGeminiKey, onDone }: Onboar
               // ── Key step ──────────────────────────────────────────────────
               <div>
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-accent-violet/90 mb-2">
-                  <KeyRound className="w-3.5 h-3.5" /> One quick setup
+                  <KeyRound className="w-3.5 h-3.5" /> Optional — explore first
                 </span>
                 <h2 className="text-[22px] font-semibold tracking-tight text-text-primary leading-tight">
-                  Connect Gemini to start
+                  Add a free key when you want to ask
                 </h2>
                 <p className="mt-2 text-[14px] text-text-secondary leading-relaxed">
-                  Drift runs on Google Gemini. Paste a free API key to begin — it stays on this device.
+                  There’s a sample exploration waiting for you to poke around right now — no key needed.
+                  When you’re ready to ask your own questions, paste a free Google Gemini key. It stays on this device.
                 </p>
 
                 <div className="mt-5">
@@ -321,7 +322,7 @@ export default function Onboarding({ settings, onSaveGeminiKey, onDone }: Onboar
                 onClick={finish}
                 className="text-[13px] text-text-muted hover:text-text-secondary transition-colors"
               >
-                {onKeyStep ? 'Skip for now' : 'Skip'}
+                {onKeyStep ? 'Explore the sample first' : 'Skip'}
               </button>
               <motion.button
                 type="button"
