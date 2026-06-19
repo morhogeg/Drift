@@ -2830,12 +2830,22 @@ function App() {
                                     td: ({ node, children }: any) => <td>{procWithBoth(children, node)}</td>,
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
                                     li: ({ node, children }: any) => {
-                                      const processed = procWithBoth(children, node)
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      // id sits on the <li> itself — an inline <span> wrapper around
-                                      // block children adds an empty first line, leaving the list
-                                      // marker stranded on its own line (worst in RTL).
-                                      return <li id={anchorId}>{processed}</li>
+                                      // A loose-list item's text arrives as a <p> that the `p` renderer
+                                      // has ALREADY run drift/highlight processing on. Re-processing it
+                                      // here re-wraps that block <p> in inline <span>s — a block inside
+                                      // an inline ("block-in-inline"), which WebKit splits so the list
+                                      // ::marker strands on a phantom first line above the text (very
+                                      // visible in RTL). So leave the <p> (and any block child) as-is,
+                                      // drop insignificant whitespace, and only process bare inline
+                                      // content (tight lists, where the item text isn't wrapped in a <p>).
+                                      const kids = (Array.isArray(children) ? children : [children])
+                                        .filter((c: any) => !(typeof c === 'string' && c.trim() === ''))
+                                        .map((c: any, i: number) =>
+                                          isValidElement(c) && (c as any).type === 'p'
+                                            ? c
+                                            : <Fragment key={i}>{procWithBoth(c, node)}</Fragment>)
+                                      return <li id={anchorId}>{kids}</li>
                                     }
                                   }
                                 })()}
@@ -2919,7 +2929,17 @@ function App() {
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      return <li id={anchorId}>{proc(children, node)}</li>
+                                      // See the drift-path <li> above: leave the already-processed <p>
+                                      // (block) untouched so it isn't re-wrapped in inline <span>s
+                                      // (block-in-inline strands the marker in WebKit), drop stray
+                                      // whitespace, and only process bare inline content (tight lists).
+                                      const kids = (Array.isArray(children) ? children : [children])
+                                        .filter((c: any) => !(typeof c === 'string' && c.trim() === ''))
+                                        .map((c: any, i: number) =>
+                                          isValidElement(c) && (c as any).type === 'p'
+                                            ? c
+                                            : <Fragment key={i}>{proc(c, node)}</Fragment>)
+                                      return <li id={anchorId}>{kids}</li>
                                     },
                                     th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
                                     td: ({ node, children }: any) => <td>{proc(children, node)}</td>,
