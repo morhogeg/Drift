@@ -623,13 +623,36 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   text-align: right;
 }
 
-/* Loose-list marker alignment — remark-gfm wraps each <li>'s content in a <p>,
-   and Tailwind Typography puts margin-top/bottom on that <p>. The top margin
-   shoves the item's text down while the ::marker stays pinned to the <li>'s top
-   edge, stranding the number/bullet above its line (most visible in RTL, where
-   the digit floats up and to the side). Collapse only the leading/trailing
-   margins so text sits beside its marker; spacing between multiple paragraphs
-   inside one item is preserved. Direction-agnostic by design. */
+/* Loose-list marker stranding (WebKit/Safari) ───────────────────────────────
+   Our inline drift/highlight processing wraps each list item's content —
+   including the block-level <p> and the surrounding "\n" text nodes — in
+   classless <span>s, producing this shape inside an <li>:
+
+     <li>
+       <span><span>"\n"</span></span>              ← stray whitespace
+       <span><span><p>…item text…</p></span></span> ← BLOCK <p> inside inline <span>
+       <span><span>"\n"</span></span>
+     </li>
+
+   A block <p> nested inside an inline <span> is "block-in-inline". WebKit
+   resolves it by splitting the inline flow and wrapping the leading inline
+   content (that first "\n" span) into an anonymous block box ABOVE the <p>.
+   The list ::marker latches onto that phantom first line, so the number/bullet
+   floats ~one line above its text (very visible in RTL). Blink/Chromium does
+   not exhibit this, which is why it only reproduces in Safari.
+
+   Fix: collapse the *classless* wrapper spans inside list items with
+   `display: contents`. Their boxes disappear from layout, so the <p> becomes an
+   effective direct child of the <li> and the "\n" whitespace collapses — no
+   block-in-inline, no phantom line, marker sits beside its text. The matched
+   drift/highlight spans carry classes, so their underline boxes are untouched. */
+.prose li span:not([class]) {
+  display: contents;
+}
+
+/* Belt-and-suspenders: in plain loose lists (no wrapper spans), Tailwind
+   Typography's margin on a list item's <p> can still nudge text off its marker.
+   Collapse only the leading/trailing margins; inter-paragraph spacing is kept. */
 .prose li > p:first-child {
   margin-top: 0;
 }
