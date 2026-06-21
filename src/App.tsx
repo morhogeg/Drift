@@ -400,6 +400,15 @@ function App() {
     return (import.meta.env.VITE_GEMINI_API_KEY || preset?.apiKey || aiSettings.geminiApiKey || '').trim()
   }, [aiSettings.modelPresets, aiSettings.geminiApiKey])
 
+  // Whether the visitor has brought THEIR OWN provider key (ignoring any
+  // build-time env key). The free "on us" welcome examples stay visible — even
+  // across refreshes and after a few have been tried — until the user adds their
+  // own key, at which point the welcome reverts to its normal returning-user state.
+  const hasOwnKey = useMemo(() => {
+    const presetKey = (aiSettings.modelPresets || []).some(p => (p.apiKey || '').trim())
+    return !!((aiSettings.geminiApiKey || '').trim() || (aiSettings.openRouterApiKey || '').trim() || presetKey)
+  }, [aiSettings.modelPresets, aiSettings.geminiApiKey, aiSettings.openRouterApiKey])
+
   // ── Semantic backfill (lifecycle) ──────────────────────────────────────────
   // Whenever chat history settles, diff drifts against the IDB vector cache and
   // batch-embed any that are missing/stale. Debounced, fire-and-forget, never
@@ -2333,12 +2342,13 @@ function App() {
                             )
                           })}
                         </div>
-                        {/* Shared detail panel — floated as an overlay ABOVE the cards row so
-                            it never adds to the layout height (keeping the whole welcome
-                            state inside one viewport) and never clips against the bottom of
-                            the screen or the composer. On small screens it stacks inline. */}
+                        {/* Shared detail panel — floated as an overlay BELOW the cards row
+                            (over the starter-prompts area) so it never adds to the layout
+                            height and never clips against the top toolbar. There is reliably
+                            more room between the cards and the composer than above the cards.
+                            On small screens it stacks inline. */}
                         {active && (
-                          <div key={activeCue} className="static mt-4 sm:absolute sm:bottom-full sm:left-1/2 sm:mt-0 sm:mb-3 sm:-translate-x-1/2 z-20 mx-auto w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/95 px-4 py-3.5 text-left shadow-xl shadow-black/40 backdrop-blur-md animate-fade-up">
+                          <div key={activeCue} className="static mt-4 sm:absolute sm:top-full sm:left-1/2 sm:mt-3 sm:mb-0 sm:-translate-x-1/2 z-20 mx-auto w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/95 px-4 py-3.5 text-left shadow-xl shadow-black/40 backdrop-blur-md animate-fade-up">
                             <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
                             <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
                             <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>
@@ -2369,9 +2379,10 @@ function App() {
                     )
                   })()}
                   {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
-                      so the drift gesture has something to act on. Shown only to genuinely
-                      new users (returning users get "pick up where you left off" below). */}
-                  {resumableTrees.length === 0 && (
+                      so the drift gesture has something to act on. Shown to new users,
+                      and kept for anyone who hasn't brought their own key yet (the free
+                      "on us" demo persists until they do). */}
+                  {(resumableTrees.length === 0 || !hasOwnKey) && (
                     <div className="w-full max-w-[440px] mt-5">
                       <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-2.5 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '1320ms' }}>Try one to start</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
