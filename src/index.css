@@ -445,6 +445,19 @@ body:has(.drift-tooltip) .ai-message ::-moz-selection {
   animation: fade-up 0.3s ease-out;
 }
 
+/* Opacity-only fade — for elements positioned with a `transform` (e.g. a
+   translate(-50%) centered popover). fade-up's keyframe animates `transform`
+   and would clobber that positioning, making the element flash off-center then
+   jump into place; this one never touches transform, so it fades in situ. */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
 /* Drift logo "draws itself" on load — the node-graph strokes trace in, literally
    sketching the branch concept. pathLength=1 normalizes every node/connector so
    they draw uniformly; nodes first, then the connectors. Respects reduced motion. */
