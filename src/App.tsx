@@ -2831,20 +2831,28 @@ function App() {
                                     th: ({ node, children }: any) => <th>{procWithBoth(children, node)}</th>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      // A loose-list item's text arrives as a <p> that the `p` renderer
-                                      // has ALREADY run drift/highlight processing on. Re-processing it
-                                      // here re-wraps that block <p> in inline <span>s — a block inside
-                                      // an inline ("block-in-inline"), which WebKit splits so the list
-                                      // ::marker strands on a phantom first line above the text (very
-                                      // visible in RTL). So leave the <p> (and any block child) as-is,
-                                      // drop insignificant whitespace, and only process bare inline
-                                      // content (tight lists, where the item text isn't wrapped in a <p>).
-                                      const kids = (Array.isArray(children) ? children : [children])
-                                        .filter((c: any) => !(typeof c === 'string' && c.trim() === ''))
-                                        .map((c: any, i: number) =>
-                                          isValidElement(c) && (c as any).type === 'p'
-                                            ? c
-                                            : <Fragment key={i}>{procWithBoth(c, node)}</Fragment>)
+                                      // Flatten structural classless <span> wrappers and drop insignificant
+                                      // whitespace so the item's <p> becomes a DIRECT child of <li>. A block
+                                      // <p> nested inside inline <span>s is "block-in-inline": WebKit splits
+                                      // it and lifts surrounding whitespace into an anonymous first line,
+                                      // stranding the list ::marker a line above its text (very visible in
+                                      // RTL). Flattening is engine-agnostic and defensive regardless of what
+                                      // introduced the wrappers; classed/interactive spans (drift links,
+                                      // highlights) are preserved. Block children are left as-is; only bare
+                                      // inline content (tight lists) is processed.
+                                      const flatten = (n: any): any[] => {
+                                        if (Array.isArray(n)) return n.flatMap(flatten)
+                                        if (typeof n === 'string') return n.trim() === '' ? [] : [n]
+                                        if (isValidElement(n) && (n as any).type === 'span') {
+                                          const sp: any = (n as any).props || {}
+                                          if (!sp.className && !sp.role && !sp.onClick) return flatten(sp.children)
+                                        }
+                                        return [n]
+                                      }
+                                      const kids = flatten(children).map((c: any, i: number) =>
+                                        isValidElement(c) && (c as any).type === 'p'
+                                          ? c
+                                          : <Fragment key={i}>{procWithBoth(c, node)}</Fragment>)
                                       return <li id={anchorId}>{kids}</li>
                                     }
                                   }
@@ -2929,16 +2937,22 @@ function App() {
                                     p: ({ node, children }: any) => <p className="mb-2">{proc(children, node)}</p>,
                                     li: ({ node, children }: any) => {
                                       const anchorId = getAnchorId(msg.id, liCounter++)
-                                      // See the drift-path <li> above: leave the already-processed <p>
-                                      // (block) untouched so it isn't re-wrapped in inline <span>s
-                                      // (block-in-inline strands the marker in WebKit), drop stray
-                                      // whitespace, and only process bare inline content (tight lists).
-                                      const kids = (Array.isArray(children) ? children : [children])
-                                        .filter((c: any) => !(typeof c === 'string' && c.trim() === ''))
-                                        .map((c: any, i: number) =>
-                                          isValidElement(c) && (c as any).type === 'p'
-                                            ? c
-                                            : <Fragment key={i}>{proc(c, node)}</Fragment>)
+                                      // See the drift-path <li> above: flatten classless wrapper spans and
+                                      // drop whitespace so the <p> is a direct child of <li> (block-in-inline
+                                      // strands the marker in WebKit); only bare inline content is processed.
+                                      const flatten = (n: any): any[] => {
+                                        if (Array.isArray(n)) return n.flatMap(flatten)
+                                        if (typeof n === 'string') return n.trim() === '' ? [] : [n]
+                                        if (isValidElement(n) && (n as any).type === 'span') {
+                                          const sp: any = (n as any).props || {}
+                                          if (!sp.className && !sp.role && !sp.onClick) return flatten(sp.children)
+                                        }
+                                        return [n]
+                                      }
+                                      const kids = flatten(children).map((c: any, i: number) =>
+                                        isValidElement(c) && (c as any).type === 'p'
+                                          ? c
+                                          : <Fragment key={i}>{proc(c, node)}</Fragment>)
                                       return <li id={anchorId}>{kids}</li>
                                     },
                                     th: ({ node, children }: any) => <th>{proc(children, node)}</th>,
