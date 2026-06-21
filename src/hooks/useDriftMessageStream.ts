@@ -6,7 +6,7 @@ import { sendMessageToGemini, getSuggestedHighlights, type ChatMessage as Gemini
 import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
-import { getFreeDriftAnswer } from '../lib/freeExamples'
+import { getFreeDriftAnswer, getFreeLensAnswer, getFreeConnectCards, getFreeConnectBridge } from '../lib/freeExamples'
 import { resolveLensPrompt } from '../lib/customLenses'
 import type { LensKey } from '../types/chat'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
@@ -108,46 +108,79 @@ export function useDriftMessageStream({
       }
       setIsTyping(true)
 
-      // ── Free "on us" drift ────────────────────────────────────────────────
-      // A pre-marked dotted term from a canned welcome answer carries its own
-      // pre-written drift answer, so a keyless visitor can drift one level
-      // deeper without an API call. Only the OPENING, lens-free drift on a
-      // pre-marked term qualifies; any lens, Connect bridge, typed follow-up, or
-      // other highlight falls through to the real (key-required) path below.
+      // ── Free "on us" drift + lenses ───────────────────────────────────────
+      // For a keyless visitor exploring a PRE-MARKED welcome term, every lens
+      // ships pre-written, so the whole "six ways" experience works with zero
+      // API calls: the default Drift, the Simplify / Deep dive / Stress test /
+      // Evidence prose lenses, and Connect (cards, then a bridge answer per
+      // card). Only the OPENING turn of a fresh thread qualifies; typed
+      // follow-ups and un-marked highlights fall through to the real
+      // (key-required) path below. Keyed users skip all of this.
       const noGeminiKey = !(import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey)
       const noOpenRouterKey = !(import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey)
-      const isDriftOpener = !driftOnlyMessages.some(m => !m.isUser && !m.isError && !isDriftScaffoldText(m.text))
-      const cannedDrift =
-        (noGeminiKey && noOpenRouterKey && !templateType && !connectQuestion && isDriftOpener && !isRetry)
-          ? getFreeDriftAnswer(selectedText)
-          : null
-      if (cannedDrift) {
-        const aiResponseId = 'drift-ai-' + Date.now().toString()
-        const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
-        setMessages(prev => [...prev, aiMessage])
-        setDriftOnlyMessages(prev => [...prev, aiMessage])
-        setStreamingMsgId(aiResponseId)
-        try {
-          // Reveal in a few chunks — per-word updates re-parse the growing markdown
-          // each tick and crawl on this renderer; chunking keeps it stream-like.
-          const tokens = cannedDrift.match(/\s+|\S+/g) ?? [cannedDrift]
-          const per = Math.max(1, Math.ceil(tokens.length / 5))
-          let acc = ''
-          let first = true
-          for (let i = 0; i < tokens.length; i += per) {
-            acc += tokens.slice(i, i + per).join('')
-            if (first) { first = false; haptics.selection() }
-            const next = acc
-            setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
-            setDriftOnlyMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
-            await new Promise(r => setTimeout(r, 45))
+      // Fresh thread = no real (non-scaffold, non-system) AI answer yet.
+      const isFreshThread = !driftOnlyMessages.some(
+        m => !m.isUser && !m.isError && !m.id.startsWith('drift-system-') && !isDriftScaffoldText(m.text)
+      )
+      if (noGeminiKey && noOpenRouterKey && !isRetry && isFreshThread) {
+        let cannedText: string | null = null
+        let cannedIsConnectCards = false
+        if (templateType === 'connect') {
+          if (connectQuestion) {
+            cannedText = getFreeConnectBridge(selectedText, connectQuestion)
+          } else {
+            const cards = getFreeConnectCards(selectedText)
+            if (cards) { cannedText = JSON.stringify(cards); cannedIsConnectCards = true }
           }
-        } finally {
-          setIsTyping(false)
-          setStreamingMsgId(null)
-          abortControllerRef.current = null
+        } else if (!templateType || templateType === 'drift') {
+          cannedText = getFreeDriftAnswer(selectedText)
+        } else if (
+          templateType === 'simplify' || templateType === 'research' ||
+          templateType === 'challenge' || templateType === 'evidence'
+        ) {
+          cannedText = getFreeLensAnswer(selectedText, templateType as 'simplify' | 'research' | 'challenge' | 'evidence')
         }
-        return
+
+        if (cannedText) {
+          const aiResponseId = 'drift-ai-' + Date.now().toString()
+          const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
+          setMessages(prev => [...prev, aiMessage])
+          setDriftOnlyMessages(prev => [...prev, aiMessage])
+          setStreamingMsgId(aiResponseId)
+          try {
+            if (cannedIsConnectCards) {
+              // Connect cards are a raw JSON array parsed into chips (never shown
+              // as prose). The parser keys off an isTyping false->true transition
+              // with the JSON present; the awaits force separate renders so React
+              // batching can't collapse them and swallow the parse.
+              await new Promise(r => setTimeout(r, 30))
+              const json = cannedText
+              setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: json } : m))
+              setDriftOnlyMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: json } : m))
+              await new Promise(r => setTimeout(r, 30))
+            } else {
+              // Reveal prose in a few chunks (per-word updates re-parse the
+              // growing markdown each tick and crawl on this renderer).
+              const tokens = cannedText.match(/\s+|\S+/g) ?? [cannedText]
+              const per = Math.max(1, Math.ceil(tokens.length / 6))
+              let acc = ''
+              let first = true
+              for (let i = 0; i < tokens.length; i += per) {
+                acc += tokens.slice(i, i + per).join('')
+                if (first) { first = false; haptics.selection() }
+                const next = acc
+                setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
+                setDriftOnlyMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
+                await new Promise(r => setTimeout(r, 45))
+              }
+            }
+          } finally {
+            setIsTyping(false)
+            setStreamingMsgId(null)
+            abortControllerRef.current = null
+          }
+          return
+        }
       }
 
       // Only use drift-specific messages, not the context messages.

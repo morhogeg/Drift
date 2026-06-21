@@ -16,6 +16,8 @@
  * won't render — the renderer locates highlights by exact substring match.
  */
 
+import { FREE_LENS_CONTENT } from './freeLensContent'
+
 export interface FreeExample {
   /** Must match the welcome-screen chip text exactly. */
   prompt: string
@@ -103,13 +105,46 @@ const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
 
 const EXAMPLE_BY_PROMPT = new Map(FREE_EXAMPLES.map(e => [norm(e.prompt), e]))
 const DRIFT_BY_TERM = new Map(Object.entries(FREE_DRIFTS).map(([k, v]) => [norm(k), v]))
+const LENS_BY_TERM = new Map(Object.entries(FREE_LENS_CONTENT).map(([k, v]) => [norm(k), v]))
 
 /** The canned root answer + dotted terms for a welcome example, or null. */
 export function getFreeExample(text: string): FreeExample | null {
   return EXAMPLE_BY_PROMPT.get(norm(text)) ?? null
 }
 
-/** The canned drift answer for a pre-marked term, or null. */
+/** The canned default-drift answer for a pre-marked term, or null. */
 export function getFreeDriftAnswer(term: string): string | null {
   return DRIFT_BY_TERM.get(norm(term)) ?? null
+}
+
+/** Built-in prose lenses that ship pre-written for every pre-marked term. */
+export type FreeProseLens = 'simplify' | 'research' | 'challenge' | 'evidence'
+
+/** The canned answer for a pre-marked term under a prose lens, or null. */
+export function getFreeLensAnswer(term: string, lens: FreeProseLens): string | null {
+  return LENS_BY_TERM.get(norm(term))?.[lens] ?? null
+}
+
+/** The canned Connect cards (`"type :: relationship :: concept"`) for a term, or null. */
+export function getFreeConnectCards(term: string): string[] | null {
+  return LENS_BY_TERM.get(norm(term))?.connect.cards ?? null
+}
+
+/**
+ * The canned Connect bridge answer for a tapped card. `connectQuestion` is the
+ * full bridge question (`How does "<term>" connect to <concept>?`); we match it
+ * back to one of the term's card concepts. Exact reconstruction first, then a
+ * lenient substring fallback so minor phrasing drift still resolves.
+ */
+export function getFreeConnectBridge(term: string, connectQuestion: string): string | null {
+  const bridges = LENS_BY_TERM.get(norm(term))?.connect.bridges
+  if (!bridges) return null
+  const q = connectQuestion.trim()
+  for (const concept of Object.keys(bridges)) {
+    if (q === `How does "${term}" connect to ${concept}?`) return bridges[concept]
+  }
+  for (const concept of Object.keys(bridges)) {
+    if (q.includes(concept)) return bridges[concept]
+  }
+  return null
 }
