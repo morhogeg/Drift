@@ -235,11 +235,14 @@ export default function AddModelSheet({
       <div className="fixed inset-0 z-[60] bg-black/50" onClick={onClose} />
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-[60] rounded-t-2xl bg-dark-surface border-t border-dark-border/60 max-h-[88dvh] flex flex-col"
+        className="fixed z-[60] bg-dark-surface flex flex-col
+          left-0 right-0 bottom-0 rounded-t-2xl border-t border-dark-border/60 max-h-[88dvh]
+          sm:left-1/2 sm:right-auto sm:bottom-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2
+          sm:w-full sm:max-w-md sm:rounded-2xl sm:border sm:border-dark-border/60 sm:max-h-[85dvh] sm:shadow-2xl"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
       >
-        {/* Drag handle */}
-        <div className="w-10 h-1 rounded-full bg-dark-border/80 mx-auto mt-3 mb-1 flex-shrink-0" />
+        {/* Drag handle — bottom-sheet affordance on mobile only */}
+        <div className="w-10 h-1 rounded-full bg-dark-border/80 mx-auto mt-3 mb-1 flex-shrink-0 sm:hidden" />
 
         {/* Header */}
         <div className="flex items-center px-5 py-3 flex-shrink-0">
