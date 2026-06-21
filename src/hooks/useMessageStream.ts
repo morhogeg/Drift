@@ -6,6 +6,7 @@ import { toast } from '@/hooks/useToast'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '@/services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '@/services/ollama'
 import { sendMessageToGemini, getSuggestedHighlights } from '@/services/gemini'
+import { getFreeExample } from '@/lib/freeExamples'
 import type { AISettings } from '@/components/Settings'
 import type { Message } from '@/types/chat'
 
@@ -81,6 +82,51 @@ export function useMessageStream({
 
       userHasScrolled.current = false
       setTimeout(scrollToBottom, 100)
+
+      // ── Free "on us" intro ────────────────────────────────────────────────
+      // The four welcome-screen example prompts ship with a pre-written answer
+      // (identical for everyone) plus a fixed set of dotted drift terms — the
+      // free demo, served with zero API calls. These four prompts ALWAYS resolve
+      // to their canned answer regardless of key state, so the demo works on the
+      // deployed (keyless) site no matter what. A user's own typed questions
+      // still go to their model as normal.
+      const canned = getFreeExample(text)
+      if (canned) {
+        const aiResponseId = (Date.now() + Math.random()).toString()
+        const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
+        chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
+        chatStore.setStreamingMessageId(aiResponseId)
+        try {
+          // Reveal in a few chunks so it reads like a stream WITHOUT re-parsing the
+          // (ever-growing) markdown on every word — each re-render of this heavy
+          // renderer is costly, so per-word updates compound into a visible crawl.
+          const tokens = canned.answer.match(/\s+|\S+/g) ?? [canned.answer]
+          const per = Math.max(1, Math.ceil(tokens.length / 6))
+          let acc = ''
+          let first = true
+          for (let i = 0; i < tokens.length; i += per) {
+            if (!useChatStore.getState().isTyping) break // user pressed Stop
+            acc += tokens.slice(i, i + per).join('')
+            if (first) { first = false; haptics.selection() }
+            chatStore.setStreaming(acc)
+            const cur = useChatStore.getState().messages
+            chatStore.setMessages(cur.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+            await new Promise(r => setTimeout(r, 45))
+          }
+          // Finalize the bubble and attach the fixed dotted drift terms.
+          const finalCur = useChatStore.getState().messages
+          chatStore.setMessages(finalCur.map(m => m.id === aiResponseId ? { ...m, text: canned.answer, suggestedHighlights: canned.highlights } : m))
+          chatStore.updateMessage(activeChatId, aiResponseId, { text: canned.answer, suggestedHighlights: canned.highlights })
+          chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(canned.answer).slice(0, 100) })
+        } finally {
+          chatStore.setStreaming('')
+          chatStore.setIsTyping(false)
+          if (useChatStore.getState().streamingMessageId === aiResponseId) chatStore.setStreamingMessageId(null)
+          abortControllerRef.current = null
+          if (!userHasScrolled.current) setTimeout(scrollToBottom, 100)
+        }
+        return
+      }
 
       const apiMessages: (OpenRouterMessage | OllamaMessage)[] = updatedMessages.map(msg => ({
         role: msg.isUser ? 'user' : 'assistant',

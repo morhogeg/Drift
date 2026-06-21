@@ -110,8 +110,12 @@ function App() {
     return settings
   })
 
-  // Live provider reachability (polls every 5s; opens Settings if creds missing)
-  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => uiStore.setSettingsOpen(true))
+  // Live provider reachability (polls with backoff). Note: we deliberately do
+  // NOT auto-open Settings when no key is present — the app is BYOK and ships a
+  // free "on us" demo, so a keyless visitor must be left alone to explore. The
+  // "Offline" badge plus the Settings gear are enough; auto-opening Settings on
+  // every poll was hijacking the screen. Adding a key stays fully manual.
+  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => {})
 
   // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
   const keyboardVisible = useKeyboardVisibility()
@@ -395,6 +399,15 @@ function App() {
     const preset = (aiSettings.modelPresets || []).find(p => p.provider === 'gemini' && p.enabled)
     return (import.meta.env.VITE_GEMINI_API_KEY || preset?.apiKey || aiSettings.geminiApiKey || '').trim()
   }, [aiSettings.modelPresets, aiSettings.geminiApiKey])
+
+  // Whether the visitor has brought THEIR OWN provider key (ignoring any
+  // build-time env key). The free "on us" welcome examples stay visible — even
+  // across refreshes and after a few have been tried — until the user adds their
+  // own key, at which point the welcome reverts to its normal returning-user state.
+  const hasOwnKey = useMemo(() => {
+    const presetKey = (aiSettings.modelPresets || []).some(p => (p.apiKey || '').trim())
+    return !!((aiSettings.geminiApiKey || '').trim() || (aiSettings.openRouterApiKey || '').trim() || presetKey)
+  }, [aiSettings.modelPresets, aiSettings.geminiApiKey, aiSettings.openRouterApiKey])
 
   // ── Semantic backfill (lifecycle) ──────────────────────────────────────────
   // Whenever chat history settles, diff drifts against the IDB vector cache and
@@ -2215,11 +2228,11 @@ function App() {
 
               {/* Empty state */}
               {messages.length === 0 && (
-                <div className="relative min-h-full overflow-x-hidden flex flex-col items-center justify-start text-center px-8 pt-[clamp(2.5rem,9vh,7rem)] pb-10">
+                <div className="relative min-h-full overflow-x-hidden flex flex-col items-center justify-start text-center px-8 pt-[clamp(1.25rem,5vh,3.5rem)] pb-6">
                   {/* Ambient hero aura — a slow, faint pink→violet breath for depth */}
                   <div aria-hidden className="drift-hero-aura pointer-events-none absolute left-1/2 top-[clamp(6rem,16vh,12rem)] h-[340px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[64px]" />
-                  <div className="relative mb-4">
-                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" className="drift-logo-draw mx-auto mb-3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <div className="relative mb-3">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" className="drift-logo-draw mx-auto mb-2.5" strokeLinecap="round" strokeLinejoin="round">
                       <defs>
                         <linearGradient id="dg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
                           <stop stopColor="#ff006e"/>
@@ -2283,12 +2296,12 @@ function App() {
                     const playIntro = !homeIntroPlayed && !prefersReducedMotion
                     return (
                       <div
-                        className="w-full max-w-[1000px] mt-6"
+                        className="relative w-full max-w-[1000px] mt-5"
                         onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActiveCue(null) }}
                       >
                         {/* Loose, staggered "fan" — desktop offsets the middle card up for a
                             less rigid feel; stacks flat on mobile. */}
-                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-center gap-4 sm:gap-6">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-center gap-3 sm:gap-5">
                           {cues.map(({ icon: Icon, lead, accent, tagline }, idx) => {
                             const isActive = activeCue === idx
                             return (
@@ -2300,14 +2313,14 @@ function App() {
                                 animate="shown"
                                 onAnimationComplete={() => { homeIntroPlayed = true }}
                                 style={{ transformPerspective: 1100, transformOrigin: 'center bottom' }}
-                                className={`w-full sm:flex-1 sm:max-w-[300px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-10'}`}
+                                className={`w-full sm:flex-1 sm:max-w-[300px] ${idx === 1 ? 'sm:mt-0' : 'sm:mt-6'}`}
                               >
                               <button
                                 type="button"
                                 onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveCue(idx) }}
                                 onClick={() => { haptics.selection(); setActiveCue(isActive ? null : idx) }}
                                 aria-expanded={isActive}
-                                className={`group relative flex w-full flex-col items-start rounded-[22px] border px-7 pt-7 pb-8 text-left transition-all duration-300 active:scale-[0.98]
+                                className={`group relative flex w-full flex-col items-start rounded-[22px] border px-6 pt-5 pb-6 text-left transition-all duration-300 active:scale-[0.98]
                                   ${isActive
                                     ? 'border-accent-violet/45 bg-gradient-to-b from-accent-violet/[0.13] to-accent-violet/[0.02] shadow-2xl shadow-accent-violet/20 -translate-y-1.5'
                                     : 'border-accent-violet/15 bg-gradient-to-b from-accent-violet/[0.07] to-transparent hover:-translate-y-1.5 hover:border-accent-violet/40 hover:shadow-2xl hover:shadow-accent-violet/20'}`}
@@ -2318,22 +2331,25 @@ function App() {
                                 <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-[22px]">
                                   <span className="absolute top-0 -left-1/2 h-full w-1/3 -skew-x-12 -translate-x-full bg-[linear-gradient(90deg,transparent,rgba(255,0,110,0.10),rgba(168,85,247,0.17),transparent)] transition-transform duration-[900ms] ease-out group-hover:translate-x-[450%]" />
                                 </span>
-                                <span className="relative mb-5 inline-flex h-16 w-16 items-center justify-center rounded-[18px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                                  <Icon className="w-8 h-8" />
+                                <span className="relative mb-3.5 inline-flex h-12 w-12 items-center justify-center rounded-[16px] border border-accent-violet/20 bg-gradient-to-br from-accent-pink/15 to-accent-violet/25 text-accent-violet shadow-sm shadow-accent-violet/20 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
+                                  <Icon className="w-6 h-6" />
                                 </span>
-                                <span className="relative text-[19px] font-semibold leading-tight text-text-primary">
+                                <span className="relative text-[18px] font-semibold leading-tight text-text-primary">
                                   {lead} <span className="bg-gradient-to-r from-accent-pink to-accent-violet bg-clip-text text-transparent">{accent}</span>
                                 </span>
-                                <span className="relative mt-2.5 text-[13.5px] leading-snug text-text-muted">{tagline}</span>
+                                <span className="relative mt-2 text-[13px] leading-snug text-text-muted">{tagline}</span>
                               </button>
                               </motion.div>
                             )
                           })}
                         </div>
-                        {/* Shared detail panel — inline, so it can never clip against the
-                            scroll boundary or the composer, and it's reachable on touch. */}
+                        {/* Shared detail panel — floated as an overlay BELOW the cards row
+                            (over the starter-prompts area) so it never adds to the layout
+                            height and never clips against the top toolbar. There is reliably
+                            more room between the cards and the composer than above the cards.
+                            On small screens it stacks inline. */}
                         {active && (
-                          <div key={activeCue} className="mx-auto mt-4 w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/70 px-4 py-3.5 text-left shadow-lg shadow-black/20 backdrop-blur-sm animate-fade-up">
+                          <div key={activeCue} className="static mt-4 sm:absolute sm:top-full sm:left-1/2 sm:mt-3 sm:mb-0 sm:-translate-x-1/2 z-20 mx-auto w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/95 px-4 py-3.5 text-left shadow-xl shadow-black/40 backdrop-blur-md animate-fade-up">
                             <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
                             <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
                             <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>
@@ -2364,12 +2380,13 @@ function App() {
                     )
                   })()}
                   {/* Starter prompts — one tap to a rich, highlight-worthy first reply,
-                      so the drift gesture has something to act on. Shown only to genuinely
-                      new users (returning users get "pick up where you left off" below). */}
-                  {resumableTrees.length === 0 && (
-                    <div className="w-full max-w-[440px] mt-7">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-3 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '1320ms' }}>Try one to start</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      so the drift gesture has something to act on. Shown to new users,
+                      and kept for anyone who hasn't brought their own key yet (the free
+                      "on us" demo persists until they do). */}
+                  {(resumableTrees.length === 0 || !hasOwnKey) && (
+                    <div className="w-full max-w-[440px] mt-5">
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted font-semibold text-center mb-2.5 animate-fade-up [animation-fill-mode:backwards]" style={{ animationDelay: '1320ms' }}>Try one to start</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {[
                           'Why did the Roman Empire really fall?',
                           'Explain quantum entanglement without the jargon',
