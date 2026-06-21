@@ -6,6 +6,7 @@ import { toast } from '@/hooks/useToast'
 import { sendMessageToOpenRouter, type ChatMessage as OpenRouterMessage, OPENROUTER_MODELS } from '@/services/openrouter'
 import { sendMessageToOllama, type ChatMessage as OllamaMessage } from '@/services/ollama'
 import { sendMessageToGemini, getSuggestedHighlights } from '@/services/gemini'
+import { getFreeExample } from '@/lib/freeExamples'
 import type { AISettings } from '@/components/Settings'
 import type { Message } from '@/types/chat'
 
@@ -81,6 +82,55 @@ export function useMessageStream({
 
       userHasScrolled.current = false
       setTimeout(scrollToBottom, 100)
+
+      // ── Free "on us" intro ────────────────────────────────────────────────
+      // The four welcome-screen example prompts ship with a pre-written answer
+      // (identical for everyone) plus a fixed set of dotted drift terms, so a
+      // visitor with no API key can experience Drift instantly — zero API calls.
+      // Only fires when the active model has no usable key; a user with their
+      // own key gets a live answer exactly as before.
+      const t0 = useModelStore.getState().selectedTargets[0] || DEFAULT_TARGET
+      const preset0 = (aiSettings?.modelPresets || []).find((p: any) => p.id === t0.key)
+      const resolvedKey0 =
+        t0.provider === 'gemini'
+          ? (import.meta.env.VITE_GEMINI_API_KEY || (preset0 as any)?.apiKey || aiSettings.geminiApiKey)
+          : t0.provider === 'openrouter'
+          ? (import.meta.env.VITE_OPENROUTER_API_KEY || (preset0 as any)?.apiKey || aiSettings.openRouterApiKey)
+          : 'ollama'
+      const canned = (t0.provider !== 'ollama' && !resolvedKey0) ? getFreeExample(text) : null
+      if (canned) {
+        const aiResponseId = (Date.now() + Math.random()).toString()
+        const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
+        chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
+        chatStore.setStreamingMessageId(aiResponseId)
+        try {
+          // Reveal the canned answer token-by-token so it feels like a real stream.
+          const tokens = canned.answer.match(/\s+|\S+/g) ?? [canned.answer]
+          let acc = ''
+          let first = true
+          for (const tok of tokens) {
+            if (!useChatStore.getState().isTyping) break // user pressed Stop
+            acc += tok
+            if (first) { first = false; haptics.selection() }
+            chatStore.setStreaming(acc)
+            const cur = useChatStore.getState().messages
+            chatStore.setMessages(cur.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
+            await new Promise(r => setTimeout(r, 14))
+          }
+          // Finalize the bubble and attach the fixed dotted drift terms.
+          const finalCur = useChatStore.getState().messages
+          chatStore.setMessages(finalCur.map(m => m.id === aiResponseId ? { ...m, text: canned.answer, suggestedHighlights: canned.highlights } : m))
+          chatStore.updateMessage(activeChatId, aiResponseId, { text: canned.answer, suggestedHighlights: canned.highlights })
+          chatStore.updateChat(activeChatId, { lastMessage: stripMarkdown(canned.answer).slice(0, 100) })
+        } finally {
+          chatStore.setStreaming('')
+          chatStore.setIsTyping(false)
+          if (useChatStore.getState().streamingMessageId === aiResponseId) chatStore.setStreamingMessageId(null)
+          abortControllerRef.current = null
+          if (!userHasScrolled.current) setTimeout(scrollToBottom, 100)
+        }
+        return
+      }
 
       const apiMessages: (OpenRouterMessage | OllamaMessage)[] = updatedMessages.map(msg => ({
         role: msg.isUser ? 'user' : 'assistant',

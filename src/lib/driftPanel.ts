@@ -31,6 +31,10 @@ export interface DriftLabels {
   connectHint: string
   bridge: (term: string, concept: string) => string
   prefixes: Record<string, string> // simplify | research | connect
+  /** Stress-test → Evidence bridge: the action-row button label, and the
+   *  grounded follow-up it sends (runs as an Evidence turn, so it cites). */
+  evidenceBridgeLabel: string
+  evidenceBridgePrompt: string
 }
 const DRIFT_LABELS_EN: DriftLabels = {
   opener: (t) => `What would you like to know about "${t}"?`,
@@ -38,6 +42,8 @@ const DRIFT_LABELS_EN: DriftLabels = {
   connectHint: 'Tap a connection to explore the bridge between them.',
   bridge: (t, c) => `How does "${t}" connect to ${c}?`,
   prefixes: { simplify: 'Simplify this', research: 'Deep dive into this', connect: 'Show me what this connects to', challenge: 'Stress test this', evidence: 'Show the evidence for this' },
+  evidenceBridgeLabel: 'Back with evidence',
+  evidenceBridgePrompt: 'Back the key claims in this stress test with evidence — cite real, checkable sources for what holds up and what fails.',
 }
 const DRIFT_LABELS_HE: DriftLabels = {
   opener: (t) => `מה תרצה לדעת על "${t}"?`,
@@ -45,6 +51,8 @@ const DRIFT_LABELS_HE: DriftLabels = {
   connectHint: 'הקש על קשר כדי לחקור את הגשר ביניהם.',
   bridge: (t, c) => `איך "${t}" קשור ל-${c}?`,
   prefixes: { simplify: 'הסבר בפשטות', research: 'צלילה לעומק', connect: 'הראה למה זה מתחבר', challenge: 'העמד את זה במבחן', evidence: 'הצג ראיות לכך' },
+  evidenceBridgeLabel: 'גבה בראיות',
+  evidenceBridgePrompt: 'גבה את הטענות המרכזיות במבחן הזה בראיות — צטט מקורות אמיתיים וניתנים לבדיקה למה שמחזיק מעמד ומה שנכשל.',
 }
 export const driftLabelsFor = (sample: string): DriftLabels =>
   /[֐-׿]/.test(sample || '') ? DRIFT_LABELS_HE : DRIFT_LABELS_EN

@@ -7,12 +7,14 @@ import {
   isDriftScaffoldText,
   isDriftOpenerText,
   isConnectCardsJson,
+  isChallengeTriggerText,
 } from '../lib/driftPanel'
 import type { AncestryEntry, Target, LensKey } from '../types/chat'
 import { customLensStore } from '../lib/customLenses'
 import { useUIStore } from '../store/uiStore'
 import { type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
+import { getFreeDriftAnswer } from '../lib/freeExamples'
 import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
 import ChallengerPicker from './ChallengerPicker'
 import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
@@ -447,6 +449,29 @@ export default function DriftPanel({
     return () => window.clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, templateType, messages.length, connectQuestion, challenger?.key, challengerChoices.length, challengerPickerOpen])
+
+  // Auto-surface the free "on us" drift: when a keyless visitor opens a fresh,
+  // lens-free drift on a PRE-MARKED welcome term, send it straight away so its
+  // pre-written answer appears — without a key there are no suggestion chips to
+  // tap. The send is intercepted in useDriftMessageStream and answered locally
+  // (zero API calls). Users with their own key skip this and get live chips /
+  // answers exactly as before.
+  useEffect(() => {
+    if (!isOpen || templateType || autoSentRef.current) return
+    if (messages.length !== 1 || !messages[0]?.id?.startsWith('drift-system-')) return
+    const noKey =
+      !(import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey) &&
+      !(import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey)
+    if (!noKey || !getFreeDriftAnswer(selectedText)) return
+    const timer = window.setTimeout(() => {
+      if (!autoSentRef.current) {
+        autoSentRef.current = true
+        sendMessage(selectedText)
+      }
+    }, 60)
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, templateType, messages.length, selectedText])
 
   // connectAnswersRef is cleared in the init effect on each new open;
   // this separate effect was removed because it fired after init and wiped restored Connect state.
@@ -1084,8 +1109,14 @@ export default function DriftPanel({
         <div className={`flex-1 overflow-y-auto p-4 space-y-4 bg-transparent custom-scrollbar ${templateType === 'connect' && !connectQuestion ? 'hidden' : ''}`} style={{ paddingBottom: 'calc(var(--kb-h, 0px) + 5rem)' }}>
           {(() => {
             const renderedGroups = new Set<string>()
-            return messages.map((msg) => {
+            return messages.map((msg, msgIndex) => {
               if (!msg.text) return null
+              // The Stress-test result is the assistant reply to the "Stress test
+              // this: X" trigger. Only there do we offer the Evidence bridge — a
+              // follow-up that re-runs grounded so the critique can cite sources.
+              const prevMsg = msgIndex > 0 ? messages[msgIndex - 1] : null
+              const isStressTestResult = templateType === 'challenge' && !msg.isUser && !msg.isError
+                && !!prevMsg?.isUser && isChallengeTriggerText(prevMsg.text)
               // A Connect-cards JSON payload is parsed into the chips view, never shown
               // as prose. Guard here so it can't leak as raw JSON when this thread is
               // viewed under a non-Connect lens.
@@ -1301,6 +1332,17 @@ export default function DriftPanel({
                             <Bookmark className={`w-3 h-3 ${savedMessageIds.has(msg.id) ? 'fill-cyan-300' : ''}`} />
                             {savedMessageIds.has(msg.id) ? 'Saved' : 'Save'}
                           </button>
+                          {isStressTestResult && (
+                            <button
+                              onClick={() => sendMessage(driftLabels.evidenceBridgePrompt, false, 'evidence')}
+                              disabled={isTyping}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-text-muted hover:text-violet-300 hover:bg-violet-500/[0.08] disabled:opacity-40 transition-all duration-150"
+                              title="Cite real sources for this stress test"
+                            >
+                              <Scale className="w-3 h-3" />
+                              {driftLabels.evidenceBridgeLabel}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

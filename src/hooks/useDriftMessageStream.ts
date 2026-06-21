@@ -6,6 +6,7 @@ import { sendMessageToGemini, getSuggestedHighlights, type ChatMessage as Gemini
 import type { AISettings } from '../components/Settings'
 import type { TermOccurrence } from '../lib/termIndex'
 import { TEMPLATE_SYSTEM_PROMPTS, isDriftScaffoldText, isDriftOpenerText, friendlyDriftError, isChallengeTriggerText } from '../lib/driftPanel'
+import { getFreeDriftAnswer } from '../lib/freeExamples'
 import { resolveLensPrompt } from '../lib/customLenses'
 import type { LensKey } from '../types/chat'
 import { resolveChallengerTarget, resolveModelCall } from '../lib/challenger'
@@ -80,7 +81,7 @@ export function useDriftMessageStream({
   const abortControllerRef = useRef<AbortController | null>(null)
   const compareAbortControllersRef = useRef<Record<string, AbortController> | null>(null)
 
-  const sendMessage = async (overrideText?: string, isRetry = false) => {
+  const sendMessage = async (overrideText?: string, isRetry = false, overrideLens?: LensKey) => {
     const textToSend = (overrideText ?? message).trim()
     if (textToSend) {
       // Sending a message has weight — a light, confident thunk.
@@ -106,6 +107,45 @@ export function useDriftMessageStream({
         if (!overrideText) setMessage('')
       }
       setIsTyping(true)
+
+      // ── Free "on us" drift ────────────────────────────────────────────────
+      // A pre-marked dotted term from a canned welcome answer carries its own
+      // pre-written drift answer, so a keyless visitor can drift one level
+      // deeper without an API call. Only the OPENING, lens-free drift on a
+      // pre-marked term qualifies; any lens, Connect bridge, typed follow-up, or
+      // other highlight falls through to the real (key-required) path below.
+      const noGeminiKey = !(import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey)
+      const noOpenRouterKey = !(import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey)
+      const isDriftOpener = !driftOnlyMessages.some(m => !m.isUser && !m.isError && !isDriftScaffoldText(m.text))
+      const cannedDrift =
+        (noGeminiKey && noOpenRouterKey && !templateType && !connectQuestion && isDriftOpener && !isRetry)
+          ? getFreeDriftAnswer(selectedText)
+          : null
+      if (cannedDrift) {
+        const aiResponseId = 'drift-ai-' + Date.now().toString()
+        const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
+        setMessages(prev => [...prev, aiMessage])
+        setDriftOnlyMessages(prev => [...prev, aiMessage])
+        setStreamingMsgId(aiResponseId)
+        try {
+          const tokens = cannedDrift.match(/\s+|\S+/g) ?? [cannedDrift]
+          let acc = ''
+          let first = true
+          for (const tok of tokens) {
+            acc += tok
+            if (first) { first = false; haptics.selection() }
+            const next = acc
+            setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
+            setDriftOnlyMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
+            await new Promise(r => setTimeout(r, 14))
+          }
+        } finally {
+          setIsTyping(false)
+          setStreamingMsgId(null)
+          abortControllerRef.current = null
+        }
+        return
+      }
 
       // Only use drift-specific messages, not the context messages.
       // Filter out the system message, context messages, any prior error
@@ -144,8 +184,13 @@ export function useDriftMessageStream({
       // this:" turn. A follow-up inside a challenge thread (typed, or tapping a
       // dotted suggestion) is ordinary exploration: drop the challenge framing so
       // it uses the normal context-aware prompt (and, below, the main model).
-      const isChallengeTurn = templateType === 'challenge' && isChallengeTriggerText(textToSend)
-      const effectiveTemplate = (templateType === 'challenge' && !isChallengeTurn) ? undefined : templateType
+      // `overrideLens` lets a single follow-up run under a *different* lens than the
+      // drift's own type — used by the Stress-test → Evidence bridge to re-run a turn
+      // grounded (Evidence) so it cites real sources, even inside a challenge thread.
+      const isChallengeTurn = !overrideLens && templateType === 'challenge' && isChallengeTriggerText(textToSend)
+      const effectiveTemplate = overrideLens
+        ? overrideLens
+        : (templateType === 'challenge' && !isChallengeTurn) ? undefined : templateType
 
       const baseSystemContent = (effectiveTemplate === 'connect' && connectQuestion)
         ? `The user is reading about "${selectedText}" and tapped a connection to explore this bridge: "${connectQuestion}". Reveal the actual link between the two — the through-line, the shared mechanism, the influence, or the tension — not a standalone definition of either side. Lead with the most interesting or surprising part of the connection, give the concrete specifics (names, events, how one shaped or opposes the other), and keep "${selectedText}" in the frame throughout. If the connection is more tenuous than it sounds, be honest about that rather than overstating it. Do not invent facts. Be concise and vivid — a few tight paragraphs, no padding.${parentContext ? `\n\nInterpret "${selectedText}" in the sense this conversation implies (disambiguate by context):\n${parentContext}` : ''}`
