@@ -110,8 +110,12 @@ function App() {
     return settings
   })
 
-  // Live provider reachability (polls every 5s; opens Settings if creds missing)
-  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => uiStore.setSettingsOpen(true))
+  // Live provider reachability (polls with backoff). Note: we deliberately do
+  // NOT auto-open Settings when no key is present — the app is BYOK and ships a
+  // free "on us" demo, so a keyless visitor must be left alone to explore. The
+  // "Offline" badge plus the Settings gear are enough; auto-opening Settings on
+  // every poll was hijacking the screen. Adding a key stays fully manual.
+  const { apiConnected, isConnecting } = useConnectionStatus(aiSettings, () => {})
 
   // Keyboard visibility (iOS — used to suppress safe-area padding when keyboard is up)
   const keyboardVisible = useKeyboardVisibility()

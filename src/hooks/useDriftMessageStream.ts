@@ -128,16 +128,19 @@ export function useDriftMessageStream({
         setDriftOnlyMessages(prev => [...prev, aiMessage])
         setStreamingMsgId(aiResponseId)
         try {
+          // Reveal in a few chunks — per-word updates re-parse the growing markdown
+          // each tick and crawl on this renderer; chunking keeps it stream-like.
           const tokens = cannedDrift.match(/\s+|\S+/g) ?? [cannedDrift]
+          const per = Math.max(1, Math.ceil(tokens.length / 5))
           let acc = ''
           let first = true
-          for (const tok of tokens) {
-            acc += tok
+          for (let i = 0; i < tokens.length; i += per) {
+            acc += tokens.slice(i, i + per).join('')
             if (first) { first = false; haptics.selection() }
             const next = acc
             setMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
             setDriftOnlyMessages(prev => prev.map(m => m.id === aiResponseId ? { ...m, text: next } : m))
-            await new Promise(r => setTimeout(r, 14))
+            await new Promise(r => setTimeout(r, 45))
           }
         } finally {
           setIsTyping(false)

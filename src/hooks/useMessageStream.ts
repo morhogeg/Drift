@@ -85,37 +85,33 @@ export function useMessageStream({
 
       // ── Free "on us" intro ────────────────────────────────────────────────
       // The four welcome-screen example prompts ship with a pre-written answer
-      // (identical for everyone) plus a fixed set of dotted drift terms, so a
-      // visitor with no API key can experience Drift instantly — zero API calls.
-      // Only fires when the active model has no usable key; a user with their
-      // own key gets a live answer exactly as before.
-      const t0 = useModelStore.getState().selectedTargets[0] || DEFAULT_TARGET
-      const preset0 = (aiSettings?.modelPresets || []).find((p: any) => p.id === t0.key)
-      const resolvedKey0 =
-        t0.provider === 'gemini'
-          ? (import.meta.env.VITE_GEMINI_API_KEY || (preset0 as any)?.apiKey || aiSettings.geminiApiKey)
-          : t0.provider === 'openrouter'
-          ? (import.meta.env.VITE_OPENROUTER_API_KEY || (preset0 as any)?.apiKey || aiSettings.openRouterApiKey)
-          : 'ollama'
-      const canned = (t0.provider !== 'ollama' && !resolvedKey0) ? getFreeExample(text) : null
+      // (identical for everyone) plus a fixed set of dotted drift terms — the
+      // free demo, served with zero API calls. These four prompts ALWAYS resolve
+      // to their canned answer regardless of key state, so the demo works on the
+      // deployed (keyless) site no matter what. A user's own typed questions
+      // still go to their model as normal.
+      const canned = getFreeExample(text)
       if (canned) {
         const aiResponseId = (Date.now() + Math.random()).toString()
         const aiMessage: Message = { id: aiResponseId, text: '', isUser: false, timestamp: new Date() }
         chatStore.setMessages([...useChatStore.getState().messages, aiMessage])
         chatStore.setStreamingMessageId(aiResponseId)
         try {
-          // Reveal the canned answer token-by-token so it feels like a real stream.
+          // Reveal in a few chunks so it reads like a stream WITHOUT re-parsing the
+          // (ever-growing) markdown on every word — each re-render of this heavy
+          // renderer is costly, so per-word updates compound into a visible crawl.
           const tokens = canned.answer.match(/\s+|\S+/g) ?? [canned.answer]
+          const per = Math.max(1, Math.ceil(tokens.length / 6))
           let acc = ''
           let first = true
-          for (const tok of tokens) {
+          for (let i = 0; i < tokens.length; i += per) {
             if (!useChatStore.getState().isTyping) break // user pressed Stop
-            acc += tok
+            acc += tokens.slice(i, i + per).join('')
             if (first) { first = false; haptics.selection() }
             chatStore.setStreaming(acc)
             const cur = useChatStore.getState().messages
             chatStore.setMessages(cur.map(m => m.id === aiResponseId ? { ...m, text: acc } : m))
-            await new Promise(r => setTimeout(r, 14))
+            await new Promise(r => setTimeout(r, 45))
           }
           // Finalize the bubble and attach the fixed dotted drift terms.
           const finalCur = useChatStore.getState().messages
