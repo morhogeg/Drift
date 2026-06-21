@@ -2111,6 +2111,7 @@ function App() {
                   setSelectedTargets={setSelectedTargetsPersist}
                   isConnecting={isConnecting}
                   apiConnected={apiConnected}
+                  onAddModel={() => setAddModelSheetOpen(true)}
                 />
               </div>
             </div>

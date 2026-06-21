@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check, Plus } from 'lucide-react'
 type Provider = 'openrouter' | 'ollama' | 'gemini'
 type Target = { provider: Provider, key: string, label: string }
 
@@ -9,10 +9,11 @@ interface Props {
   setSelectedTargets: (m: Target[]) => void
   isConnecting: boolean
   apiConnected: boolean
+  onAddModel: () => void
 }
 
 export default function HeaderControls(props: Props) {
-  const { aiSettings, selectedTargets, setSelectedTargets, isConnecting, apiConnected } = props
+  const { aiSettings, selectedTargets, setSelectedTargets, isConnecting, apiConnected, onAddModel } = props
 
   const items: Target[] = useMemo<Target[]>(() => {
     const presets = (aiSettings?.modelPresets || [])
@@ -116,6 +117,18 @@ export default function HeaderControls(props: Props) {
                   </button>
                 )
               })}
+            </div>
+            {/* Add a model — opens the add-models settings flow */}
+            <div className="border-t border-dark-border/50 py-1">
+              <button
+                onClick={() => { setMenuOpen(false); onAddModel() }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-text-secondary hover:bg-dark-elevated/60 hover:text-text-primary transition-colors"
+              >
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5">
+                  <Plus className="w-3.5 h-3.5 text-text-muted" />
+                </span>
+                <span className="truncate">Add a model…</span>
+              </button>
             </div>
           </div>
         )}
