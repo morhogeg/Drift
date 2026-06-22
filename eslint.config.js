@@ -12,12 +12,21 @@ export default tseslint.config([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
       reactRefresh.configs.vite,
     ],
+    // eslint-plugin-react-hooks v7's `recommended-latest` ships as a legacy
+    // (plugins-as-array) config, which ESLint 10 flat config rejects. Register
+    // the plugin directly and keep the two classic rules so behavior matches the
+    // pre-upgrade config (v7's flat recommended adds many new React-Compiler
+    // error rules — an opt-in beyond a dependency bump).
+    plugins: { 'react-hooks': reactHooks },
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
 ])
