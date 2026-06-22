@@ -3524,12 +3524,43 @@ function App() {
 
       {/* Knowledge Graph */}
       {knowledgeGraphOpen && (
-        // Bug 2: do NOT auto-close on a render error. The boundary is remounted
-        // every time the panel opens, so an onError→close turned any transient
-        // render throw into an "opens then immediately closes" loop. Containing
-        // the error in place (empty fallback) keeps a single tap stable and makes
-        // a real failure visible/diagnosable instead of silently yanking the map.
-        <ErrorBoundary fallback={null}>
+        // Do NOT auto-close on a render error (an onError→close turns a transient
+        // throw into an open/close loop). Instead, scope the failure to a visible,
+        // recoverable card. This also catches a failed lazy-chunk load (e.g. the
+        // tab was open across a redeploy, so the Map chunk 404s) — which would
+        // otherwise leave the panel silently blank. The Reload button clears that.
+        <ErrorBoundary
+          fallback={
+            <div
+              className="fixed inset-0 z-[55] flex items-center justify-center p-6 bg-black/40"
+              onClick={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false); setMapEntry(null) }}
+            >
+              <div
+                className="bg-dark-surface border border-dark-border/60 rounded-2xl p-6 max-w-sm text-center shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-[15px] font-semibold text-text-primary mb-1.5">The Map couldn't load</h3>
+                <p className="text-[13px] text-text-muted mb-4">
+                  This usually clears with a refresh — the app may have updated since you opened this tab.
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => { setMapFullscreen(false); setKnowledgeGraphOpen(false); setMapEntry(null) }}
+                    className="px-4 py-2 rounded-lg text-[13px] text-text-secondary hover:text-text-primary hover:bg-dark-elevated/60 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold bg-gradient-to-r from-accent-pink to-accent-violet text-white hover:opacity-90 transition-opacity"
+                  >
+                    Reload
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        >
         <Suspense fallback={null}>
         <DriftKnowledgeGraph
           chatHistory={chatHistory}
