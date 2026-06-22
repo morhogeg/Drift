@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Bookmark, GitBranch, Lightbulb, Telescope, Waypoints, Scale, Aperture, Plus, FlaskConical } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
@@ -111,11 +111,11 @@ export default function SelectionTooltip({
    * insets so notches/home-indicators don't clip it on mobile web.
    */
   const positionTooltip = useCallback(
-    (anchor: DOMRect): { x: number; y: number; placement: 'above' | 'below' } => {
-      // Worst-case dimensions for the full tooltip (incl. template row). Using a
-      // generous estimate guarantees clamping keeps the whole control on-screen.
-      const tooltipW = 300
-      const tooltipH = 96
+    (
+      anchor: DOMRect,
+      tooltipH: number,
+      tooltipW = 300,
+    ): { x: number; y: number; placement: 'above' | 'below' } => {
       const gap = 10
       const margin = 8
       const insetT = safeInset('top')
@@ -126,22 +126,27 @@ export default function SelectionTooltip({
       const vw = window.innerWidth
       const vh = window.innerHeight
 
-      // Decide placement: prefer above, flip below if it would overflow the top.
+      // Real room on each side of the selection. Decide placement from the
+      // ACTUAL tooltip height (measured post-render): prefer above, flip below
+      // when above can't fit it, and if neither side fits fully, take whichever
+      // has more room (then the Y-clamp below keeps it fully on-screen).
       const spaceAbove = anchor.top - insetT - margin
-      const placement: 'above' | 'below' = spaceAbove >= tooltipH + gap ? 'above' : 'below'
+      const spaceBelow = vh - anchor.bottom - insetB - margin
+      let placement: 'above' | 'below'
+      if (spaceAbove >= tooltipH + gap) placement = 'above'
+      else if (spaceBelow >= tooltipH + gap) placement = 'below'
+      else placement = spaceBelow >= spaceAbove ? 'below' : 'above'
 
       // Anchor Y: for 'above' we anchor the tooltip's BOTTOM edge just above the
-      // selection; for 'below' we anchor its TOP edge just below it. The render
-      // uses translateY accordingly.
+      // selection (it grows upward via translateY(-100%)); for 'below' we anchor
+      // its TOP edge just below it. Clamp so neither edge leaves the viewport.
       let y: number
       if (placement === 'above') {
         y = anchor.top - gap
-        // Ensure the top of the (upward-growing) tooltip clears the safe inset.
-        y = Math.max(y, insetT + margin + tooltipH)
+        y = Math.max(y, insetT + margin + tooltipH) // top stays on-screen
       } else {
         y = anchor.bottom + gap
-        // Ensure the bottom edge clears the safe inset.
-        y = Math.min(y, vh - insetB - margin - tooltipH)
+        y = Math.min(y, vh - insetB - margin - tooltipH) // bottom stays on-screen
         y = Math.max(y, insetT + margin)
       }
 
@@ -221,7 +226,9 @@ export default function SelectionTooltip({
           anchorRect: rect,
         })
       } else {
-        const { x, y, placement } = positionTooltip(rect)
+        // Provisional placement using a height estimate; a layout effect
+        // re-measures the real tooltip and corrects this before paint.
+        const { x, y, placement } = positionTooltip(rect, isUserMessage ? 64 : 320)
 
         setTooltip({
           visible: true,
@@ -361,7 +368,9 @@ export default function SelectionTooltip({
 
         // Apply show delay so tooltip doesn't flash on quick clicks
         showTimerRef.current = window.setTimeout(() => {
-          const { x, y, placement } = positionTooltip(rect)
+          // Provisional placement using a height estimate; a layout effect
+        // re-measures the real tooltip and corrects this before paint.
+        const { x, y, placement } = positionTooltip(rect, isUserMessage ? 64 : 320)
 
           setTooltip({
             visible: true,
@@ -474,6 +483,23 @@ export default function SelectionTooltip({
       clearSelectionChangeTimer()
     }
   }, [clearHideTimer, clearShowTimer, clearSelectionChangeTimer])
+
+  // Re-position from the tooltip's REAL height once it's in the DOM. The initial
+  // placement uses an estimate (the menu's height varies with content, e.g. how
+  // many custom lenses exist), which can be wrong enough to clip a tall menu off
+  // the top. Measuring here — before the browser paints — flips/clamps it to fit
+  // at any selection position with no visible jump. Keyed off content identity
+  // (not x/y) so the corrective setState can't loop.
+  useLayoutEffect(() => {
+    if (isTouchDevice || !tooltip?.visible) return
+    const el = tooltipRef.current
+    if (!el) return
+    const { x, y, placement } = positionTooltip(tooltip.anchorRect, el.offsetHeight, el.offsetWidth)
+    if (Math.abs(x - tooltip.x) > 1 || Math.abs(y - tooltip.y) > 1 || placement !== tooltip.placement) {
+      setTooltip(prev => (prev ? { ...prev, x, y, placement } : prev))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tooltip?.visible, tooltip?.text, tooltip?.messageId, isTouchDevice, positionTooltip])
 
   // --------------------------------------------------------------------------
   // Action handlers
