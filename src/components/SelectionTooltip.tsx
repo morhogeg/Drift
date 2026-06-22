@@ -661,7 +661,7 @@ export default function SelectionTooltip({
   return (
     <div
       ref={tooltipRef}
-      className="drift-tooltip fixed z-[99999] animate-fade-up"
+      className="drift-tooltip fixed z-[99999] animate-fade-in"
       style={{
         left: `${tooltip.x}px`,
         top: `${tooltip.y}px`,

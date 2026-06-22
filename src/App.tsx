@@ -2349,7 +2349,7 @@ function App() {
                             more room between the cards and the composer than above the cards.
                             On small screens it stacks inline. */}
                         {active && (
-                          <div key={activeCue} className="static mt-4 sm:absolute sm:top-full sm:left-1/2 sm:mt-3 sm:mb-0 sm:-translate-x-1/2 z-20 mx-auto w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/95 px-4 py-3.5 text-left shadow-xl shadow-black/40 backdrop-blur-md animate-fade-up">
+                          <div key={activeCue} className="static mt-4 sm:absolute sm:top-full sm:left-1/2 sm:mt-3 sm:mb-0 sm:-translate-x-1/2 z-20 mx-auto w-full max-w-[580px] rounded-2xl border border-accent-violet/25 bg-dark-elevated/95 px-4 py-3.5 text-left shadow-xl shadow-black/40 backdrop-blur-md">
                             <span className="block text-[13px] font-semibold leading-snug text-text-primary">{active.title}</span>
                             <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{active.body}</span>
                             <ul className={`mt-2.5 ${active.stepped ? 'space-y-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5'}`}>

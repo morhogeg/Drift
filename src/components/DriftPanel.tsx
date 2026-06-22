@@ -14,7 +14,7 @@ import { customLensStore } from '../lib/customLenses'
 import { useUIStore } from '../store/uiStore'
 import { type TermOccurrence } from '../lib/termIndex'
 import { getDriftSuggestions } from '../services/gemini'
-import { getFreeDriftAnswer } from '../lib/freeExamples'
+import { getFreeDriftAnswer, getFreeLensAnswer } from '../lib/freeExamples'
 import { resolveChallengerTarget, challengerOptions } from '../lib/challenger'
 import ChallengerPicker from './ChallengerPicker'
 import { useDriftMessageStream } from '../hooks/useDriftMessageStream'
@@ -426,11 +426,20 @@ export default function DriftPanel({
     // so the Challenge tap itself is the entry point for setting up a challenger.
     // Cancelling falls through to a same-model challenge (graceful, no dead-end).
     if (templateType === 'challenge') {
-      if (challengerPickerOpen) return
-      if (!challenger && !challengerPromptedRef.current) {
-        challengerPromptedRef.current = true
-        setChallengerPickerOpen(true)
-        return
+      // Keyless visitors get the pre-written Stress test answer — skip the
+      // challenger-model picker (a dead-end without a key) and let the canned
+      // path serve it. Keyed users still pick a challenger as before.
+      const noKeyForChallenge =
+        !(import.meta.env.VITE_GEMINI_API_KEY || aiSettings.geminiApiKey) &&
+        !(import.meta.env.VITE_OPENROUTER_API_KEY || aiSettings.openRouterApiKey)
+      const hasCannedChallenge = noKeyForChallenge && !!getFreeLensAnswer(selectedText, 'challenge')
+      if (!hasCannedChallenge) {
+        if (challengerPickerOpen) return
+        if (!challenger && !challengerPromptedRef.current) {
+          challengerPromptedRef.current = true
+          setChallengerPickerOpen(true)
+          return
+        }
       }
     }
 
