@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
-  Search, Grid, List, Calendar, Star,
+  Search, Grid, List, Star,
   Download, Trash2, Copy, ExternalLink,
-  X, ChevronLeft, Filter, Check, Bookmark
+  X, ChevronLeft, Filter, Check, Bookmark, Plus
 } from 'lucide-react'
 import { snippetStorage } from '../services/snippetStorage'
 import { toast } from '../hooks/useToast'
@@ -26,6 +26,14 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
   const [filter, setFilter] = useState<SnippetFilter>({})
   const [allTags, setAllTags] = useState<string[]>([])
   const [showFilters, setShowFilters] = useState(false)
+  const [notesDraft, setNotesDraft] = useState('')
+  const [tagDraft, setTagDraft] = useState('')
+
+  // Sync the notes editor whenever a different snippet is opened
+  useEffect(() => {
+    setNotesDraft(selectedSnippet?.notes ?? '')
+    setTagDraft('')
+  }, [selectedSnippet?.id])
 
   useEffect(() => {
     if (isOpen) {
@@ -83,6 +91,37 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
   const handleToggleStar = (snippet: Snippet) => {
     snippetStorage.updateSnippet(snippet.id, { starred: !snippet.starred })
     loadSnippets()
+  }
+
+  // Persist an arbitrary update for the open snippet and reflect it immediately
+  const applySnippetUpdate = (
+    snippet: Snippet,
+    updates: Partial<Pick<Snippet, 'notes' | 'tags'>>
+  ) => {
+    const updated = snippetStorage.updateSnippet(snippet.id, updates)
+    if (!updated) {
+      toast.error("Couldn't save that change. Please try again.")
+      return
+    }
+    setSelectedSnippet(updated)
+    setAllTags(snippetStorage.getAllTags())
+    loadSnippets()
+  }
+
+  const handleSaveNotes = (snippet: Snippet) => {
+    if (notesDraft === snippet.notes) return
+    applySnippetUpdate(snippet, { notes: notesDraft })
+  }
+
+  const handleAddTag = (snippet: Snippet) => {
+    const tag = tagDraft.trim().replace(/^#/, '')
+    setTagDraft('')
+    if (!tag || snippet.tags.includes(tag)) return
+    applySnippetUpdate(snippet, { tags: [...snippet.tags, tag] })
+  }
+
+  const handleRemoveTag = (snippet: Snippet, tag: string) => {
+    applySnippetUpdate(snippet, { tags: snippet.tags.filter(t => t !== tag) })
   }
 
   const handleExport = () => {
@@ -196,14 +235,6 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
                     }`}
                   >
                     <List className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setView('calendar')}
-                    className={`p-1.5 rounded transition-colors ${
-                      view === 'calendar' ? 'bg-dark-bubble text-text-primary' : 'text-text-muted'
-                    }`}
-                  >
-                    <Calendar className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -474,22 +505,68 @@ export default function SnippetGallery({ isOpen, onClose, onNavigateToSource }: 
               </ReactMarkdown>
             </div>
 
-            {selectedSnippet.notes && (
-              <div className="mt-6 p-3 bg-dark-elevated/50 rounded-lg">
-                <p className="text-xs text-text-muted mb-1">Notes:</p>
-                <p className="text-sm text-text-secondary">{selectedSnippet.notes}</p>
-              </div>
-            )}
+            {/* Notes — editable, persisted on blur */}
+            <div className="mt-6">
+              <p className="text-xs text-text-muted mb-1.5">Notes</p>
+              <textarea
+                value={notesDraft}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                onBlur={() => handleSaveNotes(selectedSnippet)}
+                placeholder="Add a note…"
+                rows={3}
+                className="w-full p-3 bg-dark-elevated/50 rounded-lg text-sm text-text-secondary
+                           placeholder:text-text-muted resize-y outline-none border border-transparent
+                           focus:border-cyan-500/40 transition-colors"
+              />
+            </div>
 
-            {selectedSnippet.tags.length > 0 && (
-              <div className="mt-4 flex gap-2 flex-wrap">
+            {/* Tags — editable chips with add/remove */}
+            <div className="mt-4">
+              <p className="text-xs text-text-muted mb-1.5">Tags</p>
+              <div className="flex gap-2 flex-wrap items-center">
                 {selectedSnippet.tags.map(tag => (
-                  <span key={tag} className="text-xs px-2 py-1 bg-cyan-500/20 rounded-full text-cyan-500">
+                  <span
+                    key={tag}
+                    className="group flex items-center gap-1 text-xs pl-2 pr-1 py-1 bg-cyan-500/20 rounded-full text-cyan-500"
+                  >
                     #{tag}
+                    <button
+                      onClick={() => handleRemoveTag(selectedSnippet, tag)}
+                      aria-label={`Remove tag ${tag}`}
+                      className="p-0.5 rounded-full hover:bg-cyan-500/30 transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
                   </span>
                 ))}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={tagDraft}
+                    onChange={(e) => setTagDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAddTag(selectedSnippet)
+                      }
+                    }}
+                    placeholder="Add tag…"
+                    className="w-24 px-2 py-1 bg-dark-elevated rounded-full text-xs text-text-secondary
+                               placeholder:text-text-muted outline-none border border-transparent
+                               focus:border-cyan-500/40 transition-colors"
+                  />
+                  {tagDraft.trim() && (
+                    <button
+                      onClick={() => handleAddTag(selectedSnippet)}
+                      aria-label="Add tag"
+                      className="p-1 rounded-full text-cyan-500 hover:bg-cyan-500/20 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}

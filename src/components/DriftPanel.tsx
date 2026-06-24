@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, isValidElement, cloneElement, Fragment } from 'react'
-import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, Scale, Plus } from 'lucide-react'
+import { ArrowUp, ArrowLeft, Square, Upload, Undo2, Bookmark, MessageSquarePlus, Maximize2, Minimize2, ChevronLeft, ChevronRight, Mic, Home, ArrowUpRight, ArrowUpLeft, Waypoints, Sparkles, X, AlertCircle, RefreshCw, Check, Scale, Plus } from 'lucide-react'
 import { useOnceFlag } from '../lib/onceFlags'
 import {
   connectKind,
@@ -748,9 +748,9 @@ export default function DriftPanel({
                       onClick={handleSaveAsChat}
                       className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all duration-150 active:scale-90 shrink-0
                         ${savedAsChat ? 'text-cyan-300 bg-cyan-500/[0.1]' : 'text-text-muted hover:text-text-primary hover:bg-white/[0.07]'}`}
-                      title={savedAsChat ? 'Undo save as chat' : 'Save as chat'}
+                      title={savedAsChat ? 'Undo keep as chat' : 'Keep as chat'}
                     >
-                      {savedAsChat ? <Undo2 className="w-[17px] h-[17px]" /> : <Bookmark className="w-[17px] h-[17px]" />}
+                      {savedAsChat ? <Undo2 className="w-[17px] h-[17px]" /> : <MessageSquarePlus className="w-[17px] h-[17px]" />}
                     </button>
                   </>
                 )}

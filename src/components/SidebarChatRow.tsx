@@ -145,6 +145,14 @@ export function SidebarChatRow({
                     Synthesis
                   </span>
                 )}
+                {/* Sample tag — only on the sample's root chat, so the seeded
+                    exploration reads as a demo rather than the user's own work. */}
+                {chat.metadata?.isSample && !isDrift && !isSynthesis && (
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide
+                                   text-accent-violet/90 bg-accent-violet/10 rounded px-1 py-px">
+                    Sample
+                  </span>
+                )}
                 {isDrift ? (
                   <h3
                     className={`text-[13px] font-medium truncate min-w-0 text-accent-violet/90 ${getRTLClassName(driftTerm)}`}

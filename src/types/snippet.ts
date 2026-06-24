@@ -29,4 +29,4 @@ export interface SnippetFilter {
 }
 
 export type SnippetSortBy = 'createdAt' | 'updatedAt' | 'title'
-export type SnippetView = 'grid' | 'list' | 'calendar'
+export type SnippetView = 'grid' | 'list'
